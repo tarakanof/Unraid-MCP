@@ -167,6 +167,14 @@ def test_shape_mutation_result_normalizes_array_capacity():
     assert out["capacity"]["free"]["bytes"] == 524288 * 1024
 
 
+def test_shape_mutation_result_array_stop_state_only():
+    # stop_array returns just {state}; peeling stops at the scalar value, so the
+    # single state field survives unwrapped (and there's no capacity to normalize).
+    assert shape_mutation_result({"array": {"setState": {"state": "STOPPED"}}}) == {
+        "state": "STOPPED"
+    }
+
+
 def test_shape_mutation_result_keeps_multifield_overview():
     # archive_all / delete_notification return {unread, archive} counts — a
     # two-key dict, so peeling stops there and both buckets survive.
