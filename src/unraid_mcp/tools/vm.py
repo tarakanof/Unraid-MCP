@@ -9,7 +9,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from .. import queries
 from ..client import UnraidClient
 from ..config import Settings
-from ..formatting import shape_vms
+from ..formatting import shape_mutation_result, shape_vms
 from ._base import DESTRUCTIVE, MUTATING, READ_ONLY, guarded, require_confirm
 
 
@@ -19,32 +19,32 @@ async def fetch_vms(client: UnraidClient) -> list[dict[str, Any]]:
 
 async def do_start_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, f"start VM '{vm_id}'")
-    return await client.execute(queries.VM_START, {"id": vm_id})
+    return shape_mutation_result(await client.execute(queries.VM_START, {"id": vm_id}))
 
 
 async def do_stop_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, f"stop VM '{vm_id}'")
-    return await client.execute(queries.VM_STOP, {"id": vm_id})
+    return shape_mutation_result(await client.execute(queries.VM_STOP, {"id": vm_id}))
 
 
 async def do_pause_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, f"pause VM '{vm_id}'")
-    return await client.execute(queries.VM_PAUSE, {"id": vm_id})
+    return shape_mutation_result(await client.execute(queries.VM_PAUSE, {"id": vm_id}))
 
 
 async def do_resume_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, f"resume VM '{vm_id}'")
-    return await client.execute(queries.VM_RESUME, {"id": vm_id})
+    return shape_mutation_result(await client.execute(queries.VM_RESUME, {"id": vm_id}))
 
 
 async def do_reboot_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, f"reboot VM '{vm_id}'")
-    return await client.execute(queries.VM_REBOOT, {"id": vm_id})
+    return shape_mutation_result(await client.execute(queries.VM_REBOOT, {"id": vm_id}))
 
 
 async def do_force_stop_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, f"force-stop VM '{vm_id}' (hard power off)")
-    return await client.execute(queries.VM_FORCE_STOP, {"id": vm_id})
+    return shape_mutation_result(await client.execute(queries.VM_FORCE_STOP, {"id": vm_id}))
 
 
 def register(mcp: FastMCP, settings: Settings) -> None:

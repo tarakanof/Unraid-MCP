@@ -229,6 +229,52 @@ def shape_connect_status(data: dict | None) -> dict[str, Any]:
     return {"registration": data.get("registration"), "remote_access": data.get("remoteAccess")}
 
 
+def _normalize_capacity(obj: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a ``capacity { kilobytes { total used free } }`` block to the
+    ``{bytes, human}`` shape used everywhere else, so a mutation result reads the
+    same as :func:`shape_array_status` rather than leaking raw KiB integers."""
+    cap = obj.get("capacity")
+    if isinstance(cap, dict) and isinstance(cap.get("kilobytes"), dict):
+        kib = cap["kilobytes"]
+        return {
+            **obj,
+            "capacity": {
+                "total": _size_from_kib(kib.get("total")),
+                "used": _size_from_kib(kib.get("used")),
+                "free": _size_from_kib(kib.get("free")),
+            },
+        }
+    return obj
+
+
+def shape_mutation_result(data: dict | None) -> dict[str, Any]:
+    """Flatten a GraphQL mutation response into a concise, agent-friendly result.
+
+    Unraid nests mutation payloads under the operation's root field (and often a
+    sub-field), e.g. ``{"docker": {"start": {...}}}`` or ``{"vm": {"start": true}}``.
+    Those wrapper keys are pure noise to an agent and inflate its context window, so
+    we peel them down to the payload and normalise it — matching the read path:
+
+      * a Boolean payload        → ``{"ok": <bool>}`` (clear success/failure flag)
+      * an empty object          → ``{"ok": true}``
+      * an object with capacity  → capacity normalised to ``{bytes, human}``
+      * any other object         → returned as-is (already field-filtered by the query)
+    """
+    payload: Any = data or {}
+    # Peel single-key wrapper dicts (GraphQL root + mutation field) until we reach a
+    # Boolean, an empty/multi-field object, or a non-dict/bool leaf.
+    while isinstance(payload, dict) and len(payload) == 1:
+        inner = next(iter(payload.values()))
+        if not isinstance(inner, (dict, bool)):
+            break
+        payload = inner
+    if isinstance(payload, bool):
+        return {"ok": payload}
+    if isinstance(payload, dict):
+        return {"ok": True} if not payload else _normalize_capacity(payload)
+    return {"ok": True, "result": payload}
+
+
 def summarize_health(
     array_out: dict[str, Any],
     ups_list: list[dict[str, Any]],

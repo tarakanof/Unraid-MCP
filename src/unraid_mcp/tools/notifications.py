@@ -9,7 +9,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from .. import queries
 from ..client import UnraidClient
 from ..config import Settings
-from ..formatting import shape_notifications, shape_notifications_overview
+from ..formatting import shape_mutation_result, shape_notifications, shape_notifications_overview
 from ._base import DESTRUCTIVE, MUTATING, READ_ONLY, guarded, require_confirm
 
 
@@ -34,29 +34,37 @@ async def do_archive_notification(
     client: UnraidClient, notification_id: str, confirm: bool
 ) -> dict[str, Any]:
     require_confirm(confirm, f"archive notification '{notification_id}'")
-    return await client.execute(queries.ARCHIVE_NOTIFICATION, {"id": notification_id})
+    return shape_mutation_result(
+        await client.execute(queries.ARCHIVE_NOTIFICATION, {"id": notification_id})
+    )
 
 
 async def do_archive_all(
     client: UnraidClient, importance: str | None, confirm: bool
 ) -> dict[str, Any]:
     require_confirm(confirm, "archive all notifications")
-    return await client.execute(queries.ARCHIVE_ALL_NOTIFICATIONS, {"importance": importance})
+    return shape_mutation_result(
+        await client.execute(queries.ARCHIVE_ALL_NOTIFICATIONS, {"importance": importance})
+    )
 
 
 async def do_unread_notification(
     client: UnraidClient, notification_id: str, confirm: bool
 ) -> dict[str, Any]:
     require_confirm(confirm, f"mark notification '{notification_id}' unread")
-    return await client.execute(queries.UNREAD_NOTIFICATION, {"id": notification_id})
+    return shape_mutation_result(
+        await client.execute(queries.UNREAD_NOTIFICATION, {"id": notification_id})
+    )
 
 
 async def do_delete_notification(
     client: UnraidClient, notification_id: str, notification_type: str, confirm: bool
 ) -> dict[str, Any]:
     require_confirm(confirm, f"permanently delete notification '{notification_id}'")
-    return await client.execute(
-        queries.DELETE_NOTIFICATION, {"id": notification_id, "type": notification_type}
+    return shape_mutation_result(
+        await client.execute(
+            queries.DELETE_NOTIFICATION, {"id": notification_id, "type": notification_type}
+        )
     )
 
 
