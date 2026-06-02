@@ -22,12 +22,15 @@ clients then connect to `http://<TOWER-IP>:6750/mcp` with a bearer token.
 
 ## Option A — Add the template manually (no CA listing needed)
 
-1. Copy [`unraid-mcp.xml`](./unraid-mcp.xml) to `/boot/config/plugins/dockerMan/templates-user/`
-   on your Unraid server (the flash drive). The easiest way is the terminal:
+1. Put `unraid-mcp.xml` in `/boot/config/plugins/dockerMan/templates-user/` on your
+   Unraid server (the flash drive). Because this repo is **private**, the
+   `raw.githubusercontent.com` URL isn't publicly fetchable — copy the file directly
+   from a machine that has the repo cloned:
    ```bash
-   cd /boot/config/plugins/dockerMan/templates-user
-   wget https://raw.githubusercontent.com/tarakanof/Unraid-MCP/main/deploy/unraid/unraid-mcp.xml
+   scp deploy/unraid/unraid-mcp.xml root@<TOWER-IP>:/boot/config/plugins/dockerMan/templates-user/
    ```
+   (If you later make the repo public, you can `wget` it from the raw URL instead, and
+   the template icon will render.)
 2. In the WebUI go to **Docker → Add Container**, and pick **unraid-mcp** from the
    *Template* dropdown (under "User templates").
 3. Fill in:
@@ -69,3 +72,12 @@ Point your MCP client at `http://<TOWER-IP>:6750/mcp` and send the header
   (SWAG / Nginx Proxy Manager) or set `UNRAID_MCP_TLS_CERT` + `UNRAID_MCP_TLS_KEY`
   and mount the certs. Set **Allowed Hosts** to keep DNS-rebinding protection on.
 - Use a least-privilege Unraid API key; never commit it.
+
+## Visibility (private repo / image)
+
+- This GitHub repo is **private**: the template's `raw.githubusercontent.com` icon
+  won't render and the raw `wget` won't work without a token — copy the XML manually
+  (Option A). Making the repo public restores both.
+- For Unraid to pull the image, the **Docker Hub** repo (`tarakanof/unraid-mcp`) must
+  be **public**, or add your Docker Hub credentials under Unraid's Docker settings.
+  The GitHub repo can stay private regardless.
