@@ -103,8 +103,7 @@ class Settings(BaseSettings):
             )
         if len(token) < MIN_BEARER_TOKEN_LENGTH:
             raise ValueError(
-                "UNRAID_MCP_BEARER_TOKEN must be at least "
-                f"{MIN_BEARER_TOKEN_LENGTH} characters"
+                f"UNRAID_MCP_BEARER_TOKEN must be at least {MIN_BEARER_TOKEN_LENGTH} characters"
             )
         return value
 
