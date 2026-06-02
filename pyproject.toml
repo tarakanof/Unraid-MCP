@@ -27,8 +27,8 @@ dev = [
 unraid-mcp = "unraid_mcp.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/tarakanof/unraid-mcp"
-Issues = "https://github.com/tarakanof/unraid-mcp/issues"
+Homepage = "https://github.com/tarakanof/Unraid-MCP"
+Issues = "https://github.com/tarakanof/Unraid-MCP/issues"
 
 [build-system]
 requires = ["hatchling"]

@@ -52,8 +52,8 @@ It is **read-only by default** — monitoring tools are always available, while 
 ## Install
 
 ```bash
-git clone https://github.com/tarakanof/unraid-mcp
-cd unraid-mcp
+git clone https://github.com/tarakanof/Unraid-MCP
+cd Unraid-MCP
 uv sync                 # or: pip install .
 ```
 
