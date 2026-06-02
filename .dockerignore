@@ -1,0 +1,21 @@
+# Keep the build context (and image) small. The Dockerfile only needs
+# pyproject.toml, uv.lock, README.md, and src/.
+.git
+.github
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+tests
+docs
+deploy
+docker-compose.yml
+.env
+.env.*
+!.env.example
+.DS_Store

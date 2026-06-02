@@ -117,6 +117,8 @@ UNRAID_MCP_TRANSPORT=streamable-http UNRAID_MCP_BEARER_TOKEN=$(openssl rand -hex
 
 **Remote / HTTP**: point the client at `http://<host>:6750/mcp` and send `Authorization: Bearer <UNRAID_MCP_BEARER_TOKEN>`.
 
+**For LLM agents:** see **[`docs/llm-usage.md`](docs/llm-usage.md)** — a full tool catalog, conventions, recipes, and a drop-in system-prompt snippet.
+
 ## Security model
 
 - **Read-only by default.** Mutations require `UNRAID_MCP_ALLOW_MUTATIONS=true`, and then **every** mutating tool requires an explicit `confirm=true` and refuses *before* making any network call.
@@ -139,16 +141,33 @@ Tests mock the GraphQL endpoint with `respx`, so the suite runs without a real U
 
 ## Docker
 
+A prebuilt image is published to Docker Hub as **`tarakanof/unraid-mcp`** by the
+[`docker-publish.yml`](.github/workflows/docker-publish.yml) workflow (multi-arch
+`amd64`/`arm64`). The image defaults to the streamable-HTTP transport on `0.0.0.0:6750`.
+
 ```bash
-docker build -t unraid-mcp .
 docker run --rm -p 6750:6750 \
   -e UNRAID_API_URL=https://tower.local/graphql \
   -e UNRAID_API_KEY=your-api-key \
+  -e UNRAID_VERIFY_SSL=false \
   -e UNRAID_MCP_BEARER_TOKEN=$(openssl rand -hex 32) \
-  unraid-mcp
+  tarakanof/unraid-mcp:latest
 ```
 
-The image defaults to the streamable-HTTP transport bound to `0.0.0.0`; always set a bearer token and front it with TLS for anything beyond a trusted LAN.
+Or use [`docker-compose.yml`](docker-compose.yml). Always set a bearer token and
+front it with TLS for anything beyond a trusted LAN.
+
+**To publish the image** (CI): set repo secrets `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN`; the workflow pushes `latest` + `main` + `sha-*` on pushes to
+`main` and version tags (`vX.Y.Z`) on release tags.
+
+## Deploy on Unraid
+
+The server can run as a container **on** Unraid (streamable-HTTP) and talk back to
+the same box's GraphQL API. A Community-Apps-style template and full instructions
+are in **[`deploy/unraid/`](deploy/unraid/)** — add `deploy/unraid/unraid-mcp.xml`
+as a user template (**Docker → Add Container**), fill in the API URL, API key, and
+a bearer token, and start it on port `6750`.
 
 ## License
 

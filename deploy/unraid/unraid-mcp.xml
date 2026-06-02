@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>unraid-mcp</Name>
+  <Repository>tarakanof/unraid-mcp:latest</Repository>
+  <Registry>https://hub.docker.com/r/tarakanof/unraid-mcp</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/tarakanof/Unraid-MCP/issues</Support>
+  <Project>https://github.com/tarakanof/Unraid-MCP</Project>
+  <Overview><![CDATA[
+An MCP (Model Context Protocol) server that exposes this Unraid server to AI agents via the official Unraid GraphQL API.
+
+Read-only by default (system, array, disks, parity, Docker, VMs, shares, notifications, UPS, network). Mutating tools are registered only when UNRAID_MCP_ALLOW_MUTATIONS is true, and every mutation requires confirm=true.
+
+Runs the streamable-HTTP transport on port 6750. MCP clients connect to http://TOWER-IP:6750/mcp and must send "Authorization: Bearer <UNRAID_MCP_BEARER_TOKEN>".
+
+SETUP:
+1) Create an API key on Unraid: Settings -> Management Access -> API Keys (a guest/read-only role is enough for monitoring).
+2) Set UNRAID_API_URL to this server's GraphQL endpoint, e.g. https://192.168.1.10/graphql.
+3) Set a long random UNRAID_MCP_BEARER_TOKEN so clients have a stable token across restarts.
+Put the container behind a TLS reverse proxy (or set UNRAID_MCP_TLS_CERT/KEY) before exposing it beyond your LAN.
+  ]]></Overview>
+  <Category>Tools: Network:Management</Category>
+  <WebUI/>
+  <TemplateURL>https://raw.githubusercontent.com/tarakanof/Unraid-MCP/main/deploy/unraid/unraid-mcp.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/tarakanof/Unraid-MCP/main/deploy/unraid/icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="MCP Port" Target="6750" Default="6750" Mode="tcp" Description="Streamable-HTTP port. Clients connect to http://TOWER-IP:&lt;port&gt;/mcp." Type="Port" Display="always" Required="true" Mask="false">6750</Config>
+  <Config Name="Unraid API URL" Target="UNRAID_API_URL" Default="https://YOUR_UNRAID_IP/graphql" Mode="" Description="GraphQL endpoint of THIS Unraid server. Use the host LAN IP, e.g. https://192.168.1.10/graphql." Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Unraid API Key" Target="UNRAID_API_KEY" Default="" Mode="" Description="API key from Settings -&gt; Management Access -&gt; API Keys. A guest/read role suffices for monitoring." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="MCP Bearer Token" Target="UNRAID_MCP_BEARER_TOKEN" Default="" Mode="" Description="Token MCP clients must send (Authorization: Bearer ...). Leave blank to auto-generate one in the logs, but set a fixed long random value for stable clients." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Verify Unraid TLS" Target="UNRAID_VERIFY_SSL" Default="false" Mode="" Description="Verify the Unraid API certificate. Unraid local hosts usually use a self-signed cert, so this defaults to false. Prefer mounting a CA bundle (UNRAID_CA_BUNDLE) for stricter setups." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Allow Mutations" Target="UNRAID_MCP_ALLOW_MUTATIONS" Default="false" Mode="" Description="Register state-changing tools (start/stop array, Docker/VM control, notifications). Each still requires confirm=true. Keep false for monitoring only." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Allow Raw GraphQL Query" Target="UNRAID_MCP_ALLOW_RAW_QUERY" Default="false" Mode="" Description="Register a read-only raw GraphQL passthrough tool (mutations/subscriptions rejected)." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Allowed Hosts" Target="UNRAID_MCP_ALLOWED_HOSTS" Default="" Mode="" Description="Comma-separated Host allow-list for DNS-rebinding protection, e.g. tower.local:6750,10.0.0.5:6750. Recommended when exposing the port." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Log Level" Target="UNRAID_MCP_LOG_LEVEL" Default="INFO" Mode="" Description="Log level (stderr): DEBUG, INFO, WARNING, ERROR." Type="Variable" Display="advanced" Required="false" Mask="false">INFO</Config>
+</Container>

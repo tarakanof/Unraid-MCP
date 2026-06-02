@@ -21,4 +21,8 @@ ENV UNRAID_MCP_TRANSPORT=streamable-http \
     UNRAID_MCP_PORT=6750
 EXPOSE 6750
 
+# Liveness: the MCP port is accepting connections.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import os,socket; socket.create_connection(('127.0.0.1', int(os.environ.get('UNRAID_MCP_PORT','6750'))), 3)" || exit 1
+
 ENTRYPOINT ["unraid-mcp"]
