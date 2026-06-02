@@ -1,0 +1,129 @@
+"""Array, parity, and disk tools (reads + opt-in mutations)."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from mcp.server.fastmcp import Context, FastMCP
+
+from .. import queries
+from ..client import UnraidClient
+from ..config import Settings
+from ..formatting import shape_array_status, shape_physical_disk, shape_physical_disks
+from ._base import DESTRUCTIVE, MUTATING, READ_ONLY, guarded, require_confirm
+
+# ── Read logic ───────────────────────────────────────────────────────────────
+
+
+async def fetch_array_status(client: UnraidClient) -> dict[str, Any]:
+    return shape_array_status(await client.execute(queries.ARRAY_STATUS))
+
+
+async def fetch_parity_status(client: UnraidClient) -> dict[str, Any]:
+    data = await client.execute(queries.PARITY_STATUS)
+    return (data.get("array") or {}).get("parityCheckStatus") or {}
+
+
+async def fetch_parity_history(client: UnraidClient) -> list[dict[str, Any]]:
+    return (await client.execute(queries.PARITY_HISTORY)).get("parityHistory") or []
+
+
+async def fetch_disks(client: UnraidClient) -> list[dict[str, Any]]:
+    return shape_physical_disks(await client.execute(queries.LIST_DISKS))
+
+
+async def fetch_disk(client: UnraidClient, disk_id: str) -> dict[str, Any] | None:
+    data = await client.execute(queries.DISK_DETAILS, {"id": disk_id})
+    return shape_physical_disk(data.get("disk"))
+
+
+# ── Mutation logic ─────────────────────────────────────────────────────────────
+
+
+async def do_start_array(client: UnraidClient) -> dict[str, Any]:
+    return await client.execute(queries.START_ARRAY)
+
+
+async def do_stop_array(client: UnraidClient, confirm: bool) -> dict[str, Any]:
+    require_confirm(confirm, "stop the Unraid array (this unmounts all disks)")
+    return await client.execute(queries.STOP_ARRAY)
+
+
+async def do_start_parity(client: UnraidClient, correct: bool) -> dict[str, Any]:
+    return await client.execute(queries.START_PARITY, {"correct": correct})
+
+
+async def do_pause_parity(client: UnraidClient) -> dict[str, Any]:
+    return await client.execute(queries.PAUSE_PARITY)
+
+
+async def do_resume_parity(client: UnraidClient) -> dict[str, Any]:
+    return await client.execute(queries.RESUME_PARITY)
+
+
+async def do_cancel_parity(client: UnraidClient) -> dict[str, Any]:
+    return await client.execute(queries.CANCEL_PARITY)
+
+
+def register(mcp: FastMCP, settings: Settings) -> None:
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_array_status(ctx: Context) -> dict[str, Any]:
+        """Get the Unraid array: state, total/used/free capacity, every data/parity/cache
+        disk with health, temperature and I/O counters, and live parity-check status."""
+        return await guarded(ctx, fetch_array_status)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_parity_status(ctx: Context) -> dict[str, Any]:
+        """Get the current parity-check status (progress, speed, errors, running/paused)."""
+        return await guarded(ctx, fetch_parity_status)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_parity_history(ctx: Context) -> list[dict[str, Any]]:
+        """Get the history of past parity checks (date, duration, speed, errors, status)."""
+        return await guarded(ctx, fetch_parity_history)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def list_disks(ctx: Context) -> list[dict[str, Any]]:
+        """List physical disks with model, size, interface, SMART status, temperature,
+        and spin state. Use a disk id with get_disk for full details."""
+        return await guarded(ctx, fetch_disks)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_disk(ctx: Context, disk_id: str) -> dict[str, Any] | None:
+        """Get full details for one physical disk by its id (from list_disks),
+        including partitions, firmware and SMART status."""
+        return await guarded(ctx, fetch_disk, disk_id)
+
+
+def register_mutations(mcp: FastMCP, settings: Settings) -> None:
+    @mcp.tool(annotations=MUTATING)
+    async def start_array(ctx: Context) -> dict[str, Any]:
+        """Start the Unraid array (brings storage online)."""
+        return await guarded(ctx, do_start_array)
+
+    @mcp.tool(annotations=DESTRUCTIVE)
+    async def stop_array(ctx: Context, confirm: bool = False) -> dict[str, Any]:
+        """Stop the Unraid array. Disruptive: unmounts all disks and stops dependent
+        services. Requires confirm=true."""
+        return await guarded(ctx, do_stop_array, confirm)
+
+    @mcp.tool(annotations=MUTATING)
+    async def start_parity_check(ctx: Context, correct: bool = False) -> dict[str, Any]:
+        """Start a parity check. correct=false (default) only reports errors; correct=true
+        writes corrections to parity — use with care, never on a degraded array."""
+        return await guarded(ctx, do_start_parity, correct)
+
+    @mcp.tool(annotations=MUTATING)
+    async def pause_parity_check(ctx: Context) -> dict[str, Any]:
+        """Pause the running parity check."""
+        return await guarded(ctx, do_pause_parity)
+
+    @mcp.tool(annotations=MUTATING)
+    async def resume_parity_check(ctx: Context) -> dict[str, Any]:
+        """Resume a paused parity check."""
+        return await guarded(ctx, do_resume_parity)
+
+    @mcp.tool(annotations=MUTATING)
+    async def cancel_parity_check(ctx: Context) -> dict[str, Any]:
+        """Cancel the running parity check."""
+        return await guarded(ctx, do_cancel_parity)

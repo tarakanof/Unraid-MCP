@@ -35,27 +35,29 @@ query GetSystemInfo {
 }
 """
 
-ARRAY_STATUS = (
-    """
+_ARRAY_DISK_SELECTION = "{ " + _ARRAY_DISK_FIELDS + " }"
+
+ARRAY_STATUS = """
 query GetArrayStatus {
   array {
     id
     state
     capacity { kilobytes { free used total } disks { free used total } }
-    boot { %(f)s }
-    parities { %(f)s }
-    disks { %(f)s }
-    caches { %(f)s }
+    boot __DISK__
+    parities __DISK__
+    disks __DISK__
+    caches __DISK__
     parityCheckStatus { progress speed errors status paused running correcting }
   }
 }
-"""
-    % {"f": _ARRAY_DISK_FIELDS}
-)
+""".replace("__DISK__", _ARRAY_DISK_SELECTION)
 
 LIST_DISKS = """
 query ListPhysicalDisks {
-  disks { id device name vendor type size interfaceType smartStatus temperature isSpinning serialNum }
+  disks {
+    id device name vendor type size interfaceType
+    smartStatus temperature isSpinning serialNum
+  }
 }
 """
 
@@ -168,7 +170,12 @@ query GetMe {
 
 START_ARRAY = """
 mutation StartArray {
-  array { setState(input: { desiredState: START }) { state capacity { kilobytes { free used total } } } }
+  array {
+    setState(input: { desiredState: START }) {
+      state
+      capacity { kilobytes { free used total } }
+    }
+  }
 }
 """
 

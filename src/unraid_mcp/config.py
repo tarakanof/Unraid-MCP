@@ -26,6 +26,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        populate_by_name=True,
     )
 
     # ── Unraid connection ──────────────────────────────────────────────
@@ -40,9 +41,7 @@ class Settings(BaseSettings):
     transport: Transport = Field(default="stdio", validation_alias="UNRAID_MCP_TRANSPORT")
     host: str = Field(default="127.0.0.1", validation_alias="UNRAID_MCP_HOST")
     port: int = Field(default=6750, validation_alias="UNRAID_MCP_PORT")
-    bearer_token: SecretStr | None = Field(
-        default=None, validation_alias="UNRAID_MCP_BEARER_TOKEN"
-    )
+    bearer_token: SecretStr | None = Field(default=None, validation_alias="UNRAID_MCP_BEARER_TOKEN")
 
     # ── Safety switches ────────────────────────────────────────────────
     allow_mutations: bool = Field(default=False, validation_alias="UNRAID_MCP_ALLOW_MUTATIONS")
@@ -58,7 +57,9 @@ class Settings(BaseSettings):
         value = value.strip()
         parsed = urlparse(value)
         if parsed.scheme not in ("http", "https"):
-            raise ValueError("UNRAID_API_URL must be an http(s) URL, e.g. https://tower.local/graphql")
+            raise ValueError(
+                "UNRAID_API_URL must be an http(s) URL, e.g. https://tower.local/graphql"
+            )
         if not parsed.netloc:
             raise ValueError("UNRAID_API_URL must include a host, e.g. https://tower.local/graphql")
         # Append the GraphQL path if the user gave only a base URL.
@@ -91,6 +92,4 @@ def load_settings(**overrides: object) -> Settings:
             else:
                 # Use the message only — never the offending input value.
                 problems.append(f"{field}: {err.get('msg', 'invalid value')}")
-        raise UnraidConfigError(
-            "Invalid configuration:\n  - " + "\n  - ".join(problems)
-        ) from None
+        raise UnraidConfigError("Invalid configuration:\n  - " + "\n  - ".join(problems)) from None

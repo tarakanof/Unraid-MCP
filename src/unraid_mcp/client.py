@@ -64,7 +64,8 @@ class UnraidClient:
             ) from exc
         except httpx.TransportError as exc:
             raise UnraidConnectionError(
-                f"Could not connect to Unraid at {self._host}. Check UNRAID_API_URL and the network."
+                f"Could not connect to Unraid at {self._host}. "
+                "Check UNRAID_API_URL and the network."
             ) from exc
 
         if response.status_code in (401, 403):
@@ -78,15 +79,14 @@ class UnraidClient:
                 f"Unraid returned a server error (HTTP {response.status_code}) from {self._host}."
             )
         if response.status_code >= 400:
-            raise UnraidServerError(
-                f"Unexpected HTTP {response.status_code} from {self._host}."
-            )
+            raise UnraidServerError(f"Unexpected HTTP {response.status_code} from {self._host}.")
 
         try:
             payload = response.json()
         except ValueError as exc:
             raise UnraidServerError(
-                f"Unraid returned a non-JSON response (HTTP {response.status_code}) from {self._host}."
+                f"Unraid returned a non-JSON response (HTTP {response.status_code}) "
+                f"from {self._host}."
             ) from exc
 
         errors = payload.get("errors")
