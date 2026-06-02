@@ -33,6 +33,7 @@ async def test_execute_sends_key_header_and_query_body():
         assert req.headers["x-api-key"] == KEY
         assert req.headers["content-type"].startswith("application/json")
         import json
+
         body = json.loads(req.content)
         assert body == {"query": "query { ok }", "variables": {"a": 1}}
 

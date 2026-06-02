@@ -9,8 +9,13 @@ from unraid_mcp.logging import RedactionFilter, configure_logging, get_logger
 
 def test_redaction_filter_scrubs_secret_from_message():
     record = logging.LogRecord(
-        "x", logging.INFO, __file__, 1,
-        "calling with key supersecretkey123", None, None,
+        "x",
+        logging.INFO,
+        __file__,
+        1,
+        "calling with key supersecretkey123",
+        None,
+        None,
     )
     assert RedactionFilter("supersecretkey123").filter(record) is True
     assert "supersecretkey123" not in record.getMessage()
@@ -19,8 +24,13 @@ def test_redaction_filter_scrubs_secret_from_message():
 
 def test_redaction_filter_scrubs_interpolated_secret():
     record = logging.LogRecord(
-        "x", logging.INFO, __file__, 1,
-        "key=%s done", ("supersecretkey123",), None,
+        "x",
+        logging.INFO,
+        __file__,
+        1,
+        "key=%s done",
+        ("supersecretkey123",),
+        None,
     )
     RedactionFilter("supersecretkey123").filter(record)
     assert "supersecretkey123" not in record.getMessage()

@@ -45,6 +45,11 @@ src = ["src", "tests"]
 select = ["E", "F", "I", "UP", "B", "W", "C4", "SIM"]
 ignore = ["B008"]  # FastMCP/Pydantic use callables in defaults intentionally
 
+[tool.ruff.lint.per-file-ignores]
+# GraphQL operation strings are an embedded DSL; long single-line selections
+# are clearer than artificially wrapped ones.
+"src/unraid_mcp/queries.py" = ["E501"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

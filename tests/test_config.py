@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from unraid_mcp.config import Settings, load_settings
+from unraid_mcp.config import load_settings
 from unraid_mcp.errors import UnraidConfigError
 
 REQUIRED = {"UNRAID_API_URL": "https://tower.local/graphql", "UNRAID_API_KEY": "supersecretkey123"}
@@ -13,10 +13,18 @@ REQUIRED = {"UNRAID_API_URL": "https://tower.local/graphql", "UNRAID_API_KEY": "
 @pytest.fixture
 def clean_env(monkeypatch):
     for var in (
-        "UNRAID_API_URL", "UNRAID_API_KEY", "UNRAID_VERIFY_SSL", "UNRAID_CA_BUNDLE",
-        "UNRAID_MCP_TRANSPORT", "UNRAID_MCP_HOST", "UNRAID_MCP_PORT",
-        "UNRAID_MCP_BEARER_TOKEN", "UNRAID_MCP_ALLOW_MUTATIONS",
-        "UNRAID_MCP_ALLOW_RAW_QUERY", "UNRAID_MCP_TIMEOUT", "UNRAID_MCP_LOG_LEVEL",
+        "UNRAID_API_URL",
+        "UNRAID_API_KEY",
+        "UNRAID_VERIFY_SSL",
+        "UNRAID_CA_BUNDLE",
+        "UNRAID_MCP_TRANSPORT",
+        "UNRAID_MCP_HOST",
+        "UNRAID_MCP_PORT",
+        "UNRAID_MCP_BEARER_TOKEN",
+        "UNRAID_MCP_ALLOW_MUTATIONS",
+        "UNRAID_MCP_ALLOW_RAW_QUERY",
+        "UNRAID_MCP_TIMEOUT",
+        "UNRAID_MCP_LOG_LEVEL",
     ):
         monkeypatch.delenv(var, raising=False)
     return monkeypatch

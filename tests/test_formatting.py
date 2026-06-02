@@ -29,7 +29,9 @@ def test_human_size(num, expected):
     assert human_size(num) == expected
 
 
-@pytest.mark.parametrize("value,expected", [(None, None), ("", None), ("1024", 1024 * 1024), (2, 2048)])
+@pytest.mark.parametrize(
+    "value,expected", [(None, None), ("", None), ("1024", 1024 * 1024), (2, 2048)]
+)
 def test_kib_to_bytes(value, expected):
     assert kib_to_bytes(value) == expected
 
@@ -44,13 +46,26 @@ def test_shape_array_status_converts_capacity_and_disks():
             },
             "parityCheckStatus": {"running": False, "status": "COMPLETED"},
             "boot": None,
-            "parities": [{"name": "parity", "type": "PARITY", "status": "DISK_OK", "size": "1048576"}],
+            "parities": [
+                {"name": "parity", "type": "PARITY", "status": "DISK_OK", "size": "1048576"}
+            ],
             "disks": [
                 {
-                    "name": "disk1", "device": "sdb", "type": "DATA", "status": "DISK_OK",
-                    "temp": 35, "fsType": "xfs", "size": "1048576", "fsUsed": "524288",
-                    "fsFree": "524288", "numReads": "10", "numWrites": "5", "numErrors": "0",
-                    "warning": 0, "critical": 0, "color": "green-on",
+                    "name": "disk1",
+                    "device": "sdb",
+                    "type": "DATA",
+                    "status": "DISK_OK",
+                    "temp": 35,
+                    "fsType": "xfs",
+                    "size": "1048576",
+                    "fsUsed": "524288",
+                    "fsFree": "524288",
+                    "numReads": "10",
+                    "numWrites": "5",
+                    "numErrors": "0",
+                    "warning": 0,
+                    "critical": 0,
+                    "color": "green-on",
                 }
             ],
             "caches": [],
@@ -78,9 +93,17 @@ def test_shape_array_status_handles_empty():
 
 def test_shape_physical_disk_size_is_bytes():
     raw = {
-        "id": "1:abc", "device": "sdb", "name": "WDC", "vendor": "WD", "type": "HD",
-        "size": 2_000_000_000_000, "interfaceType": "SATA", "smartStatus": "OK",
-        "temperature": 36.0, "isSpinning": True, "serialNum": "X",
+        "id": "1:abc",
+        "device": "sdb",
+        "name": "WDC",
+        "vendor": "WD",
+        "type": "HD",
+        "size": 2_000_000_000_000,
+        "interfaceType": "SATA",
+        "smartStatus": "OK",
+        "temperature": 36.0,
+        "isSpinning": True,
+        "serialNum": "X",
     }
     out = shape_physical_disk(raw)
     assert out["smart_status"] == "OK"
