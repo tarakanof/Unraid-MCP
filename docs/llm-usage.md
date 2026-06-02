@@ -43,7 +43,7 @@ A typical stdio client config:
     "unraid": {
       "command": "uv",
       "args": ["run", "--directory", "/path/to/unraid-mcp", "unraid-mcp"],
-      "env": { "UNRAID_API_URL": "https://tower.local/graphql", "UNRAID_API_KEY": "..." }
+      "env": { "UNRAID_API_URL": "https://yourhash.myunraid.net/graphql", "UNRAID_API_KEY": "..." }
     }
   }
 }

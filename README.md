@@ -38,7 +38,7 @@ It runs the streamable-HTTP transport on port 6750.
 
 ```bash
 docker run --rm -p 6750:6750 \
-  -e UNRAID_API_URL=https://tower.local/graphql \
+  -e UNRAID_API_URL=https://yourhash.myunraid.net/graphql \
   -e UNRAID_API_KEY=your-api-key \
   -e UNRAID_MCP_BEARER_TOKEN=$(openssl rand -hex 32) \
   dtarakanov/unraid-mcp:latest
@@ -47,8 +47,11 @@ docker run --rm -p 6750:6750 \
 Or grab [`docker-compose.yml`](docker-compose.yml), fill in the values, and
 `docker compose up -d`.
 
-For self-signed local Unraid certificates, prefer mounting a CA bundle and setting
-`UNRAID_CA_BUNDLE`; only set `UNRAID_VERIFY_SSL=false` on a trusted LAN.
+Use a URL whose hostname matches the Unraid certificate. The MyUnraid hostname
+shown by Unraid usually works with `UNRAID_VERIFY_SSL=true`. If you use a LAN IP
+URL and the cert does not include that IP, a CA bundle cannot fix hostname
+validation; use a matching cert/hostname or set `UNRAID_VERIFY_SSL=false` only
+on a trusted LAN.
 
 ### Local (for stdio clients)
 
@@ -65,7 +68,7 @@ uv run unraid-mcp        # stdio transport (the default)
 
 Two variables are required:
 
-- `UNRAID_API_URL` — your GraphQL endpoint, e.g. `https://tower.local/graphql`
+- `UNRAID_API_URL` — your GraphQL endpoint, e.g. `https://yourhash.myunraid.net/graphql`
 - `UNRAID_API_KEY` — an Unraid API key (a `guest`/read key is plenty for monitoring)
 
 Copy `.env.example` to `.env` for a starting point. Everything else — transports, TLS,
@@ -82,7 +85,7 @@ Local stdio clients launch the server themselves:
       "command": "uv",
       "args": ["run", "--directory", "/path/to/unraid-mcp", "unraid-mcp"],
       "env": {
-        "UNRAID_API_URL": "https://tower.local/graphql",
+        "UNRAID_API_URL": "https://yourhash.myunraid.net/graphql",
         "UNRAID_API_KEY": "your-api-key"
       }
     }

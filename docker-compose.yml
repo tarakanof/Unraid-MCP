@@ -12,19 +12,22 @@ services:
       - "${UNRAID_MCP_PUBLISHED_ADDR:-127.0.0.1}:6750:6750"
     environment:
       # --- required ---
-      UNRAID_API_URL: "${UNRAID_API_URL:?Set UNRAID_API_URL, e.g. https://tower.local/graphql}"
+      UNRAID_API_URL: "${UNRAID_API_URL:?Set UNRAID_API_URL, e.g. https://yourhash.myunraid.net/graphql}"
       UNRAID_API_KEY: "${UNRAID_API_KEY:?Set UNRAID_API_KEY}"
       # Generate with: openssl rand -hex 32
       UNRAID_MCP_BEARER_TOKEN: "${UNRAID_MCP_BEARER_TOKEN:?Set UNRAID_MCP_BEARER_TOKEN}"
       # --- TLS to the Unraid API ---
-      # Prefer verification. For self-signed Unraid certs, mount a CA bundle and
-      # set UNRAID_CA_BUNDLE; only set UNRAID_VERIFY_SSL=false on a trusted LAN.
+      # Prefer verification with a hostname that matches the cert. A CA bundle
+      # can trust a self-signed cert, but it cannot fix a hostname/IP mismatch.
+      # Only set UNRAID_VERIFY_SSL=false on a trusted LAN.
       UNRAID_VERIFY_SSL: "${UNRAID_VERIFY_SSL:-true}"
       # UNRAID_CA_BUNDLE: "/certs/unraid-ca.pem"
       # --- safety (read-only by default) ---
       UNRAID_MCP_ALLOW_MUTATIONS: "false"
       UNRAID_MCP_ALLOW_RAW_QUERY: "false"
       # --- optional hardening / misc ---
+      # If you publish on a LAN address, include that address or DNS name here
+      # (for example 10.0.0.5:6750,tower.local:6750) or Host validation rejects clients.
       UNRAID_MCP_ALLOWED_HOSTS: "${UNRAID_MCP_ALLOWED_HOSTS:-127.0.0.1:6750,localhost:6750}"
       # UNRAID_MCP_TLS_CERT: "/certs/cert.pem"
       # UNRAID_MCP_TLS_KEY: "/certs/key.pem"

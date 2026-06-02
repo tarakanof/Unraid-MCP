@@ -78,10 +78,12 @@ class Settings(BaseSettings):
         parsed = urlparse(value)
         if parsed.scheme not in ("http", "https"):
             raise ValueError(
-                "UNRAID_API_URL must be an http(s) URL, e.g. https://tower.local/graphql"
+                "UNRAID_API_URL must be an http(s) URL, e.g. https://yourhash.myunraid.net/graphql"
             )
         if not parsed.netloc:
-            raise ValueError("UNRAID_API_URL must include a host, e.g. https://tower.local/graphql")
+            raise ValueError(
+                "UNRAID_API_URL must include a host, e.g. https://yourhash.myunraid.net/graphql"
+            )
         # Append the GraphQL path if the user gave only a base URL.
         if parsed.path in ("", "/"):
             value = value.rstrip("/") + "/graphql"

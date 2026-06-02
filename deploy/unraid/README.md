@@ -34,12 +34,15 @@ clients then connect to `http://<TOWER-IP>:6750/mcp` with a bearer token.
 2. In the WebUI go to **Docker → Add Container**, and pick **unraid-mcp** from the
    *Template* dropdown (under "User templates").
 3. Fill in:
-   - **Unraid API URL** → `https://<TOWER-IP>/graphql` (your server's LAN IP)
+   - **Unraid API URL** → `https://<MYUNRAID-HOST>/graphql` (the hostname that
+     matches the Unraid certificate)
    - **Unraid API Key** → the key from above
    - **MCP Bearer Token** → the random token from above
-   - leave **Verify Unraid TLS** = `true` when the cert is trusted; for a
-     self-signed local cert, prefer mounting a CA bundle and setting
-     `UNRAID_CA_BUNDLE`
+   - leave **Verify Unraid TLS** = `true` when the cert is trusted and matches
+     the URL hostname; if you use `https://<TOWER-IP>/graphql`, verification
+     usually fails unless the cert includes that IP
+   - for a self-signed cert with a matching hostname, mount a CA bundle and set
+     `UNRAID_CA_BUNDLE`; a CA bundle does not fix hostname/IP mismatches
    - leave **Allow Mutations** = `false` unless you want write access
 4. **Apply**. The container starts on port `6750`.
 
