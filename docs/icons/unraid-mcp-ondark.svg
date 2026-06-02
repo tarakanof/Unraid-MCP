@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="g5" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FF9A42"></stop><stop offset="1" stop-color="#EE5A1B"></stop>
+    </linearGradient>
+    <radialGradient id="hi" cx="0.5" cy="0.06" r="0.9">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.30"></stop>
+      <stop offset="0.62" stop-color="#ffffff" stop-opacity="0"></stop>
+    </radialGradient>
+  </defs>
+  <rect x="6" y="28" width="200" height="200" rx="58" fill="url(#g5)"></rect>
+  <rect x="6" y="28" width="200" height="200" rx="58" fill="url(#hi)"></rect>
+  <rect x="40" y="84" width="22" height="88" rx="11" fill="#FFF6EE"></rect>
+  <rect x="74" y="84" width="22" height="88" rx="11" fill="#FFF6EE"></rect>
+  <path d="M206 128 H234" stroke="#C3CCDB" stroke-width="12" stroke-linecap="round"></path>
+  <circle cx="234" cy="128" r="15" fill="#E7ECF3"></circle>
+  <circle cx="234" cy="128" r="6" fill="#F4511E"></circle>
+  <circle cx="206" cy="128" r="28" fill="#FFF6EE"></circle>
+  <circle cx="206" cy="128" r="11" fill="#EE5A1B"></circle>
+</svg>
