@@ -4,7 +4,7 @@ The server runs as a Docker container on Unraid using the **streamable-HTTP**
 transport, and connects back to the same Unraid server's GraphQL API. MCP
 clients then connect to `http://<TOWER-IP>:6750/mcp` with a bearer token.
 
-> Image namespace: the template/compose use `tarakanof/unraid-mcp`. If your
+> Image namespace: the template/compose use `dtarakanov/unraid-mcp`. If your
 > Docker Hub username differs, change the repository accordingly.
 
 ## Prerequisites
@@ -78,6 +78,6 @@ Point your MCP client at `http://<TOWER-IP>:6750/mcp` and send the header
 - This GitHub repo is **private**: the template's `raw.githubusercontent.com` icon
   won't render and the raw `wget` won't work without a token — copy the XML manually
   (Option A). Making the repo public restores both.
-- For Unraid to pull the image, the **Docker Hub** repo (`tarakanof/unraid-mcp`) must
+- For Unraid to pull the image, the **Docker Hub** repo (`dtarakanov/unraid-mcp`) must
   be **public**, or add your Docker Hub credentials under Unraid's Docker settings.
   The GitHub repo can stay private regardless.

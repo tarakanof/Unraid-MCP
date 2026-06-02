@@ -3,7 +3,7 @@
 # Copy this, fill in the values, then: docker compose up -d
 services:
   unraid-mcp:
-    image: tarakanof/unraid-mcp:latest
+    image: dtarakanov/unraid-mcp:latest
     container_name: unraid-mcp
     restart: unless-stopped
     ports:

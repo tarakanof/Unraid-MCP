@@ -141,7 +141,7 @@ Tests mock the GraphQL endpoint with `respx`, so the suite runs without a real U
 
 ## Docker
 
-A prebuilt image is published to Docker Hub as **`tarakanof/unraid-mcp`** by the
+A prebuilt image is published to Docker Hub as **`dtarakanov/unraid-mcp`** by the
 [`docker-publish.yml`](.github/workflows/docker-publish.yml) workflow (multi-arch
 `amd64`/`arm64`). The image defaults to the streamable-HTTP transport on `0.0.0.0:6750`.
 
@@ -151,7 +151,7 @@ docker run --rm -p 6750:6750 \
   -e UNRAID_API_KEY=your-api-key \
   -e UNRAID_VERIFY_SSL=false \
   -e UNRAID_MCP_BEARER_TOKEN=$(openssl rand -hex 32) \
-  tarakanof/unraid-mcp:latest
+  dtarakanov/unraid-mcp:latest
 ```
 
 Or use [`docker-compose.yml`](docker-compose.yml). Always set a bearer token and
