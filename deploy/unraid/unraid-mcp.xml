@@ -25,7 +25,7 @@ Put the container behind a TLS reverse proxy (or set UNRAID_MCP_TLS_CERT/KEY) be
   <Category>Tools: Network:Management</Category>
   <WebUI/>
   <TemplateURL>https://raw.githubusercontent.com/tarakanof/Unraid-MCP/main/deploy/unraid/unraid-mcp.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/tarakanof/Unraid-MCP/main/deploy/unraid/icon.png</Icon>
+  <Icon>https://raw.githubusercontent.com/tarakanof/Unraid-MCP/main/docs/icons/unraid-mcp-256.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
