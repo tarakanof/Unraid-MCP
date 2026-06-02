@@ -96,11 +96,12 @@ def register_mutations(mcp: FastMCP, settings: Settings) -> None:
     async def delete_notification(
         ctx: Context,
         notification_id: str,
-        notification_type: str = "ARCHIVE",
+        notification_type: str,
         confirm: bool = False,
     ) -> dict[str, Any]:
-        """Permanently delete a notification by id. notification_type is UNREAD or ARCHIVE.
-        Irreversible — requires confirm=true."""
+        """Permanently delete a notification by id. notification_type must be UNREAD or
+        ARCHIVE (matching where the notification currently lives). Irreversible —
+        requires confirm=true."""
         return await guarded(
             ctx, do_delete_notification, notification_id, notification_type, confirm
         )

@@ -13,20 +13,27 @@ from unraid_mcp.server import build_server
 from unraid_mcp.tools import array, docker, notifications, vm
 
 READ_TOOLS = {"get_system_info", "get_array_status", "list_docker_containers", "get_health_summary"}
+# The complete set of mutating tools — kept exhaustive so the registration
+# tests catch any tool that fails to register or leaks into read-only mode.
 MUTATION_TOOLS = {
     "start_array",
     "stop_array",
     "start_parity_check",
     "pause_parity_check",
+    "resume_parity_check",
+    "cancel_parity_check",
     "start_docker_container",
     "stop_docker_container",
     "restart_docker_container",
     "start_vm",
     "stop_vm",
-    "force_stop_vm",
+    "pause_vm",
+    "resume_vm",
     "reboot_vm",
+    "force_stop_vm",
     "archive_notification",
     "archive_all_notifications",
+    "mark_notification_unread",
     "delete_notification",
 }
 
@@ -43,8 +50,29 @@ async def test_mutations_absent_by_default(settings_factory):
 
 
 async def test_mutations_present_when_enabled(settings_factory):
-    names = await _tool_names(settings_factory(allow_mutations=True))
-    assert names >= MUTATION_TOOLS
+    read_only = await _tool_names(settings_factory(allow_mutations=False))
+    with_mutations = await _tool_names(settings_factory(allow_mutations=True))
+    # Exactly the mutation set appears, nothing more, nothing fewer.
+    assert with_mutations - read_only == MUTATION_TOOLS
+
+
+async def test_correcting_parity_check_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await array.do_start_parity(client, correct=True, confirm=False)
+        assert route.call_count == 0
+
+
+async def test_non_correcting_parity_check_needs_no_confirm(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"parityCheck": {"start": True}}})
+    ) as (
+        client,
+        route,
+    ):
+        await array.do_start_parity(client, correct=False)
+        assert route.call_count == 1
+        assert json.loads(route.calls.last.request.content)["variables"] == {"correct": False}
 
 
 async def test_raw_query_gated(settings_factory):

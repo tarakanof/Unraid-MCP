@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
+from graphql import parse as graphql_parse
+from graphql.error import GraphQLError
+from graphql.language import OperationDefinitionNode, OperationType
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
@@ -23,10 +25,27 @@ from ..formatting import (
 )
 from ._base import READ_ONLY, guarded
 
-# Reject anything that runs an operation other than a query. Matches a
-# mutation/subscription operation either at the very start or as a second
-# operation after a previous one closes with "}".
-_NON_QUERY_OP = re.compile(r"(^|})\s*(mutation|subscription)\b", re.IGNORECASE)
+
+def _ensure_read_only(query: str) -> None:
+    """Parse the GraphQL document and reject anything that isn't a query.
+
+    Parsing (rather than regex matching) correctly ignores comments, BOM,
+    commas and whitespace, and never mistakes a field/alias named like a
+    keyword — or a keyword inside a string literal — for an operation.
+    """
+    try:
+        document = graphql_parse(query)
+    except GraphQLError as exc:
+        raise ToolError(f"Invalid GraphQL query: {exc.message}") from None
+
+    operations = [d for d in document.definitions if isinstance(d, OperationDefinitionNode)]
+    if not operations:
+        raise ToolError("run_graphql_query needs a query operation; none was found.")
+    if any(op.operation is not OperationType.QUERY for op in operations):
+        raise ToolError(
+            "run_graphql_query only accepts read-only queries; "
+            "mutations and subscriptions are not allowed."
+        )
 
 
 async def fetch_ups(client: UnraidClient) -> list[dict[str, Any]]:
@@ -64,11 +83,7 @@ async def fetch_health(client: UnraidClient) -> dict[str, Any]:
 async def do_raw_query(
     client: UnraidClient, query: str, variables: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    if _NON_QUERY_OP.search(query.strip()):
-        raise ToolError(
-            "run_graphql_query only accepts read-only queries; "
-            "mutations and subscriptions are not allowed."
-        )
+    _ensure_read_only(query)
     return await client.execute(query, variables)
 
 

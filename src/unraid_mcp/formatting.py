@@ -26,11 +26,11 @@ def human_size(num_bytes: float | int | None) -> str | None:
     value = float(num_bytes)
     if value < 1024:
         return f"{int(value)} B"
-    for unit in ("KiB", "MiB", "GiB", "TiB", "PiB"):
+    for unit in ("KiB", "MiB", "GiB", "TiB", "PiB", "EiB"):
         value /= 1024
         if value < 1024:
             return f"{value:.1f} {unit}"
-    return f"{value:.1f} EiB"
+    return f"{value:.1f} ZiB"
 
 
 def kib_to_bytes(value: Any) -> int | None:
@@ -180,6 +180,9 @@ def shape_docker_networks(data: dict | None) -> list[dict[str, Any]]:
 
 def shape_vms(data: dict | None) -> list[dict[str, Any]]:
     vms = (data or {}).get("vms") or {}
+    if not isinstance(vms, dict):
+        return []
+    # `domains` is canonical; `domain` is a legacy alias kept for older builds.
     domains = vms.get("domains") or vms.get("domain") or []
     return [{"id": d.get("id"), "name": d.get("name"), "state": d.get("state")} for d in domains]
 

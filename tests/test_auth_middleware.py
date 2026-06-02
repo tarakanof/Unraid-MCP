@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from unraid_mcp.auth import StaticBearerAuthMiddleware
 
 TOKEN = "tok-abcdef123456"
@@ -59,8 +61,44 @@ async def test_wrong_token_rejected():
     assert sent[0]["status"] == 401
 
 
-async def test_non_http_scope_passes_through():
+async def test_lifespan_scope_passes_through():
     inner, state = _inner_factory()
     mw = StaticBearerAuthMiddleware(inner, TOKEN)
     await _call(mw, scope_type="lifespan")
     assert state["called"] is True
+
+
+async def test_websocket_scope_is_rejected():
+    inner, state = _inner_factory()
+    mw = StaticBearerAuthMiddleware(inner, TOKEN)
+    await _call(mw, f"Bearer {TOKEN}", scope_type="websocket")
+    assert state["called"] is False
+
+
+async def test_duplicate_authorization_headers_rejected():
+    inner, state = _inner_factory()
+    mw = StaticBearerAuthMiddleware(inner, TOKEN)
+    scope = {
+        "type": "http",
+        "headers": [
+            (b"authorization", f"Bearer {TOKEN}".encode()),
+            (b"authorization", b"Bearer attacker"),
+        ],
+    }
+    sent = []
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(msg):
+        sent.append(msg)
+
+    await mw(scope, receive, send)
+    assert state["called"] is False
+    assert sent[0]["status"] == 401
+
+
+def test_empty_token_is_rejected_at_construction():
+    inner, _ = _inner_factory()
+    with pytest.raises(ValueError):
+        StaticBearerAuthMiddleware(inner, "")

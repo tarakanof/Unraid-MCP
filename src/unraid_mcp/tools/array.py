@@ -49,7 +49,11 @@ async def do_stop_array(client: UnraidClient, confirm: bool) -> dict[str, Any]:
     return await client.execute(queries.STOP_ARRAY)
 
 
-async def do_start_parity(client: UnraidClient, correct: bool) -> dict[str, Any]:
+async def do_start_parity(
+    client: UnraidClient, correct: bool, confirm: bool = False
+) -> dict[str, Any]:
+    if correct:
+        require_confirm(confirm, "start a CORRECTING parity check (writes corrections to parity)")
     return await client.execute(queries.START_PARITY, {"correct": correct})
 
 
@@ -108,10 +112,13 @@ def register_mutations(mcp: FastMCP, settings: Settings) -> None:
         return await guarded(ctx, do_stop_array, confirm)
 
     @mcp.tool(annotations=MUTATING)
-    async def start_parity_check(ctx: Context, correct: bool = False) -> dict[str, Any]:
+    async def start_parity_check(
+        ctx: Context, correct: bool = False, confirm: bool = False
+    ) -> dict[str, Any]:
         """Start a parity check. correct=false (default) only reports errors; correct=true
-        writes corrections to parity — use with care, never on a degraded array."""
-        return await guarded(ctx, do_start_parity, correct)
+        writes corrections to parity — use with care, never on a degraded array, and it
+        requires confirm=true."""
+        return await guarded(ctx, do_start_parity, correct, confirm)
 
     @mcp.tool(annotations=MUTATING)
     async def pause_parity_check(ctx: Context) -> dict[str, Any]:

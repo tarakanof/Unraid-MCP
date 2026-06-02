@@ -71,6 +71,8 @@ Copy `.env.example` to `.env` and fill it in (or export the variables in the env
 | `UNRAID_MCP_HOST` | `127.0.0.1` | Bind address for HTTP transport |
 | `UNRAID_MCP_PORT` | `6750` | Port for HTTP transport |
 | `UNRAID_MCP_BEARER_TOKEN` | – | Bearer token required from HTTP clients (auto-generated + printed if unset) |
+| `UNRAID_MCP_ALLOWED_HOSTS` | – | Comma-separated Host allow-list for DNS-rebinding protection (HTTP). Set this for non-localhost binds |
+| `UNRAID_MCP_ALLOWED_ORIGINS` | – | Comma-separated Origin allow-list for DNS-rebinding protection (HTTP) |
 | `UNRAID_MCP_ALLOW_MUTATIONS` | `false` | Register mutating tools |
 | `UNRAID_MCP_ALLOW_RAW_QUERY` | `false` | Register the read-only raw GraphQL tool |
 | `UNRAID_MCP_TIMEOUT` | `30` | HTTP timeout (seconds) |
@@ -119,14 +121,14 @@ UNRAID_MCP_TRANSPORT=streamable-http UNRAID_MCP_BEARER_TOKEN=$(openssl rand -hex
 - **Least privilege.** Use a scoped Unraid API key; a read/guest key suffices for monitoring.
 - **Secrets stay secret.** The API key is held as a `SecretStr`, never logged (a redaction filter scrubs it as defence in depth), and never appears in error messages.
 - **stdio is clean.** All logs go to stderr; stdout carries only the JSON-RPC protocol.
-- **HTTP is gated.** The HTTP transport binds `127.0.0.1` by default and requires a bearer token. For exposure beyond localhost, run behind a reverse proxy that terminates TLS. Don't expose it to untrusted networks.
-- **No arbitrary execution.** Only typed GraphQL operations are issued; the optional raw-query tool is read-only and rejects mutations/subscriptions.
+- **HTTP is gated.** The HTTP transport binds `127.0.0.1` by default and requires a bearer token (constant-time compared; duplicate/absent `Authorization` headers are rejected). DNS-rebinding protection (Host/Origin validation) is enabled automatically for localhost binds; for a non-localhost bind set `UNRAID_MCP_ALLOWED_HOSTS` to keep it on. For exposure beyond localhost, run behind a reverse proxy that terminates TLS. Don't expose it to untrusted networks.
+- **No arbitrary execution.** Only typed GraphQL operations are issued; the optional raw-query tool parses the document and allows only `query` operations (mutations/subscriptions are rejected — including ones hidden behind comments or leading whitespace).
 
 ## Development
 
 ```bash
 uv sync --extra dev
-uv run pytest          # 87 tests, all mocked — no live server needed
+uv run pytest          # 139 tests, all mocked — no live server needed
 uv run ruff check .
 uv run ruff format .
 ```

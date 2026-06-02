@@ -23,6 +23,8 @@ from unraid_mcp.formatting import (
         (1536, "1.5 KiB"),
         (1024**3, "1.0 GiB"),
         (3 * 1024**4, "3.0 TiB"),
+        (1024**5, "1.0 PiB"),
+        (1024**6, "1.0 EiB"),
     ],
 )
 def test_human_size(num, expected):

@@ -21,21 +21,28 @@ class StaticBearerAuthMiddleware:
     """Reject HTTP requests whose ``Authorization`` header isn't ``Bearer <token>``."""
 
     def __init__(self, app: ASGIApp, token: str) -> None:
+        if not token:
+            raise ValueError("StaticBearerAuthMiddleware requires a non-empty token")
         self._app = app
-        self._token = token
+        self._expected = f"Bearer {token}"
 
     async def __call__(self, scope: dict, receive, send) -> None:
-        if scope.get("type") != "http":
+        scope_type = scope.get("type")
+        # The lifespan protocol carries no client request to authenticate.
+        if scope_type == "lifespan":
             await self._app(scope, receive, send)
             return
-
-        headers = dict(scope.get("headers") or [])
-        provided = headers.get(b"authorization", b"").decode("latin-1")
-        expected = f"Bearer {self._token}"
-        # Constant-time comparison to avoid leaking the token via timing.
-        if provided and hmac.compare_digest(provided, expected):
-            await self._app(scope, receive, send)
-            return
+        # Authenticate HTTP; refuse anything else (e.g. websocket) rather than
+        # letting it slip past the gate.
+        if scope_type == "http":
+            # Collect every Authorization header: 0 or >1 is rejected, so a
+            # smuggled duplicate can't be validated by a proxy yet bypass us.
+            values = [v for k, v in (scope.get("headers") or []) if k.lower() == b"authorization"]
+            provided = values[0].decode("latin-1") if len(values) == 1 else ""
+            # Constant-time comparison to avoid leaking the token via timing.
+            if hmac.compare_digest(provided, self._expected):
+                await self._app(scope, receive, send)
+                return
 
         body = b'{"error":"unauthorized","detail":"missing or invalid bearer token"}'
         await send(

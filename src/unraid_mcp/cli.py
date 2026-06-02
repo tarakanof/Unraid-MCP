@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 
 from .auth import StaticBearerAuthMiddleware
@@ -16,13 +17,27 @@ log = get_logger(__name__)
 def _serve_http(mcp, settings: Settings) -> None:
     import uvicorn
 
-    token = settings.bearer_token.get_secret_value() if settings.bearer_token else None
-    if not token:
+    api_key = settings.api_key.get_secret_value()
+    provided = settings.bearer_token.get_secret_value() if settings.bearer_token else None
+    if provided:
+        token = provided  # operator-supplied tokens are never logged
+    else:
         token = secrets.token_urlsafe(32)
         log.warning(
             "No UNRAID_MCP_BEARER_TOKEN set; generated one for this run. "
             "Clients must send 'Authorization: Bearer <token>':\n    %s",
             token,
+        )
+    # Redact the bearer token from all subsequent logs (the generated one was
+    # shown exactly once above so the operator can configure their client).
+    configure_logging(settings.log_level, api_key, secrets=[token])
+
+    if not settings.binds_localhost and not settings.allowed_hosts:
+        log.warning(
+            "Binding %s without UNRAID_MCP_ALLOWED_HOSTS: DNS-rebinding protection is "
+            "off and only the bearer token guards access. Set UNRAID_MCP_ALLOWED_HOSTS "
+            "and front this with a TLS reverse proxy for remote use.",
+            settings.host,
         )
     app = StaticBearerAuthMiddleware(mcp.streamable_http_app(), token)
     log.info("Serving streamable-HTTP on http://%s:%s/mcp", settings.host, settings.port)
@@ -30,8 +45,10 @@ def _serve_http(mcp, settings: Settings) -> None:
 
 
 def main() -> int:
-    # Configure logging immediately (no key yet) so config errors reach stderr.
-    configure_logging(level="INFO", api_key=None)
+    # Configure logging immediately so config errors reach stderr. Seed the
+    # redaction filter straight from the environment so the key is scrubbed
+    # even on the earliest log lines, before settings are parsed.
+    configure_logging(level="INFO", api_key=os.environ.get("UNRAID_API_KEY"))
     try:
         settings = load_settings()
     except UnraidConfigError as exc:

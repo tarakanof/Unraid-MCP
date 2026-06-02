@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from .client import UnraidClient
 from .config import Settings
@@ -31,6 +32,25 @@ class AppContext:
 
     client: UnraidClient
     settings: Settings
+
+
+def _transport_security(settings: Settings) -> TransportSecuritySettings | None:
+    """DNS-rebinding protection for the HTTP transport.
+
+    Enabled for localhost binds (the safe default) or whenever the operator has
+    provided an explicit host allow-list. For a non-localhost bind without an
+    allow-list we leave it off — otherwise legitimate requests to the real
+    hostname would be rejected — and rely on the bearer token (cli warns).
+    """
+    if settings.transport != "streamable-http":
+        return None
+    if settings.binds_localhost or settings.allowed_hosts:
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=settings.http_allowed_hosts(),
+            allowed_origins=settings.http_allowed_origins(),
+        )
+    return None
 
 
 def build_server(settings: Settings) -> FastMCP:
@@ -64,6 +84,7 @@ def build_server(settings: Settings) -> FastMCP:
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level.upper(),
+        transport_security=_transport_security(settings),
     )
     register_all(mcp, settings)
     return mcp

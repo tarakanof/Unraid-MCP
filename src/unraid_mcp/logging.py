@@ -20,29 +20,40 @@ _REDACTION = "***REDACTED***"
 class RedactionFilter(logging.Filter):
     """Replace occurrences of a secret in log messages with a placeholder."""
 
-    def __init__(self, secret: str | None) -> None:
+    def __init__(self, secrets: str | list[str | None] | None) -> None:
         super().__init__()
+        if isinstance(secrets, str) or secrets is None:
+            secrets = [secrets] if secrets else []
         # Only redact non-trivial secrets; empty/very short values would match
         # everywhere and are not real keys.
-        self._secret = secret if secret and len(secret) >= 6 else None
+        self._secrets = [s for s in secrets if s and len(s) >= 6]
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if self._secret:
+        if self._secrets:
             # Render the message (applying args) then scrub, so interpolated
             # secrets are caught too.
             try:
                 message = record.getMessage()
             except Exception:
                 message = str(record.msg)
-            if self._secret in message:
-                record.msg = message.replace(self._secret, _REDACTION)
+            scrubbed = message
+            for secret in self._secrets:
+                if secret in scrubbed:
+                    scrubbed = scrubbed.replace(secret, _REDACTION)
+            if scrubbed != message:
+                record.msg = scrubbed
                 record.args = None
         return True
 
 
-def configure_logging(level: str = "INFO", api_key: str | None = None) -> None:
+def configure_logging(
+    level: str = "INFO",
+    api_key: str | None = None,
+    secrets: list[str] | None = None,
+) -> None:
     """Configure root logging to stderr with secret redaction.
 
+    ``api_key`` plus any extra ``secrets`` are scrubbed from every record.
     Idempotent: replaces any handlers we previously installed.
     """
     root = logging.getLogger()
@@ -55,10 +66,8 @@ def configure_logging(level: str = "INFO", api_key: str | None = None) -> None:
 
     handler = logging.StreamHandler(stream=sys.stderr)
     handler._unraid_mcp = True  # type: ignore[attr-defined]
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    )
-    handler.addFilter(RedactionFilter(api_key))
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    handler.addFilter(RedactionFilter([api_key, *(secrets or [])]))
     root.addHandler(handler)
 
 

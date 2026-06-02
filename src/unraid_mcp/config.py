@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     host: str = Field(default="127.0.0.1", validation_alias="UNRAID_MCP_HOST")
     port: int = Field(default=6750, validation_alias="UNRAID_MCP_PORT")
     bearer_token: SecretStr | None = Field(default=None, validation_alias="UNRAID_MCP_BEARER_TOKEN")
+    # Comma-separated Host / Origin allow-lists for DNS-rebinding protection on
+    # the HTTP transport. Required when binding to a non-localhost address.
+    allowed_hosts: str | None = Field(default=None, validation_alias="UNRAID_MCP_ALLOWED_HOSTS")
+    allowed_origins: str | None = Field(default=None, validation_alias="UNRAID_MCP_ALLOWED_ORIGINS")
 
     # ── Safety switches ────────────────────────────────────────────────
     allow_mutations: bool = Field(default=False, validation_alias="UNRAID_MCP_ALLOW_MUTATIONS")
@@ -75,6 +79,25 @@ class Settings(BaseSettings):
     def tls_verify(self) -> bool | str:
         """Value for ``httpx`` ``verify``: a CA-bundle path if set, else the bool."""
         return self.ca_bundle if self.ca_bundle else self.verify_ssl
+
+    @property
+    def binds_localhost(self) -> bool:
+        return self.host in ("127.0.0.1", "localhost", "::1")
+
+    def http_allowed_hosts(self) -> list[str]:
+        """Host header allow-list for DNS-rebinding protection (HTTP transport)."""
+        hosts: list[str] = []
+        if self.allowed_hosts:
+            hosts += [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
+        for host in (self.host, "127.0.0.1", "localhost"):
+            hosts.append(f"{host}:{self.port}")
+        return sorted(set(hosts))
+
+    def http_allowed_origins(self) -> list[str]:
+        """Origin allow-list for DNS-rebinding protection (HTTP transport)."""
+        if self.allowed_origins:
+            return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+        return [f"http://127.0.0.1:{self.port}", f"http://localhost:{self.port}"]
 
 
 def load_settings(**overrides: object) -> Settings:
