@@ -1,0 +1,75 @@
+name: Security
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Static security scan
+        run: uvx bandit -r src
+
+      - name: Export locked runtime dependencies
+        run: |
+          uv export --quiet --frozen --no-dev --no-emit-project \
+            --format requirements-txt \
+            -o /tmp/unraid-mcp-requirements.txt
+
+      - name: Dependency vulnerability scan
+        run: uvx pip-audit --require-hashes --disable-pip -r /tmp/unraid-mcp-requirements.txt
+
+  container-security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: unraid-mcp:security-scan
+
+      - name: Dockerfile configuration scan
+        run: |
+          docker run --rm \
+            -v "$PWD:/repo" \
+            aquasec/trivy:0.71.0 config \
+            --exit-code 1 \
+            --severity MEDIUM,HIGH,CRITICAL \
+            /repo
+
+      - name: Image vulnerability scan
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.71.0 image \
+            --exit-code 1 \
+            --scanners vuln \
+            --severity HIGH,CRITICAL \
+            --timeout 10m \
+            unraid-mcp:security-scan

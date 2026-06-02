@@ -62,6 +62,7 @@ def build_server(settings: Settings) -> FastMCP:
             verify=settings.tls_verify(),
             timeout=settings.timeout,
             headers={"user-agent": "unraid-mcp"},
+            trust_env=False,
         ) as http:
             client = UnraidClient(
                 settings.api_url,

@@ -19,3 +19,7 @@ docker-compose.yml
 .env.*
 !.env.example
 .DS_Store
+**/.DS_Store
+.trivy-cache
+.uv-cache
+.uv-tools

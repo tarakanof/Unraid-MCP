@@ -37,7 +37,9 @@ clients then connect to `http://<TOWER-IP>:6750/mcp` with a bearer token.
    - **Unraid API URL** → `https://<TOWER-IP>/graphql` (your server's LAN IP)
    - **Unraid API Key** → the key from above
    - **MCP Bearer Token** → the random token from above
-   - leave **Verify Unraid TLS** = `false` (local self-signed cert)
+   - leave **Verify Unraid TLS** = `true` when the cert is trusted; for a
+     self-signed local cert, prefer mounting a CA bundle and setting
+     `UNRAID_CA_BUNDLE`
    - leave **Allow Mutations** = `false` unless you want write access
 4. **Apply**. The container starts on port `6750`.
 
@@ -53,9 +55,7 @@ curl -i http://<TOWER-IP>:6750/mcp
 # (A full MCP handshake is done by your MCP client, not curl.)
 ```
 Check the container logs in the Unraid UI — on startup it logs
-`Serving streamable-HTTP on http://0.0.0.0:6750/mcp`. If you left the bearer
-token blank, the generated token is printed there (set a fixed one to avoid
-this changing on restart).
+`Serving streamable-HTTP on http://0.0.0.0:6750/mcp`.
 
 ## Connect a client
 
@@ -71,6 +71,8 @@ Point your MCP client at `http://<TOWER-IP>:6750/mcp` and send the header
   gate; for use beyond a trusted LAN put it behind a **TLS reverse proxy**
   (SWAG / Nginx Proxy Manager) or set `UNRAID_MCP_TLS_CERT` + `UNRAID_MCP_TLS_KEY`
   and mount the certs. Set **Allowed Hosts** to keep DNS-rebinding protection on.
+- Weak placeholder bearer tokens are rejected at startup; generate one with
+  `openssl rand -hex 32`.
 - Use a least-privilege Unraid API key; never commit it.
 
 ## Visibility (private repo / image)

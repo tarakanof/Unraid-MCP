@@ -1,30 +1,31 @@
 # Docker Compose / Portainer deployment of the Unraid MCP server.
 # The image defaults to the streamable-HTTP transport on port 6750.
-# Copy this, fill in the values, then: docker compose up -d
+# Set the required environment variables, then: docker compose up -d
 services:
   unraid-mcp:
-    image: dtarakanov/unraid-mcp:latest
+    image: dtarakanov/unraid-mcp:${UNRAID_MCP_IMAGE_TAG:-latest}
     container_name: unraid-mcp
     restart: unless-stopped
     ports:
-      - "6750:6750"
+      # Bind localhost by default. Publish 6750:6750 only on a trusted LAN or
+      # behind TLS/auth-aware ingress.
+      - "${UNRAID_MCP_PUBLISHED_ADDR:-127.0.0.1}:6750:6750"
     environment:
       # --- required ---
-      UNRAID_API_URL: "https://YOUR_UNRAID_IP/graphql"
-      UNRAID_API_KEY: "your-unraid-api-key"
-      # Bearer token MCP clients must send. Leave unset to auto-generate one
-      # (printed to the logs) — but it changes on every restart, so set a fixed
-      # long random value for stable clients (e.g. `openssl rand -hex 32`).
-      UNRAID_MCP_BEARER_TOKEN: "change-me-to-a-long-random-token"
+      UNRAID_API_URL: "${UNRAID_API_URL:?Set UNRAID_API_URL, e.g. https://tower.local/graphql}"
+      UNRAID_API_KEY: "${UNRAID_API_KEY:?Set UNRAID_API_KEY}"
+      # Generate with: openssl rand -hex 32
+      UNRAID_MCP_BEARER_TOKEN: "${UNRAID_MCP_BEARER_TOKEN:?Set UNRAID_MCP_BEARER_TOKEN}"
       # --- TLS to the Unraid API ---
-      # Unraid's local API usually uses a self-signed cert; disable verification
-      # or, better, mount a CA bundle and set UNRAID_CA_BUNDLE.
-      UNRAID_VERIFY_SSL: "false"
+      # Prefer verification. For self-signed Unraid certs, mount a CA bundle and
+      # set UNRAID_CA_BUNDLE; only set UNRAID_VERIFY_SSL=false on a trusted LAN.
+      UNRAID_VERIFY_SSL: "${UNRAID_VERIFY_SSL:-true}"
+      # UNRAID_CA_BUNDLE: "/certs/unraid-ca.pem"
       # --- safety (read-only by default) ---
       UNRAID_MCP_ALLOW_MUTATIONS: "false"
       UNRAID_MCP_ALLOW_RAW_QUERY: "false"
       # --- optional hardening / misc ---
-      # UNRAID_MCP_ALLOWED_HOSTS: "tower.local:6750,10.0.0.5:6750"
+      UNRAID_MCP_ALLOWED_HOSTS: "${UNRAID_MCP_ALLOWED_HOSTS:-127.0.0.1:6750,localhost:6750}"
       # UNRAID_MCP_TLS_CERT: "/certs/cert.pem"
       # UNRAID_MCP_TLS_KEY: "/certs/key.pem"
       UNRAID_MCP_LOG_LEVEL: "INFO"

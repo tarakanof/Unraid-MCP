@@ -21,6 +21,9 @@ env/
 
 # uv
 # (keep uv.lock committed for reproducible installs)
+.uv-cache/
+.uv-tools/
+.trivy-cache/
 
 # Editor / OS
 .DS_Store

@@ -40,13 +40,15 @@ It runs the streamable-HTTP transport on port 6750.
 docker run --rm -p 6750:6750 \
   -e UNRAID_API_URL=https://tower.local/graphql \
   -e UNRAID_API_KEY=your-api-key \
-  -e UNRAID_VERIFY_SSL=false \
   -e UNRAID_MCP_BEARER_TOKEN=$(openssl rand -hex 32) \
   dtarakanov/unraid-mcp:latest
 ```
 
 Or grab [`docker-compose.yml`](docker-compose.yml), fill in the values, and
 `docker compose up -d`.
+
+For self-signed local Unraid certificates, prefer mounting a CA bundle and setting
+`UNRAID_CA_BUNDLE`; only set `UNRAID_VERIFY_SSL=false` on a trusted LAN.
 
 ### Local (for stdio clients)
 
@@ -89,7 +91,8 @@ Local stdio clients launch the server themselves:
 ```
 
 Claude Desktop uses the same `mcpServers` shape. For remote/HTTP, point the client at
-`http://<host>:6750/mcp` and send `Authorization: Bearer <token>`.
+`http://<host>:6750/mcp` and send `Authorization: Bearer <token>`. Put the HTTP
+transport behind TLS before exposing it beyond localhost or a trusted LAN.
 
 Writing an agent against this? [docs/llm-usage.md](docs/llm-usage.md) has the tool
 catalog, conventions, and a drop-in system-prompt snippet.

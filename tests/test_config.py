@@ -8,6 +8,7 @@ from unraid_mcp.config import load_settings
 from unraid_mcp.errors import UnraidConfigError
 
 REQUIRED = {"UNRAID_API_URL": "https://tower.local/graphql", "UNRAID_API_KEY": "supersecretkey123"}
+TOKEN = "0123456789abcdef0123456789abcdef"
 
 
 @pytest.fixture
@@ -100,6 +101,42 @@ def test_api_key_is_secret_and_not_in_repr(clean_env):
     assert s.api_key.get_secret_value() == "supersecretkey123"
     assert "supersecretkey123" not in repr(s)
     assert "supersecretkey123" not in str(s)
+
+
+def test_blank_bearer_token_is_treated_as_unset(clean_env):
+    for k, v in REQUIRED.items():
+        clean_env.setenv(k, v)
+    clean_env.setenv("UNRAID_MCP_BEARER_TOKEN", "")
+    assert load_settings(_env_file=None).bearer_token is None
+
+
+def test_valid_bearer_token_is_secret(clean_env):
+    for k, v in REQUIRED.items():
+        clean_env.setenv(k, v)
+    clean_env.setenv("UNRAID_MCP_BEARER_TOKEN", TOKEN)
+    s = load_settings(_env_file=None)
+    assert s.bearer_token is not None
+    assert s.bearer_token.get_secret_value() == TOKEN
+    assert TOKEN not in repr(s)
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "short-token",
+        "change-me-to-a-long-random-token",
+        " replace-me-with-a-32-character-token ",
+    ],
+)
+def test_insecure_bearer_token_rejected_without_leaking_value(clean_env, token):
+    for k, v in REQUIRED.items():
+        clean_env.setenv(k, v)
+    clean_env.setenv("UNRAID_MCP_BEARER_TOKEN", token)
+    with pytest.raises(UnraidConfigError) as exc:
+        load_settings(_env_file=None)
+    msg = str(exc.value)
+    assert "UNRAID_MCP_BEARER_TOKEN" in msg
+    assert token not in msg
 
 
 @pytest.mark.parametrize(

@@ -8,6 +8,8 @@ import pytest
 
 from unraid_mcp import cli
 
+TOKEN = "0123456789abcdef0123456789abcdef"
+
 ENV_VARS = (
     "UNRAID_API_URL",
     "UNRAID_API_KEY",
@@ -52,7 +54,7 @@ def test_main_http_transport_serves_with_auth(clean_env, monkeypatch):
     clean_env.setenv("UNRAID_API_URL", "https://tower.local/graphql")
     clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
     clean_env.setenv("UNRAID_MCP_TRANSPORT", "streamable-http")
-    clean_env.setenv("UNRAID_MCP_BEARER_TOKEN", "client-token-123456")
+    clean_env.setenv("UNRAID_MCP_BEARER_TOKEN", TOKEN)
     monkeypatch.setattr(cli, "build_server", lambda settings: MagicMock())
     served = {}
     monkeypatch.setattr(cli, "_serve_http", lambda mcp, settings: served.update(host=settings.host))
@@ -87,9 +89,9 @@ def test_serve_http_uses_provided_token(settings_factory, monkeypatch):
     captured = _capture_serve_http(monkeypatch)
     cli._serve_http(
         MagicMock(),
-        settings_factory(transport="streamable-http", bearer_token="my-fixed-token-123456"),
+        settings_factory(transport="streamable-http", bearer_token=TOKEN),
     )
-    assert captured["token"] == "my-fixed-token-123456"
+    assert captured["token"] == TOKEN
     assert "ssl_certfile" not in captured["uvicorn_kwargs"]  # plaintext when no TLS configured
 
 
@@ -102,7 +104,7 @@ def test_serve_http_enables_tls_when_cert_and_key_set(settings_factory, monkeypa
         MagicMock(),
         settings_factory(
             transport="streamable-http",
-            bearer_token="my-fixed-token-123456",
+            bearer_token=TOKEN,
             tls_cert=str(cert),
             tls_key=str(key),
         ),

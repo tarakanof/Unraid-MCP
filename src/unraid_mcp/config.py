@@ -16,6 +16,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from .errors import UnraidConfigError
 
 Transport = Literal["stdio", "streamable-http"]
+MIN_BEARER_TOKEN_LENGTH = 32
+
+_INSECURE_BEARER_TOKENS = {
+    "change-me",
+    "change-me-to-a-long-random-token",
+    "changeme",
+    "replace-me",
+    "token",
+    "your-token",
+    "your-bearer-token",
+    "your-unraid-mcp-bearer-token",
+}
 
 
 class Settings(BaseSettings):
@@ -73,6 +85,27 @@ class Settings(BaseSettings):
         # Append the GraphQL path if the user gave only a base URL.
         if parsed.path in ("", "/"):
             value = value.rstrip("/") + "/graphql"
+        return value
+
+    @field_validator("bearer_token", mode="before")
+    @classmethod
+    def _validate_bearer_token(cls, value: object) -> object:
+        if value is None:
+            return None
+        token = value.get_secret_value() if isinstance(value, SecretStr) else str(value)
+        if not token:
+            return None
+        if token.strip() != token:
+            raise ValueError("UNRAID_MCP_BEARER_TOKEN must not have leading/trailing whitespace")
+        if token.lower() in _INSECURE_BEARER_TOKENS:
+            raise ValueError(
+                "UNRAID_MCP_BEARER_TOKEN must be a long random value, not a placeholder"
+            )
+        if len(token) < MIN_BEARER_TOKEN_LENGTH:
+            raise ValueError(
+                "UNRAID_MCP_BEARER_TOKEN must be at least "
+                f"{MIN_BEARER_TOKEN_LENGTH} characters"
+            )
         return value
 
     @property

@@ -37,6 +37,8 @@ When you run `streamable-http`:
 - It binds `127.0.0.1` by default.
 - It requires a bearer token, compared in constant time. Requests with a missing or
   duplicated `Authorization` header are rejected.
+- Operator-supplied bearer tokens must be at least 32 characters and cannot be
+  common placeholders such as `change-me`.
 - **DNS-rebinding protection** (Host/Origin validation) is on automatically for
   localhost binds. For a non-localhost bind, set `UNRAID_MCP_ALLOWED_HOSTS` to keep
   it on — the server warns if you don't.

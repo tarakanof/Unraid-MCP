@@ -26,7 +26,7 @@ unraid-api apikey --create --name mcp --roles guest
 | `UNRAID_MCP_TRANSPORT` | `stdio` | `stdio` or `streamable-http`. |
 | `UNRAID_MCP_HOST` | `127.0.0.1` | Bind address for the HTTP transport. |
 | `UNRAID_MCP_PORT` | `6750` | Port for the HTTP transport. |
-| `UNRAID_MCP_BEARER_TOKEN` | – | Bearer token required from HTTP clients. Auto-generated and printed to stderr if unset (changes every restart, so set a fixed one). |
+| `UNRAID_MCP_BEARER_TOKEN` | – | Bearer token required from HTTP clients. If set, it must be at least 32 random characters and cannot be a placeholder. Auto-generated and printed to stderr if unset (changes every restart, so set a fixed one). |
 | `UNRAID_MCP_ALLOWED_HOSTS` | – | Comma-separated Host allow-list for DNS-rebinding protection (HTTP). Set this whenever you bind to a non-localhost address. |
 | `UNRAID_MCP_ALLOWED_ORIGINS` | – | Comma-separated Origin allow-list for DNS-rebinding protection (HTTP). |
 | `UNRAID_MCP_TLS_CERT` | – | TLS certificate (PEM) to serve the HTTP transport over HTTPS. Set with the key below. |
@@ -53,5 +53,5 @@ fails verification. Two options, best first:
 
 1. **Trust the cert** — point `UNRAID_CA_BUNDLE` at the Unraid certificate (PEM).
    Verification stays on.
-2. **Disable verification** — set `UNRAID_VERIFY_SSL=false`. The server logs a
-   warning when you do this.
+2. **Disable verification** — set `UNRAID_VERIFY_SSL=false` only on a trusted LAN.
+   The server logs a warning when you do this.
