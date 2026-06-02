@@ -10,7 +10,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from .. import queries
 from ..client import UnraidClient
 from ..config import Settings
-from ..formatting import shape_containers, shape_docker_networks
+from ..formatting import shape_containers, shape_docker_networks, shape_mutation_result
 from ._base import DESTRUCTIVE, MUTATING, READ_ONLY, guarded, require_confirm
 
 
@@ -39,14 +39,16 @@ async def do_start_container(
     client: UnraidClient, container_id: str, confirm: bool
 ) -> dict[str, Any]:
     require_confirm(confirm, f"start container '{container_id}'")
-    return await client.execute(queries.START_CONTAINER, {"id": container_id})
+    result = await client.execute(queries.START_CONTAINER, {"id": container_id})
+    return shape_mutation_result(result)
 
 
 async def do_stop_container(
     client: UnraidClient, container_id: str, confirm: bool
 ) -> dict[str, Any]:
     require_confirm(confirm, f"stop container '{container_id}'")
-    return await client.execute(queries.STOP_CONTAINER, {"id": container_id})
+    result = await client.execute(queries.STOP_CONTAINER, {"id": container_id})
+    return shape_mutation_result(result)
 
 
 async def do_restart_container(
@@ -54,7 +56,8 @@ async def do_restart_container(
 ) -> dict[str, Any]:
     require_confirm(confirm, f"restart container '{container_id}'")
     await client.execute(queries.STOP_CONTAINER, {"id": container_id})
-    return await client.execute(queries.START_CONTAINER, {"id": container_id})
+    result = await client.execute(queries.START_CONTAINER, {"id": container_id})
+    return shape_mutation_result(result)
 
 
 def register(mcp: FastMCP, settings: Settings) -> None:

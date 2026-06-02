@@ -107,6 +107,17 @@ A typical stdio client config:
   exactly what a `list_*` tool gave you. `get_docker_container` also accepts a plain name.
 - **Sizes.** `{"bytes": int|null, "human": str|null}`. Array/share sizes derive from
   KiB; physical disk sizes from bytes — both are normalized to this shape for you.
+- **Mutation results.** State-changing tools return a concise result, not the raw
+  GraphQL envelope. Three shapes:
+  - **Boolean actions** — parity (`start`/`pause`/`resume`/`cancel`) and VM
+    (`start`/`stop`/`pause`/`resume`/`reboot`/`force_stop`) return `{"ok": true}`
+    (or `{"ok": false}` if the server reported failure).
+  - **Array start/stop** — `start_array`/`stop_array` return `{"state": "...", ...}`,
+    where `start_array` also includes `capacity` normalized to `{bytes, human}`
+    (just like `get_array_status`).
+  - **Object-returning ops** — `start_docker_container`, `archive_notification`,
+    `archive_all_notifications`, `delete_notification`, etc. return the flattened
+    payload (e.g. the affected container, or `{unread, archive}` counts).
 - **Disk health words** (on array disks): `healthy`, `warning`, `critical`, `failed`,
   `missing`, `new`, `unknown`.
 - **Enums you'll see:** array `state` `STARTED|STOPPED|...`; container `state`

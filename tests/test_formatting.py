@@ -9,6 +9,7 @@ from unraid_mcp.formatting import (
     human_size,
     kib_to_bytes,
     shape_array_status,
+    shape_mutation_result,
     shape_physical_disk,
 )
 
@@ -112,6 +113,80 @@ def test_shape_physical_disk_size_is_bytes():
     assert out["spinning"] is True
     assert out["size"]["bytes"] == 2_000_000_000_000
     assert out["size"]["human"].endswith("TiB")
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        # VM and parity mutations resolve to a bare Boolean payload.
+        ({"vm": {"start": True}}, {"ok": True}),
+        ({"vm": {"forceStop": False}}, {"ok": False}),
+        ({"parityCheck": {"start": True}}, {"ok": True}),
+        ({"parityCheck": {"pause": True}}, {"ok": True}),
+        # Empty / missing envelopes degrade to a success flag, not a bare {}.
+        ({"docker": {}}, {"ok": True}),
+        (None, {"ok": True}),
+        ({}, {"ok": True}),
+    ],
+)
+def test_shape_mutation_result_flattens_to_ok(raw, expected):
+    assert shape_mutation_result(raw) == expected
+
+
+def test_shape_mutation_result_keeps_object_payload():
+    # Docker start/stop and notification archive/unread return an object — the
+    # GraphQL wrapper keys are peeled but the payload fields are preserved.
+    raw = {"docker": {"start": {"id": "1:a", "names": ["/plex"], "state": "RUNNING"}}}
+    assert shape_mutation_result(raw) == {
+        "id": "1:a",
+        "names": ["/plex"],
+        "state": "RUNNING",
+    }
+    note = {"archiveNotification": {"id": "n1", "title": "Disk hot", "importance": "ALERT"}}
+    assert shape_mutation_result(note) == {
+        "id": "n1",
+        "title": "Disk hot",
+        "importance": "ALERT",
+    }
+
+
+def test_shape_mutation_result_normalizes_array_capacity():
+    # start_array returns capacity in KiB; it must be normalised to {bytes, human}
+    # so a mutation result reads identically to get_array_status.
+    raw = {
+        "array": {
+            "setState": {
+                "state": "STARTED",
+                "capacity": {"kilobytes": {"total": "1048576", "used": "524288", "free": "524288"}},
+            }
+        }
+    }
+    out = shape_mutation_result(raw)
+    assert out["state"] == "STARTED"
+    assert out["capacity"]["total"] == {"bytes": 1048576 * 1024, "human": "1.0 GiB"}
+    assert out["capacity"]["free"]["bytes"] == 524288 * 1024
+
+
+def test_shape_mutation_result_array_stop_state_only():
+    # stop_array returns just {state}; peeling stops at the scalar value, so the
+    # single state field survives unwrapped (and there's no capacity to normalize).
+    assert shape_mutation_result({"array": {"setState": {"state": "STOPPED"}}}) == {
+        "state": "STOPPED"
+    }
+
+
+def test_shape_mutation_result_keeps_multifield_overview():
+    # archive_all / delete_notification return {unread, archive} counts — a
+    # two-key dict, so peeling stops there and both buckets survive.
+    raw = {
+        "archiveAll": {
+            "unread": {"info": 0, "warning": 0, "alert": 0, "total": 0},
+            "archive": {"info": 1, "warning": 2, "alert": 0, "total": 3},
+        }
+    }
+    out = shape_mutation_result(raw)
+    assert out["unread"]["total"] == 0
+    assert out["archive"]["total"] == 3
 
 
 @pytest.mark.parametrize(

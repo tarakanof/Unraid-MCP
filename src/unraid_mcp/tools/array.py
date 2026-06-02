@@ -9,7 +9,12 @@ from mcp.server.fastmcp import Context, FastMCP
 from .. import queries
 from ..client import UnraidClient
 from ..config import Settings
-from ..formatting import shape_array_status, shape_physical_disk, shape_physical_disks
+from ..formatting import (
+    shape_array_status,
+    shape_mutation_result,
+    shape_physical_disk,
+    shape_physical_disks,
+)
 from ._base import DESTRUCTIVE, MUTATING, READ_ONLY, guarded, require_confirm
 
 # ── Read logic ───────────────────────────────────────────────────────────────
@@ -42,12 +47,12 @@ async def fetch_disk(client: UnraidClient, disk_id: str) -> dict[str, Any] | Non
 
 async def do_start_array(client: UnraidClient, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, "start the Unraid array")
-    return await client.execute(queries.START_ARRAY)
+    return shape_mutation_result(await client.execute(queries.START_ARRAY))
 
 
 async def do_stop_array(client: UnraidClient, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, "stop the Unraid array (this unmounts all disks)")
-    return await client.execute(queries.STOP_ARRAY)
+    return shape_mutation_result(await client.execute(queries.STOP_ARRAY))
 
 
 async def do_start_parity(client: UnraidClient, correct: bool, confirm: bool) -> dict[str, Any]:
@@ -57,22 +62,22 @@ async def do_start_parity(client: UnraidClient, correct: bool, confirm: bool) ->
         else "start a parity check"
     )
     require_confirm(confirm, label)
-    return await client.execute(queries.START_PARITY, {"correct": correct})
+    return shape_mutation_result(await client.execute(queries.START_PARITY, {"correct": correct}))
 
 
 async def do_pause_parity(client: UnraidClient, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, "pause the parity check")
-    return await client.execute(queries.PAUSE_PARITY)
+    return shape_mutation_result(await client.execute(queries.PAUSE_PARITY))
 
 
 async def do_resume_parity(client: UnraidClient, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, "resume the parity check")
-    return await client.execute(queries.RESUME_PARITY)
+    return shape_mutation_result(await client.execute(queries.RESUME_PARITY))
 
 
 async def do_cancel_parity(client: UnraidClient, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, "cancel the parity check")
-    return await client.execute(queries.CANCEL_PARITY)
+    return shape_mutation_result(await client.execute(queries.CANCEL_PARITY))
 
 
 def register(mcp: FastMCP, settings: Settings) -> None:
