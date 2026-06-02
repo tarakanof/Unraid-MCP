@@ -35,7 +35,10 @@ async def fetch_docker_networks(client: UnraidClient) -> list[dict[str, Any]]:
     return shape_docker_networks(await client.execute(queries.DOCKER_NETWORKS))
 
 
-async def do_start_container(client: UnraidClient, container_id: str) -> dict[str, Any]:
+async def do_start_container(
+    client: UnraidClient, container_id: str, confirm: bool
+) -> dict[str, Any]:
+    require_confirm(confirm, f"start container '{container_id}'")
     return await client.execute(queries.START_CONTAINER, {"id": container_id})
 
 
@@ -73,9 +76,12 @@ def register(mcp: FastMCP, settings: Settings) -> None:
 
 def register_mutations(mcp: FastMCP, settings: Settings) -> None:
     @mcp.tool(annotations=MUTATING)
-    async def start_docker_container(ctx: Context, container_id: str) -> dict[str, Any]:
-        """Start a Docker container by its id (get the id from list_docker_containers)."""
-        return await guarded(ctx, do_start_container, container_id)
+    async def start_docker_container(
+        ctx: Context, container_id: str, confirm: bool = False
+    ) -> dict[str, Any]:
+        """Start a Docker container by its id (get the id from list_docker_containers).
+        Requires confirm=true."""
+        return await guarded(ctx, do_start_container, container_id, confirm)
 
     @mcp.tool(annotations=DESTRUCTIVE)
     async def stop_docker_container(

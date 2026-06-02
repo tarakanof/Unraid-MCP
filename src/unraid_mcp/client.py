@@ -92,7 +92,11 @@ class UnraidClient:
         errors = payload.get("errors")
         data = payload.get("data")
         if errors:
-            messages = "; ".join(str(e.get("message", "unknown error")) for e in errors)
+            # Defence in depth: never echo the API key even if a misconfigured
+            # upstream reflected it into an error message.
+            messages = self._redact(
+                "; ".join(str(e.get("message", "unknown error")) for e in errors)
+            )
             if data is None:
                 raise UnraidGraphQLError(f"GraphQL error: {messages}", errors=errors)
             # Partial success — Unraid returned some data plus non-fatal errors
@@ -101,3 +105,8 @@ class UnraidClient:
             log.warning("GraphQL returned partial errors: %s", messages)
 
         return data or {}
+
+    def _redact(self, text: str) -> str:
+        if self._key and self._key in text:
+            return text.replace(self._key, "***REDACTED***")
+        return text

@@ -27,9 +27,8 @@ query GetSystemInfo {
     cpu { manufacturer brand cores threads processors socket }
     memory { layout { type clockSpeed manufacturer } }
     baseboard { manufacturer model version }
-    system { manufacturer model version serial }
+    system { manufacturer model version }
     versions { core { unraid api kernel } }
-    machineId
     time
   }
 }

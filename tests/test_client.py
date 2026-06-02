@@ -111,3 +111,20 @@ async def test_non_json_response_raises_server_error():
             client = await _client(http)
             with pytest.raises(UnraidServerError):
                 await client.execute("query { x }")
+
+
+async def test_graphql_error_message_redacts_api_key():
+    # Defence in depth: even if an upstream reflected the key into an error,
+    # it must not appear in the raised exception.
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(
+                200, json={"errors": [{"message": f"rejected key {KEY}"}], "data": None}
+            )
+        )
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            with pytest.raises(UnraidGraphQLError) as exc:
+                await client.execute("query { x }")
+        assert KEY not in str(exc.value)
+        assert "***REDACTED***" in str(exc.value)

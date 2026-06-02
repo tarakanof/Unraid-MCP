@@ -32,16 +32,35 @@ def _serve_http(mcp, settings: Settings) -> None:
     # shown exactly once above so the operator can configure their client).
     configure_logging(settings.log_level, api_key, secrets=[token])
 
+    ssl_kwargs: dict[str, str] = {}
+    if settings.tls_enabled:
+        ssl_kwargs = {"ssl_certfile": settings.tls_cert, "ssl_keyfile": settings.tls_key}
+    elif not settings.binds_localhost:
+        log.warning(
+            "Serving PLAINTEXT HTTP on a non-localhost address (%s): the bearer token "
+            "travels unencrypted. Set UNRAID_MCP_TLS_CERT + UNRAID_MCP_TLS_KEY, or put "
+            "this behind a TLS-terminating reverse proxy. Do not expose it directly.",
+            settings.host,
+        )
+
     if not settings.binds_localhost and not settings.allowed_hosts:
         log.warning(
             "Binding %s without UNRAID_MCP_ALLOWED_HOSTS: DNS-rebinding protection is "
             "off and only the bearer token guards access. Set UNRAID_MCP_ALLOWED_HOSTS "
-            "and front this with a TLS reverse proxy for remote use.",
+            "for remote use.",
             settings.host,
         )
+
+    scheme = "https" if settings.tls_enabled else "http"
     app = StaticBearerAuthMiddleware(mcp.streamable_http_app(), token)
-    log.info("Serving streamable-HTTP on http://%s:%s/mcp", settings.host, settings.port)
-    uvicorn.run(app, host=settings.host, port=settings.port, log_level=settings.log_level.lower())
+    log.info("Serving streamable-HTTP on %s://%s:%s/mcp", scheme, settings.host, settings.port)
+    uvicorn.run(
+        app,
+        host=settings.host,
+        port=settings.port,
+        log_level=settings.log_level.lower(),
+        **ssl_kwargs,
+    )
 
 
 def main() -> int:

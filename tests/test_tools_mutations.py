@@ -63,16 +63,41 @@ async def test_correcting_parity_check_requires_confirm(mocked_client):
         assert route.call_count == 0
 
 
-async def test_non_correcting_parity_check_needs_no_confirm(mocked_client):
+async def test_parity_check_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await array.do_start_parity(client, correct=False, confirm=False)
+        assert route.call_count == 0
+
+
+async def test_parity_check_with_confirm_sends(mocked_client):
     async with mocked_client(
         httpx.Response(200, json={"data": {"parityCheck": {"start": True}}})
-    ) as (
-        client,
-        route,
-    ):
-        await array.do_start_parity(client, correct=False)
+    ) as (client, route):
+        await array.do_start_parity(client, correct=False, confirm=True)
         assert route.call_count == 1
         assert json.loads(route.calls.last.request.content)["variables"] == {"correct": False}
+
+
+async def test_start_array_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await array.do_start_array(client, confirm=False)
+        assert route.call_count == 0
+
+
+async def test_start_vm_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await vm.do_start_vm(client, "uuid-1", confirm=False)
+        assert route.call_count == 0
+
+
+async def test_archive_notification_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await notifications.do_archive_notification(client, "n1", confirm=False)
+        assert route.call_count == 0
 
 
 async def test_raw_query_gated(settings_factory):
@@ -100,7 +125,7 @@ async def test_start_container_sends_id_variable(mocked_client):
     async with mocked_client(
         httpx.Response(200, json={"data": {"docker": {"start": {"id": "1:a"}}}})
     ) as (client, route):
-        await docker.do_start_container(client, "1:abc")
+        await docker.do_start_container(client, "1:abc", confirm=True)
         body = json.loads(route.calls.last.request.content)
         assert body["query"] == queries.START_CONTAINER
         assert body["variables"] == {"id": "1:abc"}

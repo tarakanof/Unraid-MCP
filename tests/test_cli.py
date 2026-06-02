@@ -21,6 +21,10 @@ ENV_VARS = (
     "UNRAID_MCP_ALLOW_RAW_QUERY",
     "UNRAID_MCP_TIMEOUT",
     "UNRAID_MCP_LOG_LEVEL",
+    "UNRAID_MCP_ALLOWED_HOSTS",
+    "UNRAID_MCP_ALLOWED_ORIGINS",
+    "UNRAID_MCP_TLS_CERT",
+    "UNRAID_MCP_TLS_KEY",
 )
 
 
@@ -65,8 +69,11 @@ def _capture_serve_http(monkeypatch):
         captured["token"] = token
         return app
 
+    def fake_run(*args, **kwargs):
+        captured["uvicorn_kwargs"] = kwargs
+
     monkeypatch.setattr(cli, "StaticBearerAuthMiddleware", rec)
-    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+    monkeypatch.setattr(uvicorn, "run", fake_run)
     return captured
 
 
@@ -83,3 +90,22 @@ def test_serve_http_uses_provided_token(settings_factory, monkeypatch):
         settings_factory(transport="streamable-http", bearer_token="my-fixed-token-123456"),
     )
     assert captured["token"] == "my-fixed-token-123456"
+    assert "ssl_certfile" not in captured["uvicorn_kwargs"]  # plaintext when no TLS configured
+
+
+def test_serve_http_enables_tls_when_cert_and_key_set(settings_factory, monkeypatch, tmp_path):
+    cert, key = tmp_path / "cert.pem", tmp_path / "key.pem"
+    cert.write_text("x")
+    key.write_text("y")
+    captured = _capture_serve_http(monkeypatch)
+    cli._serve_http(
+        MagicMock(),
+        settings_factory(
+            transport="streamable-http",
+            bearer_token="my-fixed-token-123456",
+            tls_cert=str(cert),
+            tls_key=str(key),
+        ),
+    )
+    assert captured["uvicorn_kwargs"]["ssl_certfile"] == str(cert)
+    assert captured["uvicorn_kwargs"]["ssl_keyfile"] == str(key)

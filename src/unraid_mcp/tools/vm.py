@@ -17,7 +17,8 @@ async def fetch_vms(client: UnraidClient) -> list[dict[str, Any]]:
     return shape_vms(await client.execute(queries.LIST_VMS))
 
 
-async def do_start_vm(client: UnraidClient, vm_id: str) -> dict[str, Any]:
+async def do_start_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
+    require_confirm(confirm, f"start VM '{vm_id}'")
     return await client.execute(queries.VM_START, {"id": vm_id})
 
 
@@ -26,11 +27,13 @@ async def do_stop_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[st
     return await client.execute(queries.VM_STOP, {"id": vm_id})
 
 
-async def do_pause_vm(client: UnraidClient, vm_id: str) -> dict[str, Any]:
+async def do_pause_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
+    require_confirm(confirm, f"pause VM '{vm_id}'")
     return await client.execute(queries.VM_PAUSE, {"id": vm_id})
 
 
-async def do_resume_vm(client: UnraidClient, vm_id: str) -> dict[str, Any]:
+async def do_resume_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
+    require_confirm(confirm, f"resume VM '{vm_id}'")
     return await client.execute(queries.VM_RESUME, {"id": vm_id})
 
 
@@ -53,9 +56,9 @@ def register(mcp: FastMCP, settings: Settings) -> None:
 
 def register_mutations(mcp: FastMCP, settings: Settings) -> None:
     @mcp.tool(annotations=MUTATING)
-    async def start_vm(ctx: Context, vm_id: str) -> dict[str, Any]:
-        """Start a VM by its id (from list_vms)."""
-        return await guarded(ctx, do_start_vm, vm_id)
+    async def start_vm(ctx: Context, vm_id: str, confirm: bool = False) -> dict[str, Any]:
+        """Start a VM by its id (from list_vms). Requires confirm=true."""
+        return await guarded(ctx, do_start_vm, vm_id, confirm)
 
     @mcp.tool(annotations=DESTRUCTIVE)
     async def stop_vm(ctx: Context, vm_id: str, confirm: bool = False) -> dict[str, Any]:
@@ -63,14 +66,14 @@ def register_mutations(mcp: FastMCP, settings: Settings) -> None:
         return await guarded(ctx, do_stop_vm, vm_id, confirm)
 
     @mcp.tool(annotations=MUTATING)
-    async def pause_vm(ctx: Context, vm_id: str) -> dict[str, Any]:
-        """Pause a running VM by id."""
-        return await guarded(ctx, do_pause_vm, vm_id)
+    async def pause_vm(ctx: Context, vm_id: str, confirm: bool = False) -> dict[str, Any]:
+        """Pause a running VM by id. Requires confirm=true."""
+        return await guarded(ctx, do_pause_vm, vm_id, confirm)
 
     @mcp.tool(annotations=MUTATING)
-    async def resume_vm(ctx: Context, vm_id: str) -> dict[str, Any]:
-        """Resume a paused VM by id."""
-        return await guarded(ctx, do_resume_vm, vm_id)
+    async def resume_vm(ctx: Context, vm_id: str, confirm: bool = False) -> dict[str, Any]:
+        """Resume a paused VM by id. Requires confirm=true."""
+        return await guarded(ctx, do_resume_vm, vm_id, confirm)
 
     @mcp.tool(annotations=DESTRUCTIVE)
     async def reboot_vm(ctx: Context, vm_id: str, confirm: bool = False) -> dict[str, Any]:

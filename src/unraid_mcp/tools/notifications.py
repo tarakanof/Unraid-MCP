@@ -30,7 +30,10 @@ async def fetch_notifications(
     return shape_notifications(await client.execute(queries.LIST_NOTIFICATIONS, {"filter": filt}))
 
 
-async def do_archive_notification(client: UnraidClient, notification_id: str) -> dict[str, Any]:
+async def do_archive_notification(
+    client: UnraidClient, notification_id: str, confirm: bool
+) -> dict[str, Any]:
+    require_confirm(confirm, f"archive notification '{notification_id}'")
     return await client.execute(queries.ARCHIVE_NOTIFICATION, {"id": notification_id})
 
 
@@ -41,7 +44,10 @@ async def do_archive_all(
     return await client.execute(queries.ARCHIVE_ALL_NOTIFICATIONS, {"importance": importance})
 
 
-async def do_unread_notification(client: UnraidClient, notification_id: str) -> dict[str, Any]:
+async def do_unread_notification(
+    client: UnraidClient, notification_id: str, confirm: bool
+) -> dict[str, Any]:
+    require_confirm(confirm, f"mark notification '{notification_id}' unread")
     return await client.execute(queries.UNREAD_NOTIFICATION, {"id": notification_id})
 
 
@@ -75,9 +81,11 @@ def register(mcp: FastMCP, settings: Settings) -> None:
 
 def register_mutations(mcp: FastMCP, settings: Settings) -> None:
     @mcp.tool(annotations=MUTATING)
-    async def archive_notification(ctx: Context, notification_id: str) -> dict[str, Any]:
-        """Archive (clear) a single unread notification by id."""
-        return await guarded(ctx, do_archive_notification, notification_id)
+    async def archive_notification(
+        ctx: Context, notification_id: str, confirm: bool = False
+    ) -> dict[str, Any]:
+        """Archive (clear) a single unread notification by id. Requires confirm=true."""
+        return await guarded(ctx, do_archive_notification, notification_id, confirm)
 
     @mcp.tool(annotations=DESTRUCTIVE)
     async def archive_all_notifications(
@@ -88,9 +96,11 @@ def register_mutations(mcp: FastMCP, settings: Settings) -> None:
         return await guarded(ctx, do_archive_all, importance, confirm)
 
     @mcp.tool(annotations=MUTATING)
-    async def mark_notification_unread(ctx: Context, notification_id: str) -> dict[str, Any]:
-        """Mark an archived notification unread again by id."""
-        return await guarded(ctx, do_unread_notification, notification_id)
+    async def mark_notification_unread(
+        ctx: Context, notification_id: str, confirm: bool = False
+    ) -> dict[str, Any]:
+        """Mark an archived notification unread again by id. Requires confirm=true."""
+        return await guarded(ctx, do_unread_notification, notification_id, confirm)
 
     @mcp.tool(annotations=DESTRUCTIVE)
     async def delete_notification(

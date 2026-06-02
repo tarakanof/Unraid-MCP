@@ -25,7 +25,7 @@ It is **read-only by default** — monitoring tools are always available, while 
 | `whoami` | The authenticated API user and its roles |
 | `get_health_summary` | One-call triage roll-up: array, unhealthy disks, parity, UPS, alerts |
 
-**Mutating tools** (only registered when `UNRAID_MCP_ALLOW_MUTATIONS=true`; the **bold** ones additionally require `confirm=true`):
+**Mutating tools** (only registered when `UNRAID_MCP_ALLOW_MUTATIONS=true`). **Every mutating tool requires `confirm=true`** and refuses — before making any network call — without it. The **bold** ones are additionally flagged with a destructive hint for clients:
 
 - Array: `start_array`, **`stop_array`**
 - Parity: `start_parity_check`, `pause_parity_check`, `resume_parity_check`, `cancel_parity_check`
@@ -73,7 +73,9 @@ Copy `.env.example` to `.env` and fill it in (or export the variables in the env
 | `UNRAID_MCP_BEARER_TOKEN` | – | Bearer token required from HTTP clients (auto-generated + printed if unset) |
 | `UNRAID_MCP_ALLOWED_HOSTS` | – | Comma-separated Host allow-list for DNS-rebinding protection (HTTP). Set this for non-localhost binds |
 | `UNRAID_MCP_ALLOWED_ORIGINS` | – | Comma-separated Origin allow-list for DNS-rebinding protection (HTTP) |
-| `UNRAID_MCP_ALLOW_MUTATIONS` | `false` | Register mutating tools |
+| `UNRAID_MCP_TLS_CERT` | – | TLS certificate (PEM) to serve the HTTP transport over HTTPS. Set with the key below |
+| `UNRAID_MCP_TLS_KEY` | – | TLS private key (PEM). Both cert + key enable HTTPS directly |
+| `UNRAID_MCP_ALLOW_MUTATIONS` | `false` | Register mutating tools (each still requires `confirm=true`) |
 | `UNRAID_MCP_ALLOW_RAW_QUERY` | `false` | Register the read-only raw GraphQL tool |
 | `UNRAID_MCP_TIMEOUT` | `30` | HTTP timeout (seconds) |
 | `UNRAID_MCP_LOG_LEVEL` | `INFO` | Log level (to stderr) |
@@ -117,18 +119,18 @@ UNRAID_MCP_TRANSPORT=streamable-http UNRAID_MCP_BEARER_TOKEN=$(openssl rand -hex
 
 ## Security model
 
-- **Read-only by default.** Mutations require `UNRAID_MCP_ALLOW_MUTATIONS=true`; destructive ones also require `confirm=true` and refuse *before* making any network call.
+- **Read-only by default.** Mutations require `UNRAID_MCP_ALLOW_MUTATIONS=true`, and then **every** mutating tool requires an explicit `confirm=true` and refuses *before* making any network call.
 - **Least privilege.** Use a scoped Unraid API key; a read/guest key suffices for monitoring.
 - **Secrets stay secret.** The API key is held as a `SecretStr`, never logged (a redaction filter scrubs it as defence in depth), and never appears in error messages.
 - **stdio is clean.** All logs go to stderr; stdout carries only the JSON-RPC protocol.
-- **HTTP is gated.** The HTTP transport binds `127.0.0.1` by default and requires a bearer token (constant-time compared; duplicate/absent `Authorization` headers are rejected). DNS-rebinding protection (Host/Origin validation) is enabled automatically for localhost binds; for a non-localhost bind set `UNRAID_MCP_ALLOWED_HOSTS` to keep it on. For exposure beyond localhost, run behind a reverse proxy that terminates TLS. Don't expose it to untrusted networks.
+- **HTTP is gated.** The HTTP transport binds `127.0.0.1` by default and requires a bearer token (constant-time compared; duplicate/absent `Authorization` headers are rejected). DNS-rebinding protection (Host/Origin validation) is enabled automatically for localhost binds; for a non-localhost bind set `UNRAID_MCP_ALLOWED_HOSTS` to keep it on. **TLS:** set `UNRAID_MCP_TLS_CERT` + `UNRAID_MCP_TLS_KEY` to serve HTTPS directly, or terminate TLS at a reverse proxy — the server warns loudly if it serves plaintext on a non-localhost address. Don't expose it to untrusted networks.
 - **No arbitrary execution.** Only typed GraphQL operations are issued; the optional raw-query tool parses the document and allows only `query` operations (mutations/subscriptions are rejected — including ones hidden behind comments or leading whitespace).
 
 ## Development
 
 ```bash
 uv sync --extra dev
-uv run pytest          # 139 tests, all mocked — no live server needed
+uv run pytest          # 146 tests, all mocked — no live server needed
 uv run ruff check .
 uv run ruff format .
 ```

@@ -40,7 +40,8 @@ async def fetch_disk(client: UnraidClient, disk_id: str) -> dict[str, Any] | Non
 # ── Mutation logic ─────────────────────────────────────────────────────────────
 
 
-async def do_start_array(client: UnraidClient) -> dict[str, Any]:
+async def do_start_array(client: UnraidClient, confirm: bool) -> dict[str, Any]:
+    require_confirm(confirm, "start the Unraid array")
     return await client.execute(queries.START_ARRAY)
 
 
@@ -49,23 +50,28 @@ async def do_stop_array(client: UnraidClient, confirm: bool) -> dict[str, Any]:
     return await client.execute(queries.STOP_ARRAY)
 
 
-async def do_start_parity(
-    client: UnraidClient, correct: bool, confirm: bool = False
-) -> dict[str, Any]:
-    if correct:
-        require_confirm(confirm, "start a CORRECTING parity check (writes corrections to parity)")
+async def do_start_parity(client: UnraidClient, correct: bool, confirm: bool) -> dict[str, Any]:
+    label = (
+        "start a CORRECTING parity check (writes corrections to parity)"
+        if correct
+        else "start a parity check"
+    )
+    require_confirm(confirm, label)
     return await client.execute(queries.START_PARITY, {"correct": correct})
 
 
-async def do_pause_parity(client: UnraidClient) -> dict[str, Any]:
+async def do_pause_parity(client: UnraidClient, confirm: bool) -> dict[str, Any]:
+    require_confirm(confirm, "pause the parity check")
     return await client.execute(queries.PAUSE_PARITY)
 
 
-async def do_resume_parity(client: UnraidClient) -> dict[str, Any]:
+async def do_resume_parity(client: UnraidClient, confirm: bool) -> dict[str, Any]:
+    require_confirm(confirm, "resume the parity check")
     return await client.execute(queries.RESUME_PARITY)
 
 
-async def do_cancel_parity(client: UnraidClient) -> dict[str, Any]:
+async def do_cancel_parity(client: UnraidClient, confirm: bool) -> dict[str, Any]:
+    require_confirm(confirm, "cancel the parity check")
     return await client.execute(queries.CANCEL_PARITY)
 
 
@@ -101,9 +107,9 @@ def register(mcp: FastMCP, settings: Settings) -> None:
 
 def register_mutations(mcp: FastMCP, settings: Settings) -> None:
     @mcp.tool(annotations=MUTATING)
-    async def start_array(ctx: Context) -> dict[str, Any]:
-        """Start the Unraid array (brings storage online)."""
-        return await guarded(ctx, do_start_array)
+    async def start_array(ctx: Context, confirm: bool = False) -> dict[str, Any]:
+        """Start the Unraid array (brings storage online). Requires confirm=true."""
+        return await guarded(ctx, do_start_array, confirm)
 
     @mcp.tool(annotations=DESTRUCTIVE)
     async def stop_array(ctx: Context, confirm: bool = False) -> dict[str, Any]:
@@ -116,21 +122,21 @@ def register_mutations(mcp: FastMCP, settings: Settings) -> None:
         ctx: Context, correct: bool = False, confirm: bool = False
     ) -> dict[str, Any]:
         """Start a parity check. correct=false (default) only reports errors; correct=true
-        writes corrections to parity — use with care, never on a degraded array, and it
-        requires confirm=true."""
+        writes corrections to parity — use with care, never on a degraded array.
+        Requires confirm=true."""
         return await guarded(ctx, do_start_parity, correct, confirm)
 
     @mcp.tool(annotations=MUTATING)
-    async def pause_parity_check(ctx: Context) -> dict[str, Any]:
-        """Pause the running parity check."""
-        return await guarded(ctx, do_pause_parity)
+    async def pause_parity_check(ctx: Context, confirm: bool = False) -> dict[str, Any]:
+        """Pause the running parity check. Requires confirm=true."""
+        return await guarded(ctx, do_pause_parity, confirm)
 
     @mcp.tool(annotations=MUTATING)
-    async def resume_parity_check(ctx: Context) -> dict[str, Any]:
-        """Resume a paused parity check."""
-        return await guarded(ctx, do_resume_parity)
+    async def resume_parity_check(ctx: Context, confirm: bool = False) -> dict[str, Any]:
+        """Resume a paused parity check. Requires confirm=true."""
+        return await guarded(ctx, do_resume_parity, confirm)
 
     @mcp.tool(annotations=MUTATING)
-    async def cancel_parity_check(ctx: Context) -> dict[str, Any]:
-        """Cancel the running parity check."""
-        return await guarded(ctx, do_cancel_parity)
+    async def cancel_parity_check(ctx: Context, confirm: bool = False) -> dict[str, Any]:
+        """Cancel the running parity check. Requires confirm=true."""
+        return await guarded(ctx, do_cancel_parity, confirm)

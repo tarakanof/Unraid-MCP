@@ -25,9 +25,23 @@ def clean_env(monkeypatch):
         "UNRAID_MCP_ALLOW_RAW_QUERY",
         "UNRAID_MCP_TIMEOUT",
         "UNRAID_MCP_LOG_LEVEL",
+        "UNRAID_MCP_ALLOWED_HOSTS",
+        "UNRAID_MCP_ALLOWED_ORIGINS",
+        "UNRAID_MCP_TLS_CERT",
+        "UNRAID_MCP_TLS_KEY",
     ):
         monkeypatch.delenv(var, raising=False)
     return monkeypatch
+
+
+def test_tls_enabled_requires_both_cert_and_key(clean_env):
+    for k, v in REQUIRED.items():
+        clean_env.setenv(k, v)
+    assert load_settings(_env_file=None).tls_enabled is False
+    clean_env.setenv("UNRAID_MCP_TLS_CERT", "/etc/ssl/cert.pem")
+    assert load_settings(_env_file=None).tls_enabled is False  # key still missing
+    clean_env.setenv("UNRAID_MCP_TLS_KEY", "/etc/ssl/key.pem")
+    assert load_settings(_env_file=None).tls_enabled is True
 
 
 def test_missing_required_raises_config_error(clean_env):

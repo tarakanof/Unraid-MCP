@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # the HTTP transport. Required when binding to a non-localhost address.
     allowed_hosts: str | None = Field(default=None, validation_alias="UNRAID_MCP_ALLOWED_HOSTS")
     allowed_origins: str | None = Field(default=None, validation_alias="UNRAID_MCP_ALLOWED_ORIGINS")
+    # Serve the HTTP transport over TLS directly. Both must be set to enable it;
+    # otherwise terminate TLS at a reverse proxy in front of this server.
+    tls_cert: str | None = Field(default=None, validation_alias="UNRAID_MCP_TLS_CERT")
+    tls_key: str | None = Field(default=None, validation_alias="UNRAID_MCP_TLS_KEY")
 
     # ── Safety switches ────────────────────────────────────────────────
     allow_mutations: bool = Field(default=False, validation_alias="UNRAID_MCP_ALLOW_MUTATIONS")
@@ -83,6 +87,10 @@ class Settings(BaseSettings):
     @property
     def binds_localhost(self) -> bool:
         return self.host in ("127.0.0.1", "localhost", "::1")
+
+    @property
+    def tls_enabled(self) -> bool:
+        return bool(self.tls_cert and self.tls_key)
 
     def http_allowed_hosts(self) -> list[str]:
         """Host header allow-list for DNS-rebinding protection (HTTP transport)."""
