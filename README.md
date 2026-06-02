@@ -64,6 +64,17 @@ uv run unraid-mcp        # stdio transport (the default)
 
 (`python -m unraid_mcp` also works once the venv is activated.)
 
+### On Unraid (bundled template)
+
+To run it *on* Unraid, talking back to the same box, use the ready-made
+Community-Apps template at [`deploy/unraid/unraid-mcp.xml`](deploy/unraid/unraid-mcp.xml).
+Install it as a **user template**: copy that file into
+`/boot/config/plugins/dockerMan/templates-user/` on the flash drive, then
+**Docker → Add Container** and pick **unraid-mcp** from the *Template* dropdown —
+every field is pre-filled. The full walkthrough — API key, bearer token, the TLS
+setting, and a few ways to get the file onto the box — is in
+[deploy/unraid/](deploy/unraid/).
+
 ## Configure
 
 Two variables are required:
@@ -99,12 +110,6 @@ transport behind TLS before exposing it beyond localhost or a trusted LAN.
 
 Writing an agent against this? [docs/llm-usage.md](docs/llm-usage.md) has the tool
 catalog, conventions, and a drop-in system-prompt snippet.
-
-## Running it on Unraid
-
-You can run the container *on* Unraid and have it talk back to the same box. There's a
-ready-made template and step-by-step instructions in [deploy/unraid/](deploy/unraid/) —
-add the XML as a user template, fill in the URL/key/token, and start it on port 6750.
 
 ## Develop
 
