@@ -89,14 +89,14 @@ class UnraidClient:
                 f"from {self._host}."
             ) from exc
 
-        errors = payload.get("errors")
         data = payload.get("data")
-        if errors:
+        raw_errors = payload.get("errors")
+        if raw_errors:
             # Defence in depth: never echo the API key even if a misconfigured
-            # upstream reflected it into an error message.
-            messages = self._redact(
-                "; ".join(str(e.get("message", "unknown error")) for e in errors)
-            )
+            # upstream reflected it into an error. Redact the whole errors
+            # structure so the exception's .errors attribute is also safe.
+            errors = self._redact_obj(raw_errors)
+            messages = "; ".join(str(e.get("message", "unknown error")) for e in errors)
             if data is None:
                 raise UnraidGraphQLError(f"GraphQL error: {messages}", errors=errors)
             # Partial success — Unraid returned some data plus non-fatal errors
@@ -110,3 +110,13 @@ class UnraidClient:
         if self._key and self._key in text:
             return text.replace(self._key, "***REDACTED***")
         return text
+
+    def _redact_obj(self, obj: Any) -> Any:
+        """Recursively redact the API key from any string within a JSON value."""
+        if isinstance(obj, str):
+            return self._redact(obj)
+        if isinstance(obj, list):
+            return [self._redact_obj(item) for item in obj]
+        if isinstance(obj, dict):
+            return {key: self._redact_obj(value) for key, value in obj.items()}
+        return obj

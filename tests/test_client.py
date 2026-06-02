@@ -128,3 +128,6 @@ async def test_graphql_error_message_redacts_api_key():
                 await client.execute("query { x }")
         assert KEY not in str(exc.value)
         assert "***REDACTED***" in str(exc.value)
+        # The structured .errors payload must also be scrubbed, not just the message.
+        assert KEY not in str(exc.value.errors)
+        assert "***REDACTED***" in exc.value.errors[0]["message"]

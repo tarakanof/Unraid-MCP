@@ -54,11 +54,14 @@ def _serve_http(mcp, settings: Settings) -> None:
     scheme = "https" if settings.tls_enabled else "http"
     app = StaticBearerAuthMiddleware(mcp.streamable_http_app(), token)
     log.info("Serving streamable-HTTP on %s://%s:%s/mcp", scheme, settings.host, settings.port)
+    # log_config=None lets uvicorn's loggers propagate to our root handler, so
+    # they pass through the same stderr sink + secret-redaction filter.
     uvicorn.run(
         app,
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level.lower(),
+        log_config=None,
         **ssl_kwargs,
     )
 
