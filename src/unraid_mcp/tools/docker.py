@@ -88,5 +88,6 @@ def register_mutations(mcp: FastMCP, settings: Settings) -> None:
     async def restart_docker_container(
         ctx: Context, container_id: str, confirm: bool = False
     ) -> dict[str, Any]:
-        """Restart a Docker container by id (stop then start). Requires confirm=true."""
+        """Restart a Docker container by id (stop then start). Not atomic — if the
+        start fails the container is left stopped. Requires confirm=true."""
         return await guarded(ctx, do_restart_container, container_id, confirm)
