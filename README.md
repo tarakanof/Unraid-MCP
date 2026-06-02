@@ -1,102 +1,77 @@
-# unraid-mcp
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/icons/unraid-mcp-lockup-dark.png">
+    <img alt="Unraid MCP" src="docs/icons/unraid-mcp-lockup-light.png" width="460">
+  </picture>
+</p>
 
-An [MCP](https://modelcontextprotocol.io) server that exposes your **Unraid** server to MCP-client agents (Claude Desktop, the `hermes` harness, etc.) through Unraid's official **GraphQL API**.
+An [MCP](https://modelcontextprotocol.io) server that hooks your **Unraid** box up to
+MCP-aware agents (Claude Desktop, the `hermes` harness, whatever) through Unraid's
+official **GraphQL API**.
 
-It is **read-only by default** — monitoring tools are always available, while anything that changes the server is opt-in and confirmation-gated. Secrets are never logged, all logging goes to stderr, and `stdio` (the default transport) has no network surface.
+It's **read-only by default** — the monitoring tools are always on, and anything that
+can change the server is opt-in and asks for confirmation. Your API key never gets
+logged. The details are in [docs/security.md](docs/security.md).
 
-## Features
+> Needs Unraid 7.2+ (the API is built in) or the Unraid Connect plugin on older versions.
 
-**Read-only tools (always available):**
+## What you get
 
-| Tool | What it returns |
-|------|-----------------|
-| `get_system_info` | OS/kernel, CPU, memory, motherboard, Unraid + API versions, uptime |
-| `get_array_status` | Array state, capacity, every disk with health/temp/I-O, parity-check status |
-| `list_disks` / `get_disk` | Physical disks: model, size, interface, SMART, temperature, spin state, partitions |
-| `get_parity_status` / `get_parity_history` | Current and past parity checks |
-| `list_docker_containers` / `get_docker_container` | Containers with state, image, ports, autostart |
-| `list_docker_networks` | Docker networks |
-| `list_vms` | Virtual machines and their state |
-| `list_shares` | User shares with sizes, allocator, cache mode |
-| `list_notifications` / `get_notifications_overview` | Notifications + unread/archive counts by severity |
-| `get_ups_status` | UPS battery/load/runtime |
-| `list_network_interfaces` | NICs with IPs, speed, state |
-| `get_connect_status` | Registration/license + remote-access status |
-| `whoami` | The authenticated API user and its roles |
-| `get_health_summary` | One-call triage roll-up: array, unhealthy disks, parity, UPS, alerts |
+Read-only tools for the stuff you'd actually want to check: system info, array and
+disk health, parity, Docker containers/networks, VMs, shares, notifications, UPS,
+network interfaces, and a one-shot `get_health_summary` for quick triage.
 
-**Mutating tools** (only registered when `UNRAID_MCP_ALLOW_MUTATIONS=true`). **Every mutating tool requires `confirm=true`** and refuses — before making any network call — without it. The **bold** ones are additionally flagged with a destructive hint for clients:
+Opt-in mutating tools (start/stop the array, control Docker/VMs, run parity checks,
+manage notifications) only show up when you set `UNRAID_MCP_ALLOW_MUTATIONS=true`, and
+every one of them needs `confirm=true`.
 
-- Array: `start_array`, **`stop_array`**
-- Parity: `start_parity_check`, `pause_parity_check`, `resume_parity_check`, `cancel_parity_check`
-- Docker: `start_docker_container`, **`stop_docker_container`**, **`restart_docker_container`**
-- VM: `start_vm`, **`stop_vm`**, `pause_vm`, `resume_vm`, **`reboot_vm`**, **`force_stop_vm`**
-- Notifications: `archive_notification`, **`archive_all_notifications`**, `mark_notification_unread`, **`delete_notification`**
+The full tool catalog and agent-side conventions live in
+[docs/llm-usage.md](docs/llm-usage.md).
 
-> There is intentionally **no reboot/shutdown of the host** — the Unraid GraphQL API does not expose those mutations, so neither does this server.
+## Quick start
 
-**Escape hatch:** `run_graphql_query` (only when `UNRAID_MCP_ALLOW_RAW_QUERY=true`) runs an arbitrary **read-only** GraphQL query; mutations and subscriptions are rejected.
+### Docker (easiest)
 
-## Prerequisites
+The image is on Docker Hub as
+[`dtarakanov/unraid-mcp`](https://hub.docker.com/r/dtarakanov/unraid-mcp) (multi-arch).
+It runs the streamable-HTTP transport on port 6750.
 
-- **Unraid 7.2+** (the API is built in) or an earlier version with the **Unraid Connect** plugin installed.
-- An **API key**. Create one in the WebGUI (**Settings → Management Access → API Keys**) or on the server's terminal:
+```bash
+docker run --rm -p 6750:6750 \
+  -e UNRAID_API_URL=https://tower.local/graphql \
+  -e UNRAID_API_KEY=your-api-key \
+  -e UNRAID_VERIFY_SSL=false \
+  -e UNRAID_MCP_BEARER_TOKEN=$(openssl rand -hex 32) \
+  dtarakanov/unraid-mcp:latest
+```
 
-  ```bash
-  # Least privilege for monitoring — a read/guest-scoped key is enough:
-  unraid-api apikey --create --name mcp --roles guest
-  ```
+Or grab [`docker-compose.yml`](docker-compose.yml), fill in the values, and
+`docker compose up -d`.
 
-  Use a key with only the roles/permissions you need. A `guest`/read-scoped key is sufficient for the read-only tools.
-
-## Install
+### Local (for stdio clients)
 
 ```bash
 git clone https://github.com/tarakanof/Unraid-MCP
 cd Unraid-MCP
-uv sync                 # or: pip install .
+uv sync
+uv run unraid-mcp        # stdio transport (the default)
 ```
+
+(`python -m unraid_mcp` also works once the venv is activated.)
 
 ## Configure
 
-Copy `.env.example` to `.env` and fill it in (or export the variables in the environment):
+Two variables are required:
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `UNRAID_API_URL` | _(required)_ | GraphQL endpoint, e.g. `https://tower.local/graphql` (`/graphql` is appended if omitted) |
-| `UNRAID_API_KEY` | _(required)_ | API key, sent as `x-api-key` |
-| `UNRAID_VERIFY_SSL` | `true` | Verify TLS. See note below for self-signed certs |
-| `UNRAID_CA_BUNDLE` | – | Path to a CA bundle to trust the Unraid certificate |
-| `UNRAID_MCP_TRANSPORT` | `stdio` | `stdio` or `streamable-http` |
-| `UNRAID_MCP_HOST` | `127.0.0.1` | Bind address for HTTP transport |
-| `UNRAID_MCP_PORT` | `6750` | Port for HTTP transport |
-| `UNRAID_MCP_BEARER_TOKEN` | – | Bearer token required from HTTP clients (auto-generated + printed if unset) |
-| `UNRAID_MCP_ALLOWED_HOSTS` | – | Comma-separated Host allow-list for DNS-rebinding protection (HTTP). Set this for non-localhost binds |
-| `UNRAID_MCP_ALLOWED_ORIGINS` | – | Comma-separated Origin allow-list for DNS-rebinding protection (HTTP) |
-| `UNRAID_MCP_TLS_CERT` | – | TLS certificate (PEM) to serve the HTTP transport over HTTPS. Set with the key below |
-| `UNRAID_MCP_TLS_KEY` | – | TLS private key (PEM). Both cert + key enable HTTPS directly |
-| `UNRAID_MCP_ALLOW_MUTATIONS` | `false` | Register mutating tools (each still requires `confirm=true`) |
-| `UNRAID_MCP_ALLOW_RAW_QUERY` | `false` | Register the read-only raw GraphQL tool |
-| `UNRAID_MCP_TIMEOUT` | `30` | HTTP timeout (seconds) |
-| `UNRAID_MCP_LOG_LEVEL` | `INFO` | Log level (to stderr) |
+- `UNRAID_API_URL` — your GraphQL endpoint, e.g. `https://tower.local/graphql`
+- `UNRAID_API_KEY` — an Unraid API key (a `guest`/read key is plenty for monitoring)
 
-> **Self-signed certificates:** Unraid local hosts often use self-signed TLS. Prefer pointing `UNRAID_CA_BUNDLE` at the certificate over setting `UNRAID_VERIFY_SSL=false`. Disabling verification logs a warning.
-
-## Run
-
-```bash
-# stdio (default) — for local subprocess clients
-unraid-mcp
-# or
-python -m unraid_mcp
-
-# streamable-HTTP — for remote clients
-UNRAID_MCP_TRANSPORT=streamable-http UNRAID_MCP_BEARER_TOKEN=$(openssl rand -hex 32) unraid-mcp
-```
+Copy `.env.example` to `.env` for a starting point. Everything else — transports, TLS,
+the safety switches — is in [docs/configuration.md](docs/configuration.md).
 
 ## Connect a client
 
-**Generic stdio harness (e.g. `hermes`)** — launch the server as a subprocess and pass the connection via env:
+Local stdio clients launch the server themselves:
 
 ```json
 {
@@ -113,61 +88,40 @@ UNRAID_MCP_TRANSPORT=streamable-http UNRAID_MCP_BEARER_TOKEN=$(openssl rand -hex
 }
 ```
 
-**Claude Desktop** (`claude_desktop_config.json`) uses the same `mcpServers` shape.
+Claude Desktop uses the same `mcpServers` shape. For remote/HTTP, point the client at
+`http://<host>:6750/mcp` and send `Authorization: Bearer <token>`.
 
-**Remote / HTTP**: point the client at `http://<host>:6750/mcp` and send `Authorization: Bearer <UNRAID_MCP_BEARER_TOKEN>`.
+Writing an agent against this? [docs/llm-usage.md](docs/llm-usage.md) has the tool
+catalog, conventions, and a drop-in system-prompt snippet.
 
-**For LLM agents:** see **[`docs/llm-usage.md`](docs/llm-usage.md)** — a full tool catalog, conventions, recipes, and a drop-in system-prompt snippet.
+## Running it on Unraid
 
-## Security model
+You can run the container *on* Unraid and have it talk back to the same box. There's a
+ready-made template and step-by-step instructions in [deploy/unraid/](deploy/unraid/) —
+add the XML as a user template, fill in the URL/key/token, and start it on port 6750.
 
-- **Read-only by default.** Mutations require `UNRAID_MCP_ALLOW_MUTATIONS=true`, and then **every** mutating tool requires an explicit `confirm=true` and refuses *before* making any network call.
-- **Least privilege.** Use a scoped Unraid API key; a read/guest key suffices for monitoring.
-- **Secrets stay secret.** The API key is held as a `SecretStr`, never logged (a redaction filter scrubs it as defence in depth), and never appears in error messages.
-- **stdio is clean.** All logs go to stderr; stdout carries only the JSON-RPC protocol.
-- **HTTP is gated.** The HTTP transport binds `127.0.0.1` by default and requires a bearer token (constant-time compared; duplicate/absent `Authorization` headers are rejected). DNS-rebinding protection (Host/Origin validation) is enabled automatically for localhost binds; for a non-localhost bind set `UNRAID_MCP_ALLOWED_HOSTS` to keep it on. **TLS:** set `UNRAID_MCP_TLS_CERT` + `UNRAID_MCP_TLS_KEY` to serve HTTPS directly, or terminate TLS at a reverse proxy — the server warns loudly if it serves plaintext on a non-localhost address. Don't expose it to untrusted networks.
-- **No arbitrary execution.** Only typed GraphQL operations are issued; the optional raw-query tool parses the document and allows only `query` operations (mutations/subscriptions are rejected — including ones hidden behind comments or leading whitespace).
-
-## Development
+## Develop
 
 ```bash
 uv sync --extra dev
-uv run pytest          # 146 tests, all mocked — no live server needed
+uv run pytest        # all mocked — no live server needed
 uv run ruff check .
 uv run ruff format .
 ```
 
-Tests mock the GraphQL endpoint with `respx`, so the suite runs without a real Unraid server. The architecture keeps logic functions pure and testable; the `@mcp.tool` wrappers are thin.
+Tests mock the GraphQL endpoint with `respx`, so the suite runs without a real Unraid
+server. The logic functions are kept pure and testable; the `@mcp.tool` wrappers are
+thin.
 
-## Docker
+The Docker image builds and pushes to Docker Hub automatically when a GitHub Release is
+published — see [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml).
 
-A prebuilt image is published to Docker Hub as **`dtarakanov/unraid-mcp`** by the
-[`docker-publish.yml`](.github/workflows/docker-publish.yml) workflow (multi-arch
-`amd64`/`arm64`). The image defaults to the streamable-HTTP transport on `0.0.0.0:6750`.
+## Docs
 
-```bash
-docker run --rm -p 6750:6750 \
-  -e UNRAID_API_URL=https://tower.local/graphql \
-  -e UNRAID_API_KEY=your-api-key \
-  -e UNRAID_VERIFY_SSL=false \
-  -e UNRAID_MCP_BEARER_TOKEN=$(openssl rand -hex 32) \
-  dtarakanov/unraid-mcp:latest
-```
-
-Or use [`docker-compose.yml`](docker-compose.yml). Always set a bearer token and
-front it with TLS for anything beyond a trusted LAN.
-
-**To publish the image** (CI): set repo secrets `DOCKERHUB_USERNAME` and
-`DOCKERHUB_TOKEN`; the workflow pushes `latest` + `main` + `sha-*` on pushes to
-`main` and version tags (`vX.Y.Z`) on release tags.
-
-## Deploy on Unraid
-
-The server can run as a container **on** Unraid (streamable-HTTP) and talk back to
-the same box's GraphQL API. A Community-Apps-style template and full instructions
-are in **[`deploy/unraid/`](deploy/unraid/)** — add `deploy/unraid/unraid-mcp.xml`
-as a user template (**Docker → Add Container**), fill in the API URL, API key, and
-a bearer token, and start it on port `6750`.
+- [docs/configuration.md](docs/configuration.md) — every environment variable, transports, TLS
+- [docs/security.md](docs/security.md) — the security model
+- [docs/llm-usage.md](docs/llm-usage.md) — tool catalog + guide for LLM agents
+- [deploy/unraid/](deploy/unraid/) — running it on Unraid
 
 ## License
 
