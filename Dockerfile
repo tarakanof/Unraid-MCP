@@ -1,17 +1,20 @@
 # Minimal image for running unraid-mcp over the streamable-HTTP transport.
 # stdio clients usually launch the package directly via uv/python instead.
-FROM python:3.12-slim
+FROM python:3.12-alpine@sha256:236173eb74001afe2f60862de935b74fcbd00adfca247b2c27051a70a6a39a2d
 
-# Install uv for fast, reproducible installs.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Install uv only for the build, then remove it from the runtime image.
+COPY --from=ghcr.io/astral-sh/uv:latest@sha256:78bc42400d77b0678ba95765305c826652ed5431f399257271dda681d0318f03 /uv /uvx /bin/
 
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
-RUN uv pip install --system --no-cache .
+RUN uv export --quiet --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt \
+    && uv pip install --system --no-cache -r requirements.txt \
+    && uv pip install --system --no-cache --no-deps . \
+    && rm -f requirements.txt /bin/uv /bin/uvx
 
 # Run as a non-root user.
-RUN useradd --create-home --uid 10001 app
+RUN adduser -D -u 10001 app
 USER app
 
 # In a container the server must bind all interfaces; require a bearer token

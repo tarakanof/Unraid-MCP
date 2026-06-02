@@ -38,15 +38,20 @@ It runs the streamable-HTTP transport on port 6750.
 
 ```bash
 docker run --rm -p 6750:6750 \
-  -e UNRAID_API_URL=https://tower.local/graphql \
+  -e UNRAID_API_URL=https://yourhash.myunraid.net/graphql \
   -e UNRAID_API_KEY=your-api-key \
-  -e UNRAID_VERIFY_SSL=false \
   -e UNRAID_MCP_BEARER_TOKEN=$(openssl rand -hex 32) \
   dtarakanov/unraid-mcp:latest
 ```
 
 Or grab [`docker-compose.yml`](docker-compose.yml), fill in the values, and
 `docker compose up -d`.
+
+Use a URL whose hostname matches the Unraid certificate. The MyUnraid hostname
+shown by Unraid usually works with `UNRAID_VERIFY_SSL=true`. If you use a LAN IP
+URL and the cert does not include that IP, a CA bundle cannot fix hostname
+validation; use a matching cert/hostname or set `UNRAID_VERIFY_SSL=false` only
+on a trusted LAN.
 
 ### Local (for stdio clients)
 
@@ -63,7 +68,7 @@ uv run unraid-mcp        # stdio transport (the default)
 
 Two variables are required:
 
-- `UNRAID_API_URL` — your GraphQL endpoint, e.g. `https://tower.local/graphql`
+- `UNRAID_API_URL` — your GraphQL endpoint, e.g. `https://yourhash.myunraid.net/graphql`
 - `UNRAID_API_KEY` — an Unraid API key (a `guest`/read key is plenty for monitoring)
 
 Copy `.env.example` to `.env` for a starting point. Everything else — transports, TLS,
@@ -80,7 +85,7 @@ Local stdio clients launch the server themselves:
       "command": "uv",
       "args": ["run", "--directory", "/path/to/unraid-mcp", "unraid-mcp"],
       "env": {
-        "UNRAID_API_URL": "https://tower.local/graphql",
+        "UNRAID_API_URL": "https://yourhash.myunraid.net/graphql",
         "UNRAID_API_KEY": "your-api-key"
       }
     }
@@ -89,7 +94,8 @@ Local stdio clients launch the server themselves:
 ```
 
 Claude Desktop uses the same `mcpServers` shape. For remote/HTTP, point the client at
-`http://<host>:6750/mcp` and send `Authorization: Bearer <token>`.
+`http://<host>:6750/mcp` and send `Authorization: Bearer <token>`. Put the HTTP
+transport behind TLS before exposing it beyond localhost or a trusted LAN.
 
 Writing an agent against this? [docs/llm-usage.md](docs/llm-usage.md) has the tool
 catalog, conventions, and a drop-in system-prompt snippet.

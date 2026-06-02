@@ -18,8 +18,8 @@ Runs the streamable-HTTP transport on port 6750. MCP clients connect to http://T
 
 SETUP:
 1) Create an API key on Unraid: Settings -> Management Access -> API Keys (a guest/read-only role is enough for monitoring).
-2) Set UNRAID_API_URL to this server's GraphQL endpoint, e.g. https://192.168.1.10/graphql.
-3) Set a long random UNRAID_MCP_BEARER_TOKEN so clients have a stable token across restarts.
+2) Set UNRAID_API_URL to this server's GraphQL endpoint using a hostname that matches the cert, e.g. https://yourhash.myunraid.net/graphql.
+3) Set a long random UNRAID_MCP_BEARER_TOKEN (for example, openssl rand -hex 32).
 Put the container behind a TLS reverse proxy (or set UNRAID_MCP_TLS_CERT/KEY) before exposing it beyond your LAN.
   ]]></Overview>
   <Category>Tools: Network:Management</Category>
@@ -34,12 +34,13 @@ Put the container behind a TLS reverse proxy (or set UNRAID_MCP_TLS_CERT/KEY) be
   <DonateLink/>
   <Requires/>
   <Config Name="MCP Port" Target="6750" Default="6750" Mode="tcp" Description="Streamable-HTTP port. Clients connect to http://TOWER-IP:&lt;port&gt;/mcp." Type="Port" Display="always" Required="true" Mask="false">6750</Config>
-  <Config Name="Unraid API URL" Target="UNRAID_API_URL" Default="https://YOUR_UNRAID_IP/graphql" Mode="" Description="GraphQL endpoint of THIS Unraid server. Use the host LAN IP, e.g. https://192.168.1.10/graphql." Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Unraid API URL" Target="UNRAID_API_URL" Default="https://YOUR_MYUNRAID_HOST/graphql" Mode="" Description="GraphQL endpoint of THIS Unraid server. Use a hostname that matches the cert, e.g. https://yourhash.myunraid.net/graphql. LAN IP URLs usually require Verify Unraid TLS=false unless the cert includes that IP." Type="Variable" Display="always" Required="true" Mask="false"></Config>
   <Config Name="Unraid API Key" Target="UNRAID_API_KEY" Default="" Mode="" Description="API key from Settings -&gt; Management Access -&gt; API Keys. A guest/read role suffices for monitoring." Type="Variable" Display="always" Required="true" Mask="true"></Config>
-  <Config Name="MCP Bearer Token" Target="UNRAID_MCP_BEARER_TOKEN" Default="" Mode="" Description="Token MCP clients must send (Authorization: Bearer ...). Leave blank to auto-generate one in the logs, but set a fixed long random value for stable clients." Type="Variable" Display="always" Required="false" Mask="true"></Config>
-  <Config Name="Verify Unraid TLS" Target="UNRAID_VERIFY_SSL" Default="false" Mode="" Description="Verify the Unraid API certificate. Unraid local hosts usually use a self-signed cert, so this defaults to false. Prefer mounting a CA bundle (UNRAID_CA_BUNDLE) for stricter setups." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="MCP Bearer Token" Target="UNRAID_MCP_BEARER_TOKEN" Default="" Mode="" Description="Token MCP clients must send (Authorization: Bearer ...). Must be at least 32 random characters; generate with: openssl rand -hex 32." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Verify Unraid TLS" Target="UNRAID_VERIFY_SSL" Default="true" Mode="" Description="Verify the Unraid API certificate. A CA bundle can trust a self-signed cert but cannot fix hostname/IP mismatch; only set false on a trusted LAN." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Unraid CA Bundle" Target="UNRAID_CA_BUNDLE" Default="" Mode="" Description="Optional PEM CA bundle path inside the container for the Unraid API certificate, e.g. /certs/unraid-ca.pem." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="Allow Mutations" Target="UNRAID_MCP_ALLOW_MUTATIONS" Default="false" Mode="" Description="Register state-changing tools (start/stop array, Docker/VM control, notifications). Each still requires confirm=true. Keep false for monitoring only." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
   <Config Name="Allow Raw GraphQL Query" Target="UNRAID_MCP_ALLOW_RAW_QUERY" Default="false" Mode="" Description="Register a read-only raw GraphQL passthrough tool (mutations/subscriptions rejected)." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
-  <Config Name="Allowed Hosts" Target="UNRAID_MCP_ALLOWED_HOSTS" Default="" Mode="" Description="Comma-separated Host allow-list for DNS-rebinding protection, e.g. tower.local:6750,10.0.0.5:6750. Recommended when exposing the port." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Allowed Hosts" Target="UNRAID_MCP_ALLOWED_HOSTS" Default="" Mode="" Description="Comma-separated Host allow-list for DNS-rebinding protection. Include the LAN IP/name clients use, e.g. tower.local:6750,10.0.0.5:6750." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="Log Level" Target="UNRAID_MCP_LOG_LEVEL" Default="INFO" Mode="" Description="Log level (stderr): DEBUG, INFO, WARNING, ERROR." Type="Variable" Display="advanced" Required="false" Mask="false">INFO</Config>
 </Container>

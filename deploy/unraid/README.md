@@ -34,10 +34,15 @@ clients then connect to `http://<TOWER-IP>:6750/mcp` with a bearer token.
 2. In the WebUI go to **Docker → Add Container**, and pick **unraid-mcp** from the
    *Template* dropdown (under "User templates").
 3. Fill in:
-   - **Unraid API URL** → `https://<TOWER-IP>/graphql` (your server's LAN IP)
+   - **Unraid API URL** → `https://<MYUNRAID-HOST>/graphql` (the hostname that
+     matches the Unraid certificate)
    - **Unraid API Key** → the key from above
    - **MCP Bearer Token** → the random token from above
-   - leave **Verify Unraid TLS** = `false` (local self-signed cert)
+   - leave **Verify Unraid TLS** = `true` when the cert is trusted and matches
+     the URL hostname; if you use `https://<TOWER-IP>/graphql`, verification
+     usually fails unless the cert includes that IP
+   - for a self-signed cert with a matching hostname, mount a CA bundle and set
+     `UNRAID_CA_BUNDLE`; a CA bundle does not fix hostname/IP mismatches
    - leave **Allow Mutations** = `false` unless you want write access
 4. **Apply**. The container starts on port `6750`.
 
@@ -53,9 +58,7 @@ curl -i http://<TOWER-IP>:6750/mcp
 # (A full MCP handshake is done by your MCP client, not curl.)
 ```
 Check the container logs in the Unraid UI — on startup it logs
-`Serving streamable-HTTP on http://0.0.0.0:6750/mcp`. If you left the bearer
-token blank, the generated token is printed there (set a fixed one to avoid
-this changing on restart).
+`Serving streamable-HTTP on http://0.0.0.0:6750/mcp`.
 
 ## Connect a client
 
@@ -71,6 +74,8 @@ Point your MCP client at `http://<TOWER-IP>:6750/mcp` and send the header
   gate; for use beyond a trusted LAN put it behind a **TLS reverse proxy**
   (SWAG / Nginx Proxy Manager) or set `UNRAID_MCP_TLS_CERT` + `UNRAID_MCP_TLS_KEY`
   and mount the certs. Set **Allowed Hosts** to keep DNS-rebinding protection on.
+- Weak placeholder bearer tokens are rejected at startup; generate one with
+  `openssl rand -hex 32`.
 - Use a least-privilege Unraid API key; never commit it.
 
 ## Visibility (private repo / image)

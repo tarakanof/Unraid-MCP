@@ -51,3 +51,10 @@ async def test_mutations_callable_when_enabled(settings_factory):
             # Confirm-gated stop_array refuses without confirm and makes no change.
             refused = await session.call_tool("stop_array", {"confirm": False})
             assert refused.isError is True
+
+
+async def test_unraid_http_client_ignores_proxy_environment(settings_factory, monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.local:8080")
+    mcp = build_server(settings_factory())
+    async with mcp._mcp_server.lifespan(mcp._mcp_server) as ctx:
+        assert ctx.client._http.trust_env is False

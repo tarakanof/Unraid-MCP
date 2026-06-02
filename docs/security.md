@@ -37,12 +37,21 @@ When you run `streamable-http`:
 - It binds `127.0.0.1` by default.
 - It requires a bearer token, compared in constant time. Requests with a missing or
   duplicated `Authorization` header are rejected.
+- Operator-supplied bearer tokens must be at least 32 characters and cannot be
+  common placeholders such as `change-me`.
 - **DNS-rebinding protection** (Host/Origin validation) is on automatically for
   localhost binds. For a non-localhost bind, set `UNRAID_MCP_ALLOWED_HOSTS` to keep
   it on — the server warns if you don't.
 - **TLS:** set `UNRAID_MCP_TLS_CERT` + `UNRAID_MCP_TLS_KEY` to serve HTTPS directly,
   or terminate TLS at a reverse proxy. The server warns loudly if it's serving
   plaintext on a non-localhost address. Don't expose it to untrusted networks.
+
+## Outbound API path
+
+Requests to the Unraid API verify TLS by default and ignore ambient proxy
+environment variables such as `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`. That
+keeps API traffic from being silently redirected through process-level proxy
+settings; route the container or host directly to the Unraid API endpoint.
 
 ## No arbitrary execution
 
