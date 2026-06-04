@@ -53,6 +53,7 @@ jobs:
             type=sha,format=short,prefix=sha-
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -64,3 +65,35 @@ jobs:
           cache-to: type=gha,mode=max
           sbom: true
           provenance: mode=max
+
+      # Render a job summary on the run page (Actions → run → Summary).
+      # The Docker Hub namespace shows as *** because DOCKERHUB_USERNAME is a
+      # secret; store it as a repo variable (vars.) instead if you want it shown.
+      - name: Job summary
+        if: ${{ steps.build.outcome == 'success' }}
+        run: |
+          IMAGE="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
+          {
+            echo "## 📦 Published \`${{ env.IMAGE_NAME }}\` \`${{ steps.meta.outputs.version }}\`"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Registry | Docker Hub |"
+            echo "| Image | \`$IMAGE\` |"
+            echo "| Version | \`${{ steps.meta.outputs.version }}\` |"
+            echo "| Digest | \`${{ steps.build.outputs.digest }}\` |"
+            echo "| Platforms | \`linux/amd64\`, \`linux/arm64\` |"
+            echo "| SBOM + provenance | attached |"
+            echo ""
+            echo "**Tags**"
+            echo ""
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo ""
+            echo "**Pull**"
+            echo ""
+            echo '```sh'
+            echo "docker pull $IMAGE:${{ steps.meta.outputs.version }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
