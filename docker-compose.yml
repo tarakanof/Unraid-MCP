@@ -6,6 +6,14 @@ services:
     image: dtarakanov/unraid-mcp:${UNRAID_MCP_IMAGE_TAG:-latest}
     container_name: unraid-mcp
     restart: unless-stopped
+    # The server needs no privileges, capabilities, or writable filesystem.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
     ports:
       # Bind localhost by default. Publish 6750:6750 only on a trusted LAN or
       # behind TLS/auth-aware ingress.

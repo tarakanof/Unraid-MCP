@@ -46,6 +46,26 @@ class RedactionFilter(logging.Filter):
         return True
 
 
+class RedactingFormatter(logging.Formatter):
+    """Scrub secrets from the fully formatted output, tracebacks included.
+
+    Filters never see exception text — ``exc_info`` is rendered at format
+    time — so a secret inside an exception message would bypass
+    :class:`RedactionFilter`. Scrubbing the final string closes that gap.
+    """
+
+    def __init__(self, fmt: str, secrets: list[str]) -> None:
+        super().__init__(fmt)
+        self._secrets = [s for s in secrets if s and len(s) >= 6]
+
+    def format(self, record: logging.LogRecord) -> str:
+        formatted = super().format(record)
+        for secret in self._secrets:
+            if secret in formatted:
+                formatted = formatted.replace(secret, _REDACTION)
+        return formatted
+
+
 def configure_logging(
     level: str = "INFO",
     api_key: str | None = None,
@@ -64,10 +84,16 @@ def configure_logging(
         if getattr(handler, "_unraid_mcp", False):
             root.removeHandler(handler)
 
+    all_secrets: list[str | None] = [api_key, *(secrets or [])]
     handler = logging.StreamHandler(stream=sys.stderr)
     handler._unraid_mcp = True  # type: ignore[attr-defined]
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    handler.addFilter(RedactionFilter([api_key, *(secrets or [])]))
+    handler.setFormatter(
+        RedactingFormatter(
+            "%(asctime)s %(levelname)s %(name)s: %(message)s",
+            [s for s in all_secrets if s],
+        )
+    )
+    handler.addFilter(RedactionFilter(all_secrets))
     root.addHandler(handler)
 
 

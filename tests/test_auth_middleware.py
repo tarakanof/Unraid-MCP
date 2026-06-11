@@ -68,11 +68,13 @@ async def test_lifespan_scope_passes_through():
     assert state["called"] is True
 
 
-async def test_websocket_scope_is_rejected():
+async def test_websocket_scope_is_rejected_with_close_frame():
     inner, state = _inner_factory()
     mw = StaticBearerAuthMiddleware(inner, TOKEN)
-    await _call(mw, f"Bearer {TOKEN}", scope_type="websocket")
+    sent = await _call(mw, f"Bearer {TOKEN}", scope_type="websocket")
     assert state["called"] is False
+    # A websocket must get a websocket.close, not HTTP response frames.
+    assert sent == [{"type": "websocket.close", "code": 1008}]
 
 
 async def test_duplicate_authorization_headers_rejected():

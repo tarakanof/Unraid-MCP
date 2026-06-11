@@ -52,6 +52,17 @@ def test_configure_logging_emits_to_stderr_and_redacts(capsys):
     assert "***REDACTED***" in captured.err
 
 
+def test_configure_logging_redacts_secret_in_traceback(capsys):
+    configure_logging(level="INFO", api_key="supersecretkey123")
+    try:
+        raise RuntimeError("boom with supersecretkey123 inside")
+    except RuntimeError:
+        get_logger("unraid_mcp.test").exception("request failed")
+    captured = capsys.readouterr()
+    assert "supersecretkey123" not in captured.err
+    assert "***REDACTED***" in captured.err
+
+
 def test_configure_logging_is_idempotent(capsys):
     configure_logging(level="INFO", api_key="supersecretkey123")
     configure_logging(level="INFO", api_key="supersecretkey123")

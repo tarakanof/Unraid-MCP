@@ -32,8 +32,13 @@ class StaticBearerAuthMiddleware:
         if scope_type == "lifespan":
             await self._app(scope, receive, send)
             return
-        # Authenticate HTTP; refuse anything else (e.g. websocket) rather than
-        # letting it slip past the gate.
+        # Websockets are never authenticated here; refuse them with a proper
+        # close frame (sending HTTP frames on a websocket violates ASGI).
+        if scope_type == "websocket":
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        # Authenticate HTTP; anything else falls through to the 401 below
+        # rather than slipping past the gate.
         if scope_type == "http":
             # Collect every Authorization header: 0 or >1 is rejected, so a
             # smuggled duplicate can't be validated by a proxy yet bypass us.
