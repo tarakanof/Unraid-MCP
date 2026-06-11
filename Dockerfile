@@ -1,6 +1,6 @@
 # Minimal image for running unraid-mcp over the streamable-HTTP transport.
 # stdio clients usually launch the package directly via uv/python instead.
-FROM python:3.12-alpine@sha256:236173eb74001afe2f60862de935b74fcbd00adfca247b2c27051a70a6a39a2d
+FROM python:3.12-alpine@sha256:c93e680d8a99a9a36cd1667fc7267788e3dcebccdb4c4621b040c367a6f07fb6
 
 # Install uv only for the build, then remove it from the runtime image.
 COPY --from=ghcr.io/astral-sh/uv:latest@sha256:78bc42400d77b0678ba95765305c826652ed5431f399257271dda681d0318f03 /uv /uvx /bin/
