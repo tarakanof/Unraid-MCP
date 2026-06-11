@@ -5,6 +5,13 @@
   </picture>
 </p>
 
+<p align="center">
+  <a href="https://github.com/tarakanof/Unraid-MCP/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/tarakanof/Unraid-MCP/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/tarakanof/Unraid-MCP/actions/workflows/security.yml"><img alt="Security" src="https://github.com/tarakanof/Unraid-MCP/actions/workflows/security.yml/badge.svg"></a>
+  <a href="https://hub.docker.com/r/dtarakanov/unraid-mcp"><img alt="Docker Hub" src="https://img.shields.io/docker/v/dtarakanov/unraid-mcp?sort=semver&logo=docker&label=docker"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/tarakanof/Unraid-MCP"></a>
+</p>
+
 An [MCP](https://modelcontextprotocol.io) server that hooks your **Unraid** box up to
 MCP-aware agents (Claude Desktop, the `hermes` harness, whatever) through Unraid's
 official **GraphQL API**.
@@ -37,12 +44,16 @@ The image is on Docker Hub as
 It runs the streamable-HTTP transport on port 6750.
 
 ```bash
-docker run --rm -p 6750:6750 \
+docker run --rm -p 127.0.0.1:6750:6750 \
   -e UNRAID_API_URL=https://yourhash.myunraid.net/graphql \
   -e UNRAID_API_KEY=your-api-key \
   -e UNRAID_MCP_BEARER_TOKEN=$(openssl rand -hex 32) \
   dtarakanov/unraid-mcp:latest
 ```
+
+This publishes the port on localhost only. To reach it from other machines, drop the
+`127.0.0.1:` prefix — but set `UNRAID_MCP_ALLOWED_HOSTS` and put TLS in front first
+(see [docs/security.md](docs/security.md)).
 
 Or grab [`docker-compose.yml`](docker-compose.yml), fill in the values, and
 `docker compose up -d`.
