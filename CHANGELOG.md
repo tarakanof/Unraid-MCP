@@ -1,6 +1,32 @@
 # Changelog
 
-## 0.2.0 - Unreleased
+## 0.2.1 - 2026-06-11
+
+### Security hardening
+
+- All GitHub Actions are pinned to commit SHAs and the Trivy scanner image to
+  its digest; the CI workflow token is now read-only.
+- Secrets are scrubbed from formatted log output including exception
+  tracebacks, which logging filters never see.
+- The bearer-auth middleware rejects websocket connections with a proper
+  close frame (code 1008) instead of HTTP frames.
+- Docker Compose and the Unraid template now run the container with
+  `no-new-privileges`, all capabilities dropped, and a read-only root
+  filesystem.
+- Bumped the `python:3.12-alpine` base image for OpenSSL CVE-2026-45447.
+
+### Fixed
+
+- The container healthcheck probes the configured `UNRAID_MCP_HOST` instead
+  of hardcoded `127.0.0.1`.
+
+### Documentation
+
+- `docs/security.md` notes that tool output is untrusted data (prompt
+  injection via upstream strings such as notification text).
+- README documents installing via the Unraid template.
+
+## 0.2.0 - 2026-06-02
 
 ### Security hardening
 
