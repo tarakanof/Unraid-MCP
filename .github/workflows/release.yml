@@ -1,0 +1,66 @@
+name: Release
+
+# Auto-create a GitHub Release when the version in pyproject.toml is bumped on
+# main. The release publishes the Docker image by calling docker-publish.yml as
+# a reusable workflow (a release created by GITHUB_TOKEN would not trigger the
+# `release: published` event, so we invoke the publish step directly instead).
+#
+# To cut a release: bump `version` in pyproject.toml, merge to main. The tag
+# `vX.Y.Z` and a GitHub Release with auto-generated notes are created, and the
+# multi-arch image is built and pushed to Docker Hub.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - pyproject.toml
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tag-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      released: ${{ steps.check.outputs.released }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for new version
+        id: check
+        run: |
+          version="$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$version" >/dev/null 2>&1; then
+            echo "Tag v$version already exists; nothing to release."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create tag and release
+        if: steps.check.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          git tag -a "v$VERSION" -m "v$VERSION"
+          git push origin "v$VERSION"
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --generate-notes
+
+  publish:
+    needs: tag-release
+    if: needs.tag-release.outputs.released == 'true'
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      version: ${{ needs.tag-release.outputs.version }}
+    secrets: inherit
