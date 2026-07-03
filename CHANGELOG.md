@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.5.0 - 2026-07-04
+
+Safe mutation expansion (milestone v0.5.0) on top of the observability tools
+added since 0.3.0.
+
+### Added — safe mutation expansion
+
+- Tiered mutation permissions: a third **dangerous** tier behind
+  `UNRAID_MCP_ALLOW_DANGEROUS` (only effective alongside
+  `UNRAID_MCP_ALLOW_MUTATIONS`), housing high-blast-radius array-topology ops
+  (`mount_array_disk`, `unmount_array_disk`, `clear_disk_statistics`,
+  `add_disk_to_array`, `remove_disk_from_array`) and `remove_docker_container`
+  (#25).
+- Docker: native `restart_docker_container` (atomic, with a stop→start fallback
+  on older API builds) plus `pause_docker_container` / `unpause_docker_container`
+  (#21).
+- Docker updates: `update_docker_container` and `update_docker_containers`
+  (batch, capped at 20) in the mutate tier; `update_all_docker_containers` in
+  the dangerous tier (#22).
+- VM: `reset_vm` — hard reset, like the physical reset button (#23).
+- Notifications: bulk `archive_notifications` / `unarchive_notifications`,
+  `unarchive_all_notifications`, `delete_archived_notifications`, and
+  `create_notification` — an agent→operator channel that posts a persistent note
+  into the Unraid WebGUI (#24).
+- Every mutating tool keeps its `MUTATING`/`DESTRUCTIVE` annotation and refuses
+  without `confirm=true` before any network I/O.
+
+### Added — observability tools
+
+- `get_system_metrics` — live CPU / memory / temperature utilization (#52).
+- `get_docker_container_logs` — paged, capped container log retrieval (#53).
+- `list_log_files` + `read_log_file` — system log browsing, paged and
+  size-capped (#54).
+- `get_services`, `check_docker_updates`, and native container lookup (#55).
+- `get_system_time`, flash device identity, and richer share fields (#56).
+- API capability detection foundation, so tools unsupported by the box's API
+  version degrade gracefully (#51).
+
+### Maintenance
+
+- Dependabot bumps for GitHub Actions, Python, and Docker base image; CI git
+  identity fix for annotated release tags.
+
+## 0.3.0 - 2026-07-03
+
+### Fixed
+
+- `get_disk` raises a typed `ToolError` on not-found instead of returning null
+  (#11); empty array slots (`DISK_NP`) no longer counted as unhealthy (#14);
+  `list_vms` retries with the legacy `domain` field on older API builds (#13).
+- Bearer tokens compared as bytes — non-ASCII `Authorization` header now
+  returns a clean 401 (#10); clear, actionable error on 3xx redirects without
+  leaking the URL (#12).
+
+### CI / tests
+
+- Weekly schema-drift check for `queries.py` against the upstream schema (#31);
+  env-gated live smoke suite (`pytest -m live`) (#32); Dependabot config (#33).
+
 ## 0.2.1 - 2026-06-11
 
 ### Security hardening
