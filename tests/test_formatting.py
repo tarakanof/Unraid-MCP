@@ -9,9 +9,12 @@ from unraid_mcp.formatting import (
     human_size,
     kib_to_bytes,
     shape_array_status,
+    shape_flash,
     shape_metrics,
     shape_mutation_result,
     shape_physical_disk,
+    shape_shares,
+    shape_system_time,
 )
 
 
@@ -87,6 +90,62 @@ def test_shape_metrics_partial_response_omits_missing_temperature():
     assert "cpu" in out
     assert "memory" in out
     assert "temperature" not in out
+
+
+def test_shape_system_time_filters_empty_ntp_slots():
+    raw = {
+        "systemTime": {
+            "currentTime": "2026-07-03T12:00:00Z",
+            "timeZone": "UTC",
+            "useNtp": True,
+            "ntpServers": ["0.pool.ntp.org", "", ""],
+        }
+    }
+    assert shape_system_time(raw) == {
+        "current_time": "2026-07-03T12:00:00Z",
+        "time_zone": "UTC",
+        "use_ntp": True,
+        "ntp_servers": ["0.pool.ntp.org"],
+    }
+
+
+def test_shape_system_time_handles_empty():
+    assert shape_system_time(None) == {
+        "current_time": None,
+        "time_zone": None,
+        "use_ntp": None,
+        "ntp_servers": [],
+    }
+
+
+def test_shape_flash():
+    raw = {"flash": {"guid": "abc-123", "vendor": "SanDisk", "product": "Cruzer"}}
+    assert shape_flash(raw) == {"guid": "abc-123", "vendor": "SanDisk", "product": "Cruzer"}
+
+
+def test_shape_flash_handles_empty():
+    assert shape_flash(None) == {"guid": None, "vendor": None, "product": None}
+
+
+def test_shape_shares_includes_and_omits_extra_fields():
+    raw = {
+        "shares": [
+            {
+                "name": "secure",
+                "include": ["disk1"],
+                "exclude": [],
+                "splitLevel": "2",
+                "floor": None,
+                "luksStatus": "ENCRYPTED",
+            }
+        ]
+    }
+    out = shape_shares(raw)[0]
+    assert out["include"] == ["disk1"]
+    assert out["split_level"] == "2"
+    assert out["encryption_status"] == "ENCRYPTED"
+    assert "exclude" not in out
+    assert "floor" not in out
 
 
 def test_shape_array_status_converts_capacity_and_disks():

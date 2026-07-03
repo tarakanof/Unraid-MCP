@@ -53,6 +53,13 @@ environment variables such as `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`. That
 keeps API traffic from being silently redirected through process-level proxy
 settings; route the container or host directly to the Unraid API endpoint.
 
+## Tool output can include hardware identifiers
+
+`get_system_info` includes the boot flash device's GUID (`flash.guid`), which is
+also the identifier Unraid ties your license to. That's expected for a tool
+talking to your own box, but keep it in mind if you ever relay tool output
+somewhere less trusted than your own agent session.
+
 ## Tool output is untrusted data
 
 Tool results echo strings that originate on the Unraid box — container names, share

@@ -173,7 +173,26 @@ query ListVMsLegacy {
 
 SHARES = """
 query GetSharesInfo {
-  shares { id name free used size comment allocator cache cow color }
+  shares {
+    id name free used size comment allocator cache cow color
+    include exclude splitLevel floor luksStatus
+  }
+}
+"""
+
+# Root ``systemTime`` — separate from ``info`` (see SYSTEM_INFO above).
+SYSTEM_TIME = """
+query GetSystemTime {
+  systemTime { currentTime timeZone useNtp ntpServers }
+}
+"""
+
+# Root ``flash`` — a separate root query, NOT nested under ``info``. Fetched as
+# a second, independently-degrading call in ``fetch_system_info`` so older API
+# builds without this field still return system info (see tools/system.py).
+FLASH = """
+query GetFlashInfo {
+  flash { guid vendor product }
 }
 """
 

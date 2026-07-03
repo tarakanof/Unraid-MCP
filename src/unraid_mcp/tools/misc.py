@@ -13,7 +13,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from .. import queries
 from ..client import UnraidClient
 from ..config import Settings
-from ..errors import UnraidError, UnraidGraphQLError
+from ..errors import UnraidGraphQLError
 from ..formatting import (
     shape_array_status,
     shape_connect_status,
@@ -30,6 +30,7 @@ from ._base import (
     feature_unsupported,
     get_app_context,
     guarded,
+    safe_query,
     unsupported_field_error,
 )
 
@@ -127,19 +128,12 @@ async def fetch_log_file(
         raise
 
 
-async def _safe(client: UnraidClient, query: str, shaper, default):
-    """Run an optional query; on any Unraid error fall back to a default so the
-    health summary degrades gracefully when a feature isn't available."""
-    try:
-        return shaper(await client.execute(query))
-    except UnraidError:
-        return default
-
-
 async def fetch_health(client: UnraidClient) -> dict[str, Any]:
     array = shape_array_status(await client.execute(queries.ARRAY_STATUS))
-    ups = await _safe(client, queries.UPS_DEVICES, shape_ups, [])
-    overview = await _safe(client, queries.NOTIFICATIONS_OVERVIEW, shape_notifications_overview, {})
+    ups = await safe_query(client, queries.UPS_DEVICES, shape_ups, [])
+    overview = await safe_query(
+        client, queries.NOTIFICATIONS_OVERVIEW, shape_notifications_overview, {}
+    )
     return summarize_health(array, ups, overview)
 
 

@@ -58,9 +58,10 @@ A typical stdio client config:
 | Tool | Args | Use it to |
 |------|------|-----------|
 | `get_health_summary` | – | One-call triage: array state, capacity, unhealthy disks, parity status, UPS, unread alert counts. **Start here.** |
-| `get_system_info` | – | OS/kernel, CPU, memory, motherboard, Unraid + API versions, uptime. |
+| `get_system_info` | – | OS/kernel, CPU, memory, motherboard, Unraid + API versions, uptime, and (when supported) flash boot-device identity. |
 | `get_system_metrics` | – | Live utilization: total/per-core CPU %, memory/swap usage, temperatures. Requires API 7.2+; older builds get a friendly error. |
 | `get_services` | – | Health of the Unraid services stack (API, dynamix, etc.): name, online, uptime, version. |
+| `get_system_time` | – | Server time, timezone, and NTP config — correlate log timestamps and spot NTP misconfig. Requires API 7.1+. |
 | `get_array_status` | – | Array state, total/used/free capacity, and every data/parity/cache disk with `health`, temp, and I/O counters. |
 | `list_disks` | – | Physical disks: model, size, interface, SMART status, temperature, spin state. |
 | `get_disk` | `disk_id` | Full detail for one physical disk (partitions, firmware, SMART). Get `disk_id` from `list_disks`. |
@@ -72,7 +73,7 @@ A typical stdio client config:
 | `get_docker_container_logs` | `container_id`, `tail=100`, `since=None` | Recent log lines for a container. `tail` capped at 1000 (protects context window); page further back with the previous response's `cursor` as `since`. Log content is untrusted workload output. Requires API 7.2+. |
 | `check_docker_updates` | – | Per-container Docker image update status (cached digests; does not refresh them). |
 | `list_vms` | – | VMs: `id`, `name`, `state`. |
-| `list_shares` | – | User shares with free/used/total sizes, allocator, cache mode. |
+| `list_shares` | – | User shares with free/used/total sizes, allocator, cache mode, and (when set) include/exclude, split level, floor, and encryption status. |
 | `get_notifications_overview` | – | Unread/archive counts by severity. |
 | `list_notifications` | `notification_type="UNREAD"`, `importance=None`, `limit=25`, `offset=0` | List notifications. `notification_type` ∈ `UNREAD`/`ARCHIVE`; `importance` ∈ `INFO`/`WARNING`/`ALERT`. |
 | `get_ups_status` | – | UPS battery/load/runtime. |

@@ -108,6 +108,21 @@ async def guarded(
         raise ToolError(str(exc)) from None
 
 
+async def safe_query(
+    client: UnraidClient,
+    query: str,
+    shaper: Callable[[dict[str, Any] | None], Any],
+    default: Any,
+) -> Any:
+    """Run an optional query; on any Unraid error fall back to ``default`` so a
+    composed fetch degrades gracefully when a feature/field isn't available on
+    this API build (e.g. an older server missing a root query entirely)."""
+    try:
+        return shaper(await client.execute(query))
+    except UnraidError:
+        return default
+
+
 def require_confirm(confirm: bool, action: str) -> None:
     """Raise ``ToolError`` (before any network call) if a destructive action was
     not explicitly confirmed."""

@@ -10,12 +10,45 @@ from .. import queries
 from ..client import UnraidClient
 from ..config import Settings
 from ..errors import UnraidGraphQLError
-from ..formatting import shape_metrics, shape_services, shape_system_info
-from ._base import READ_ONLY, feature_unsupported, get_app_context, guarded, unsupported_field_error
+from ..formatting import (
+    shape_flash,
+    shape_metrics,
+    shape_services,
+    shape_system_info,
+    shape_system_time,
+)
+from ._base import (
+    READ_ONLY,
+    feature_unsupported,
+    get_app_context,
+    guarded,
+    safe_query,
+    unsupported_field_error,
+)
 
 
 async def fetch_system_info(client: UnraidClient) -> dict[str, Any]:
-    return shape_system_info(await client.execute(queries.SYSTEM_INFO))
+    info = shape_system_info(await client.execute(queries.SYSTEM_INFO))
+    # `flash` is a separate root query (not nested under `info`), fetched here
+    # as a second, independently-degrading call so older API builds without
+    # this field still return system info — just without flash device identity.
+    flash = await safe_query(client, queries.FLASH, shape_flash, None)
+    if flash is not None:
+        info = {**info, "flash": flash}
+    return info
+
+
+async def fetch_system_time(
+    client: UnraidClient, *, api_version: str | None = None
+) -> dict[str, Any]:
+    try:
+        return shape_system_time(await client.execute(queries.SYSTEM_TIME))
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported(
+                "system time info", requires="7.1+", api_version=api_version
+            ) from None
+        raise
 
 
 async def fetch_metrics(client: UnraidClient, *, api_version: str | None = None) -> dict[str, Any]:
@@ -69,3 +102,10 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         online, uptime, version."""
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, fetch_services, api_version=api_version)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_system_time(ctx: Context) -> dict[str, Any]:
+        """Get server time, timezone, and NTP config — correlate log timestamps
+        and spot NTP misconfig."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(ctx, fetch_system_time, api_version=api_version)

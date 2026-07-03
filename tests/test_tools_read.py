@@ -25,11 +25,63 @@ def _sent_vars(route):
     return json.loads(route.calls.last.request.content)["variables"]
 
 
-async def test_system_info(mocked_client):
-    async with mocked_client(_resp({"info": {"os": {"hostname": "tower"}}})) as (client, route):
+async def test_system_info_with_flash(mocked_client):
+    """The second (flash) call succeeds: info is enriched with flash identity."""
+    info_resp = _resp({"info": {"os": {"hostname": "tower"}}})
+    flash_resp = _resp({"flash": {"guid": "abc-123", "vendor": "SanDisk", "product": "Cruzer"}})
+    async with mocked_client([info_resp, flash_resp]) as (client, route):
+        out = await system.fetch_system_info(client)
+    assert out["os"] == {"hostname": "tower"}
+    assert out["flash"] == {"guid": "abc-123", "vendor": "SanDisk", "product": "Cruzer"}
+    assert route.call_count == 2
+    assert _sent_query(route) == queries.FLASH
+
+
+async def test_system_info_degrades_when_flash_unavailable(mocked_client):
+    """An older API build without `flash` still returns system info, just
+    without the flash key — the second call fails and is swallowed."""
+    info_resp = _resp({"info": {"os": {"hostname": "tower"}}})
+    flash_err = httpx.Response(
+        200,
+        json={"errors": [{"message": 'Cannot query field "flash" on type "Query".'}], "data": None},
+    )
+    async with mocked_client([info_resp, flash_err]) as (client, route):
         out = await system.fetch_system_info(client)
     assert out == {"os": {"hostname": "tower"}}
-    assert _sent_query(route) == queries.SYSTEM_INFO
+    assert "flash" not in out
+
+
+async def test_system_time(mocked_client):
+    data = {
+        "systemTime": {
+            "currentTime": "2026-07-03T12:00:00Z",
+            "timeZone": "UTC",
+            "useNtp": True,
+            "ntpServers": ["0.pool.ntp.org", "", ""],
+        }
+    }
+    async with mocked_client(_resp(data)) as (client, route):
+        out = await system.fetch_system_time(client)
+    assert out == {
+        "current_time": "2026-07-03T12:00:00Z",
+        "time_zone": "UTC",
+        "use_ntp": True,
+        "ntp_servers": ["0.pool.ntp.org"],
+    }
+    assert _sent_query(route) == queries.SYSTEM_TIME
+
+
+async def test_system_time_unsupported_raises_friendly_error(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "systemTime" on type "Query".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client(resp) as (client, route):
+        with pytest.raises(ToolError, match="does not support"):
+            await system.fetch_system_time(client, api_version="7.0.0")
 
 
 async def test_system_metrics(mocked_client):
@@ -492,6 +544,49 @@ async def test_shares(mocked_client):
         out = await shares.fetch_shares(c)
     assert out[0]["name"] == "appdata"
     assert out[0]["size"]["human"] == "1.0 GiB"
+
+
+async def test_shares_enriched_fields(mocked_client):
+    data = {
+        "shares": [
+            {
+                "name": "secure",
+                "include": ["disk1", "disk2"],
+                "exclude": ["disk3"],
+                "splitLevel": "2",
+                "floor": "10G",
+                "luksStatus": "ENCRYPTED",
+            }
+        ]
+    }
+    async with mocked_client(_resp(data)) as (c, r):
+        out = await shares.fetch_shares(c)
+    share = out[0]
+    assert share["include"] == ["disk1", "disk2"]
+    assert share["exclude"] == ["disk3"]
+    assert share["split_level"] == "2"
+    assert share["floor"] == "10G"
+    assert share["encryption_status"] == "ENCRYPTED"
+
+
+async def test_shares_omits_empty_extra_fields(mocked_client):
+    data = {
+        "shares": [
+            {
+                "name": "plain",
+                "include": [],
+                "exclude": [],
+                "splitLevel": None,
+                "floor": "",
+                "luksStatus": None,
+            }
+        ]
+    }
+    async with mocked_client(_resp(data)) as (c, r):
+        out = await shares.fetch_shares(c)
+    share = out[0]
+    for key in ("include", "exclude", "split_level", "floor", "encryption_status"):
+        assert key not in share
 
 
 async def test_notifications_overview_and_list(mocked_client):

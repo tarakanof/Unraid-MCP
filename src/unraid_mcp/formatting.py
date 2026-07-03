@@ -326,8 +326,9 @@ def shape_vms(data: dict | None) -> list[dict[str, Any]]:
 
 
 def shape_shares(data: dict | None) -> list[dict[str, Any]]:
-    return [
-        {
+    shares = []
+    for s in (data or {}).get("shares") or []:
+        share = {
             "name": s.get("name"),
             "comment": s.get("comment"),
             "free": _size_from_kib(s.get("free")),
@@ -336,8 +337,38 @@ def shape_shares(data: dict | None) -> list[dict[str, Any]]:
             "allocator": s.get("allocator"),
             "cache": s.get("cache"),
         }
-        for s in ((data or {}).get("shares") or [])
-    ]
+        # Extra fields are compact-optional: omit rather than emit None/empty
+        # noise for shares that don't set include/exclude/split-level/etc.
+        extras = {
+            "include": s.get("include") or None,
+            "exclude": s.get("exclude") or None,
+            "split_level": s.get("splitLevel") or None,
+            "floor": s.get("floor") or None,
+            "encryption_status": s.get("luksStatus") or None,
+        }
+        share.update({k: v for k, v in extras.items() if v is not None})
+        shares.append(share)
+    return shares
+
+
+def shape_system_time(data: dict | None) -> dict[str, Any]:
+    time_info = (data or {}).get("systemTime") or {}
+    return {
+        "current_time": time_info.get("currentTime"),
+        "time_zone": time_info.get("timeZone"),
+        "use_ntp": time_info.get("useNtp"),
+        # Empty strings indicate unused NTP server slots per the schema note.
+        "ntp_servers": [s for s in (time_info.get("ntpServers") or []) if s],
+    }
+
+
+def shape_flash(data: dict | None) -> dict[str, Any]:
+    flash = (data or {}).get("flash") or {}
+    return {
+        "guid": flash.get("guid"),
+        "vendor": flash.get("vendor"),
+        "product": flash.get("product"),
+    }
 
 
 def shape_notifications(data: dict | None) -> list[dict[str, Any]]:
