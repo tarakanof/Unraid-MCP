@@ -104,3 +104,38 @@ def test_empty_token_is_rejected_at_construction():
     inner, _ = _inner_factory()
     with pytest.raises(ValueError):
         StaticBearerAuthMiddleware(inner, "")
+
+
+async def _call_raw_header(mw, auth_header_bytes):
+    scope = {
+        "type": "http",
+        "headers": [(b"authorization", auth_header_bytes)],
+        "method": "POST",
+        "path": "/mcp",
+    }
+    sent = []
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(msg):
+        sent.append(msg)
+
+    await mw(scope, receive, send)
+    return sent
+
+
+async def test_non_ascii_bearer_token_rejected_without_exception():
+    inner, state = _inner_factory()
+    mw = StaticBearerAuthMiddleware(inner, TOKEN)
+    sent = await _call_raw_header(mw, b"Bearer caf\xc3\xa9" + b"x" * 32)
+    assert state["called"] is False
+    assert sent[0]["status"] == 401
+
+
+async def test_invalid_utf8_bearer_token_rejected_without_exception():
+    inner, state = _inner_factory()
+    mw = StaticBearerAuthMiddleware(inner, TOKEN)
+    sent = await _call_raw_header(mw, b"Bearer \xff\xfe" + b"x" * 32)
+    assert state["called"] is False
+    assert sent[0]["status"] == 401

@@ -9,6 +9,7 @@ import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
 from unraid_mcp import queries
+from unraid_mcp.errors import UnraidGraphQLError
 from unraid_mcp.tools import array, docker, misc, notifications, shares, system, vm
 
 
@@ -66,6 +67,33 @@ async def test_disks_and_disk_details(mocked_client):
         out = await array.fetch_disk(c, "1:a")
         assert out["smart_status"] == "OK"
         assert _sent_vars(r) == {"id": "1:a"}
+
+
+async def test_disk_details_null_raises_friendly_error(mocked_client):
+    async with mocked_client(_resp({"disk": None})) as (c, r):
+        with pytest.raises(ToolError, match="No disk matching"):
+            await array.fetch_disk(c, "1:nope")
+
+
+async def test_disk_details_graphql_not_found_raises_friendly_error(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={"errors": [{"message": "Disk not found for id 1:nope"}], "data": None},
+    )
+    async with mocked_client(resp) as (c, r):
+        with pytest.raises(ToolError, match="No disk matching") as exc:
+            await array.fetch_disk(c, "1:nope")
+    assert "Disk not found" not in str(exc.value)
+
+
+async def test_disk_details_unrelated_graphql_error_passes_through(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={"errors": [{"message": "Authentication required"}], "data": None},
+    )
+    async with mocked_client(resp) as (c, r):
+        with pytest.raises(UnraidGraphQLError, match="Authentication required"):
+            await array.fetch_disk(c, "1:whatever")
 
 
 async def test_docker_list_and_resolve(mocked_client):
