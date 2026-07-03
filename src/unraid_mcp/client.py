@@ -68,6 +68,21 @@ class UnraidClient:
                 "Check UNRAID_API_URL and the network."
             ) from exc
 
+        if 300 <= response.status_code < 400:
+            location = response.headers.get("location")
+            hint = "If this is an http→https redirect, change UNRAID_API_URL to https://..."
+            if location:
+                parsed = urlparse(location)
+                if parsed.scheme and parsed.netloc:
+                    raise UnraidConnectionError(
+                        f"Unraid responded with a redirect (HTTP {response.status_code}) to "
+                        f"{parsed.scheme}://{parsed.netloc}. This client does not follow "
+                        f"redirects. {hint}"
+                    )
+            raise UnraidConnectionError(
+                f"Unraid responded with a redirect (HTTP {response.status_code}) from "
+                f"{self._host}. This client does not follow redirects. {hint}"
+            )
         if response.status_code in (401, 403):
             raise UnraidAuthError(
                 "Authentication failed (HTTP "

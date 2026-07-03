@@ -5,10 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 
 from .. import queries
 from ..client import UnraidClient
 from ..config import Settings
+from ..errors import UnraidGraphQLError
 from ..formatting import (
     shape_array_status,
     shape_mutation_result,
@@ -37,9 +39,25 @@ async def fetch_disks(client: UnraidClient) -> list[dict[str, Any]]:
     return shape_physical_disks(await client.execute(queries.LIST_DISKS))
 
 
-async def fetch_disk(client: UnraidClient, disk_id: str) -> dict[str, Any] | None:
-    data = await client.execute(queries.DISK_DETAILS, {"id": disk_id})
-    return shape_physical_disk(data.get("disk"))
+def _disk_not_found(disk_id: str) -> ToolError:
+    return ToolError(f"No disk matching '{disk_id}'. Use list_disks to see valid ids.")
+
+
+async def fetch_disk(client: UnraidClient, disk_id: str) -> dict[str, Any]:
+    try:
+        data = await client.execute(queries.DISK_DETAILS, {"id": disk_id})
+    except UnraidGraphQLError as exc:
+        # The upstream resolver raises NotFoundException("Disk with id ${id} not
+        # found") for unknown/malformed ids (see disks.service.ts). Match on that
+        # narrow phrase so unrelated GraphQL errors (auth, other fields, etc.)
+        # keep propagating as UnraidGraphQLError untouched.
+        if "disk" in str(exc).lower() and "not found" in str(exc).lower():
+            raise _disk_not_found(disk_id) from None
+        raise
+    disk = data.get("disk")
+    if not disk:
+        raise _disk_not_found(disk_id)
+    return shape_physical_disk(disk)
 
 
 # ── Mutation logic ─────────────────────────────────────────────────────────────
@@ -104,9 +122,11 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         return await guarded(ctx, fetch_disks)
 
     @mcp.tool(annotations=READ_ONLY)
-    async def get_disk(ctx: Context, disk_id: str) -> dict[str, Any] | None:
+    async def get_disk(ctx: Context, disk_id: str) -> dict[str, Any]:
         """Get full details for one physical disk by its id (from list_disks),
-        including partitions, firmware and SMART status."""
+        including partitions, firmware and SMART status. Errors (does not
+        return null) if disk_id doesn't match a known disk — use list_disks
+        to find a valid id."""
         return await guarded(ctx, fetch_disk, disk_id)
 
 

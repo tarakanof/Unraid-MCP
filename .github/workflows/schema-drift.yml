@@ -1,0 +1,31 @@
+name: Schema drift
+
+# Validates every GraphQL operation in queries.py against the upstream
+# unraid/api schema. Runs weekly (and on demand) rather than per-PR because it
+# depends on a network download. A failure here means upstream renamed/removed
+# a field we still use — the failed run is the notification; fix queries.py.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Check schema drift
+        run: uv run python scripts/check_schema_drift.py

@@ -9,6 +9,7 @@ import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
 from unraid_mcp import queries
+from unraid_mcp.errors import UnraidGraphQLError
 from unraid_mcp.tools import array, docker, misc, notifications, shares, system, vm
 
 
@@ -68,6 +69,33 @@ async def test_disks_and_disk_details(mocked_client):
         assert _sent_vars(r) == {"id": "1:a"}
 
 
+async def test_disk_details_null_raises_friendly_error(mocked_client):
+    async with mocked_client(_resp({"disk": None})) as (c, r):
+        with pytest.raises(ToolError, match="No disk matching"):
+            await array.fetch_disk(c, "1:nope")
+
+
+async def test_disk_details_graphql_not_found_raises_friendly_error(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={"errors": [{"message": "Disk not found for id 1:nope"}], "data": None},
+    )
+    async with mocked_client(resp) as (c, r):
+        with pytest.raises(ToolError, match="No disk matching") as exc:
+            await array.fetch_disk(c, "1:nope")
+    assert "Disk not found" not in str(exc.value)
+
+
+async def test_disk_details_unrelated_graphql_error_passes_through(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={"errors": [{"message": "Authentication required"}], "data": None},
+    )
+    async with mocked_client(resp) as (c, r):
+        with pytest.raises(UnraidGraphQLError, match="Authentication required"):
+            await array.fetch_disk(c, "1:whatever")
+
+
 async def test_docker_list_and_resolve(mocked_client):
     data = {
         "docker": {
@@ -103,6 +131,51 @@ async def test_vms_with_domains_and_fallback(mocked_client):
         _resp({"vms": {"domain": [{"id": "u2", "name": "lin", "state": "SHUTOFF"}]}})
     ) as (c, r):
         assert (await vm.fetch_vms(c))[0]["state"] == "SHUTOFF"
+
+
+async def test_vms_modern_schema_single_request(mocked_client):
+    """LIST_VMS succeeds on the first try: no retry, exactly one HTTP call."""
+    async with mocked_client(
+        _resp({"vms": {"domains": [{"id": "u1", "name": "win", "state": "RUNNING"}]}})
+    ) as (c, r):
+        out = await vm.fetch_vms(c)
+    assert out == [{"id": "u1", "name": "win", "state": "RUNNING"}]
+    assert r.call_count == 1
+    assert _sent_query(r) == queries.LIST_VMS
+
+
+async def test_vms_legacy_schema_retries_once(mocked_client):
+    """LIST_VMS fails because `domains` doesn't exist on this build; the
+    retry with LIST_VMS_LEGACY succeeds, using exactly two HTTP calls."""
+    missing_field_error = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "domains" on type "Vms".'}],
+            "data": None,
+        },
+    )
+    legacy_success = _resp({"vms": {"domain": [{"id": "u2", "name": "lin", "state": "SHUTOFF"}]}})
+    async with mocked_client([missing_field_error, legacy_success]) as (c, r):
+        out = await vm.fetch_vms(c)
+    assert out == [{"id": "u2", "name": "lin", "state": "SHUTOFF"}]
+    assert r.call_count == 2
+    assert _sent_query(r) == queries.LIST_VMS_LEGACY
+
+
+async def test_vms_unrelated_graphql_error_not_retried(mocked_client):
+    """A GraphQL error unrelated to the `domains` field must not trigger a
+    retry; it propagates as a ToolError after a single HTTP call."""
+    unrelated_error = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "foo" on type "Vms".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client(unrelated_error) as (c, r):
+        with pytest.raises(UnraidGraphQLError):
+            await vm.fetch_vms(c)
+    assert r.call_count == 1
 
 
 async def test_shares(mocked_client):
@@ -174,3 +247,47 @@ async def test_health_summary_degrades_when_ups_unavailable(mocked_client):
         out = await misc.fetch_health(c)
     assert out["overall"] == "ok"
     assert out["ups"] == []
+
+
+async def test_health_summary_ignores_empty_array_slots(mocked_client):
+    array_resp = _resp(
+        {
+            "array": {
+                "state": "STARTED",
+                "capacity": {"kilobytes": {"total": "1", "used": "0", "free": "1"}},
+                "disks": [
+                    {"name": "disk1", "status": "DISK_OK"},
+                    {"name": "disk2", "status": "DISK_NP"},
+                ],
+            }
+        }
+    )
+    ups_resp = _resp({"upsDevices": []})
+    notif_resp = _resp({"notifications": {"overview": {"unread": {"alert": 0, "warning": 0}}}})
+    async with mocked_client([array_resp, ups_resp, notif_resp]) as (c, r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "ok"
+    assert out["unhealthy_disks"] == []
+    assert out["disk_count"] == 1
+
+
+async def test_health_summary_flags_missing_assigned_disk(mocked_client):
+    array_resp = _resp(
+        {
+            "array": {
+                "state": "STARTED",
+                "capacity": {"kilobytes": {"total": "1", "used": "0", "free": "1"}},
+                "disks": [
+                    {"name": "disk1", "status": "DISK_OK"},
+                    {"name": "disk2", "status": "DISK_NP_MISSING"},
+                ],
+            }
+        }
+    )
+    ups_resp = _resp({"upsDevices": []})
+    notif_resp = _resp({"notifications": {"overview": {"unread": {"alert": 0, "warning": 0}}}})
+    async with mocked_client([array_resp, ups_resp, notif_resp]) as (c, r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "attention"
+    assert out["unhealthy_disks"][0]["health"] == "missing"
+    assert out["disk_count"] == 2

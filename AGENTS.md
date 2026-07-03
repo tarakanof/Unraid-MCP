@@ -14,6 +14,14 @@ uv run ruff check . && uv run ruff format --check . # lint + format
 
 All three must pass before opening a PR.
 
+Schema-drift check (network, run manually or via the weekly `schema-drift`
+workflow) — validates every operation in `queries.py` against the upstream
+`unraid/api` SDL:
+
+```sh
+uv run python scripts/check_schema_drift.py         # PASS/FAIL per op, non-zero on drift
+```
+
 ## Architecture
 
 - **Tool modules** live in `src/unraid_mcp/tools/`. Each exposes
