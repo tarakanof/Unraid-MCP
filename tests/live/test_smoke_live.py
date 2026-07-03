@@ -71,6 +71,25 @@ async def live_client():
         )
 
 
+class _NoNetworkTransport(httpx.AsyncBaseTransport):
+    """Transport that fails the test on ANY request."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        raise AssertionError(
+            f"unexpected network I/O: {request.method} {request.url} — "
+            "the confirm-refusal path must not touch the server"
+        )
+
+
+@pytest_asyncio.fixture
+async def tripwire_client():
+    """Client for the confirm-refusal tests: its transport raises on any
+    request, so a broken ``require_confirm`` fails the test loudly instead of
+    mutating the real box (e.g. stopping the array mid-smoke-test)."""
+    async with httpx.AsyncClient(transport=_NoNetworkTransport()) as http:
+        yield UnraidClient("https://tripwire.invalid/graphql", "live-smoke-tripwire", http)
+
+
 # ── Shape helpers ────────────────────────────────────────────────────────────
 
 
@@ -187,8 +206,9 @@ async def test_run_graphql_query(live_client):
 # ── Mutating tools: confirm-refusal path only (no state change) ───────────────
 
 # Each entry invokes a ``do_*`` mutation with confirm=False. ``require_confirm``
-# raises ``ToolError`` *before any network I/O*, so these make no request and
-# change no server state — we only assert the refusal.
+# raises ``ToolError`` *before any network I/O*. These run against the
+# tripwire client (not the live one), so if that invariant ever regresses the
+# test fails on the attempted request instead of mutating the real server.
 MUTATION_REFUSALS: list[tuple[str, Callable[[UnraidClient], Awaitable[Any]]]] = [
     ("start_array", lambda c: array.do_start_array(c, confirm=False)),
     ("stop_array", lambda c: array.do_stop_array(c, confirm=False)),
@@ -221,6 +241,6 @@ MUTATION_REFUSALS: list[tuple[str, Callable[[UnraidClient], Awaitable[Any]]]] = 
 @pytest.mark.parametrize(
     "call", [c for _, c in MUTATION_REFUSALS], ids=[n for n, _ in MUTATION_REFUSALS]
 )
-async def test_mutation_refuses_without_confirm(live_client, call):
+async def test_mutation_refuses_without_confirm(tripwire_client, call):
     with pytest.raises(ToolError):
-        await call(live_client)
+        await call(tripwire_client)
