@@ -13,17 +13,33 @@ from mcp.server.fastmcp.exceptions import ToolError
 from .. import queries
 from ..client import UnraidClient
 from ..config import Settings
-from ..errors import UnraidError
+from ..errors import UnraidError, UnraidGraphQLError
 from ..formatting import (
     shape_array_status,
     shape_connect_status,
+    shape_log_file,
+    shape_log_files,
     shape_me,
     shape_network_interfaces,
     shape_notifications_overview,
     shape_ups,
     summarize_health,
 )
-from ._base import READ_ONLY, guarded
+from ._base import (
+    READ_ONLY,
+    feature_unsupported,
+    get_app_context,
+    guarded,
+    unsupported_field_error,
+)
+
+# Server-enforced cap on how many log lines a single read_log_file call may
+# request; kept in sync with the docstring below.
+MAX_LOG_LINES = 500
+
+# Only paths under this prefix are accepted (defense-in-depth on top of
+# server-side validation) — the API serves system logs from here.
+LOG_PATH_PREFIX = "/var/log"
 
 
 def _ensure_read_only(query: str) -> None:
@@ -62,6 +78,53 @@ async def fetch_me(client: UnraidClient) -> dict[str, Any]:
 
 async def fetch_connect_status(client: UnraidClient) -> dict[str, Any]:
     return shape_connect_status(await client.execute(queries.CONNECT_STATUS))
+
+
+async def fetch_log_files(
+    client: UnraidClient, *, api_version: str | None = None
+) -> list[dict[str, Any]]:
+    try:
+        return shape_log_files(await client.execute(queries.LOG_FILES))
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported(
+                "system log files", requires="7.2+", api_version=api_version
+            ) from None
+        raise
+
+
+async def fetch_log_file(
+    client: UnraidClient,
+    path: str,
+    lines: int = 100,
+    start_line: int | None = None,
+    *,
+    api_version: str | None = None,
+) -> dict[str, Any]:
+    # Validate before any network I/O.
+    if lines > MAX_LOG_LINES:
+        raise ToolError(
+            f"lines={lines} exceeds the maximum of {MAX_LOG_LINES} per call; "
+            "request a smaller window and page with start_line instead."
+        )
+    if not path or not path.startswith(LOG_PATH_PREFIX):
+        raise ToolError(
+            f"path must start with {LOG_PATH_PREFIX!r}. Call list_log_files first "
+            "to get a valid path."
+        )
+
+    variables: dict[str, Any] = {"path": path, "lines": lines}
+    if start_line is not None:
+        variables["startLine"] = start_line
+
+    try:
+        return shape_log_file(await client.execute(queries.LOG_FILE, variables))
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported(
+                "system log files", requires="7.2+", api_version=api_version
+            ) from None
+        raise
 
 
 async def _safe(client: UnraidClient, query: str, shaper, default):
@@ -113,6 +176,34 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         """Compact health roll-up for triage: array state, capacity, any unhealthy disks,
         parity-check status, UPS state, and unread notification counts."""
         return await guarded(ctx, fetch_health)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def list_log_files(ctx: Context) -> list[dict[str, Any]]:
+        """List available system log files: name, path, size, and last-modified time.
+        Use a path from this list with read_log_file — arbitrary paths are rejected."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(ctx, fetch_log_files, api_version=api_version)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def read_log_file(
+        ctx: Context,
+        path: str,
+        lines: int = 100,
+        start_line: int | None = None,
+    ) -> dict[str, Any]:
+        """Read a slice of a system log file for triage (e.g. "why did my server do
+        X last night"). `path` must be one listed by list_log_files (must start with
+        `/var/log`) — call that tool first if you don't have a path. `lines` is capped
+        at 500 per call.
+
+        The response includes `total_lines` (the file's total line count) and
+        `start_line` (where this slice began) so you can page through a large file.
+        To page forward, call again with `start_line` advanced by `lines`. To read
+        the tail of the file, first call with a small `lines` to learn `total_lines`,
+        then call again with `start_line = total_lines - lines`.
+        """
+        api_version = get_app_context(ctx).api_version
+        return await guarded(ctx, fetch_log_file, path, lines, start_line, api_version=api_version)
 
 
 def register_raw_query(mcp: FastMCP, settings: Settings) -> None:

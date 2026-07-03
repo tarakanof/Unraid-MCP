@@ -120,9 +120,10 @@ async def _run(fetch: Callable[..., Awaitable[Any]], *args: Any) -> Any:
     tools unsupported by this API version don't fail the run.
 
     Most reads surface unsupported fields as a raw ``UnraidGraphQLError``.
-    ``system.fetch_metrics`` (issue #16) instead translates that into a
-    friendly ``ToolError`` via ``_base.feature_unsupported`` (issue #15's
-    degradation contract), so it's also treated as a skip here.
+    Some fetches instead follow issue #15's degrading-fetch pattern and
+    translate that into a friendly ``ToolError`` via ``_base.feature_unsupported``
+    (e.g. ``system.fetch_metrics``, ``misc.fetch_log_files``/``fetch_log_file``),
+    whose message contains "does not support" — treat both the same way and skip.
     """
     try:
         return await fetch(*args)
@@ -156,6 +157,7 @@ LIST_READS: list[Callable[..., Awaitable[Any]]] = [
     docker.fetch_docker_networks,
     misc.fetch_ups,
     misc.fetch_network_interfaces,
+    misc.fetch_log_files,
     notifications.fetch_notifications,
     shares.fetch_shares,
     vm.fetch_vms,
@@ -228,6 +230,23 @@ async def test_get_container_logs(live_client):
     for line in result["lines"]:
         assert isinstance(line, dict)
     _check_shapes(result)
+
+
+async def test_read_log_file(live_client):
+    """list_log_files → read_log_file: exercise paging against a real log."""
+    log_files = await _run(misc.fetch_log_files, live_client)
+    if not log_files:
+        pytest.skip("box reports no log files")
+    preferred = next((f for f in log_files if f.get("path") == "/var/log/syslog"), None)
+    path = (preferred or log_files[0]).get("path")
+    if not path:
+        pytest.skip("listed log file has no path to read")
+    detail = await _run(misc.fetch_log_file, live_client, path, 10, None)
+    assert isinstance(detail, dict)
+    assert detail.get("path") == path
+    assert isinstance(detail.get("content"), str)
+    assert isinstance(detail.get("total_lines"), int)
+    _check_shapes(detail)
 
 
 async def test_run_graphql_query(live_client):
