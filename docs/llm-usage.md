@@ -104,6 +104,21 @@ A typical stdio client config:
 | `mark_notification_unread` | `notification_id`, `confirm` | Move an archived notification back to unread. |
 | `delete_notification` | `notification_id`, `notification_type`, `confirm` | **Permanent.** `notification_type` ∈ `UNREAD`/`ARCHIVE` (where it currently lives). |
 
+### Dangerous (only if the operator enabled **both** mutations and dangerous; **all require `confirm=true`**)
+
+These are high-blast-radius. They appear only when `UNRAID_MCP_ALLOW_DANGEROUS=true`
+*and* `UNRAID_MCP_ALLOW_MUTATIONS=true`. If they're absent, the operator has not
+opted in — do not try to work around it.
+
+| Tool | Args | Notes |
+|------|------|-------|
+| `mount_array_disk` | `disk_id`, `confirm` | id from `list_disks`. Brings one array disk online. |
+| `unmount_array_disk` | `disk_id`, `confirm` | **Data becomes inaccessible** until remounted. |
+| `clear_disk_statistics` | `disk_id`, `confirm` | **Unrecoverable** — resets that disk's read/write/error counters. |
+| `add_disk_to_array` | `disk_id`, `slot=None`, `confirm` | **Array must be stopped.** Assigning a data slot can overwrite/format the disk once started. |
+| `remove_disk_from_array` | `disk_id`, `confirm` | **Array must be stopped.** Data on the removed disk becomes inaccessible. |
+| `remove_docker_container` | `container_id`, `with_image=False`, `confirm` | **Permanent.** `with_image=true` also deletes the underlying image. |
+
 > There is intentionally **no host reboot/shutdown** tool — the Unraid GraphQL API doesn't expose it.
 
 ---

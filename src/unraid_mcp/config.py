@@ -65,6 +65,10 @@ class Settings(BaseSettings):
 
     # ── Safety switches ────────────────────────────────────────────────
     allow_mutations: bool = Field(default=False, validation_alias="UNRAID_MCP_ALLOW_MUTATIONS")
+    # Third tier for high-blast-radius mutations (array topology, container
+    # removal). Only takes effect when ``allow_mutations`` is ALSO true — enabling
+    # this alone unlocks nothing (see tools.register_all).
+    allow_dangerous: bool = Field(default=False, validation_alias="UNRAID_MCP_ALLOW_DANGEROUS")
     allow_raw_query: bool = Field(default=False, validation_alias="UNRAID_MCP_ALLOW_RAW_QUERY")
 
     # ── Misc ───────────────────────────────────────────────────────────

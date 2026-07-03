@@ -98,6 +98,77 @@ async def do_cancel_parity(client: UnraidClient, confirm: bool) -> dict[str, Any
     return shape_mutation_result(await client.execute(queries.CANCEL_PARITY))
 
 
+# ── Dangerous-tier logic ────────────────────────────────────────────────────
+
+
+def _require_disk_id(disk_id: str) -> None:
+    if not disk_id or not disk_id.strip():
+        raise ToolError("disk_id must be a non-empty disk id (see list_disks for valid ids).")
+
+
+async def do_mount_array_disk(client: UnraidClient, disk_id: str, confirm: bool) -> dict[str, Any]:
+    require_confirm(confirm, f"mount disk '{disk_id}' in the array (brings the disk online)")
+    _require_disk_id(disk_id)
+    return shape_mutation_result(await client.execute(queries.MOUNT_ARRAY_DISK, {"id": disk_id}))
+
+
+async def do_unmount_array_disk(
+    client: UnraidClient, disk_id: str, confirm: bool
+) -> dict[str, Any]:
+    require_confirm(
+        confirm,
+        f"unmount disk '{disk_id}' from the array "
+        "(data on it becomes inaccessible until remounted)",
+    )
+    _require_disk_id(disk_id)
+    return shape_mutation_result(await client.execute(queries.UNMOUNT_ARRAY_DISK, {"id": disk_id}))
+
+
+async def do_clear_disk_statistics(
+    client: UnraidClient, disk_id: str, confirm: bool
+) -> dict[str, Any]:
+    require_confirm(
+        confirm,
+        f"clear the read/write/error I/O statistics for disk '{disk_id}' "
+        "(the counters are reset and cannot be recovered)",
+    )
+    _require_disk_id(disk_id)
+    return shape_mutation_result(
+        await client.execute(queries.CLEAR_ARRAY_DISK_STATISTICS, {"id": disk_id})
+    )
+
+
+async def do_add_disk_to_array(
+    client: UnraidClient, disk_id: str, slot: int | None = None, confirm: bool = False
+) -> dict[str, Any]:
+    require_confirm(
+        confirm,
+        f"add disk '{disk_id}' to the array "
+        "(the array must be stopped; assigning a slot can overwrite the disk)",
+    )
+    _require_disk_id(disk_id)
+    if slot is not None and slot < 0:
+        raise ToolError(f"slot must be a non-negative integer, got {slot}.")
+    input_: dict[str, Any] = {"id": disk_id}
+    if slot is not None:
+        input_["slot"] = slot
+    return shape_mutation_result(await client.execute(queries.ADD_DISK_TO_ARRAY, {"input": input_}))
+
+
+async def do_remove_disk_from_array(
+    client: UnraidClient, disk_id: str, confirm: bool
+) -> dict[str, Any]:
+    require_confirm(
+        confirm,
+        f"remove disk '{disk_id}' from the array "
+        "(array must be stopped; data on it becomes inaccessible)",
+    )
+    _require_disk_id(disk_id)
+    return shape_mutation_result(
+        await client.execute(queries.REMOVE_DISK_FROM_ARRAY, {"input": {"id": disk_id}})
+    )
+
+
 def register(mcp: FastMCP, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def get_array_status(ctx: Context) -> dict[str, Any]:
@@ -165,3 +236,51 @@ def register_mutations(mcp: FastMCP, settings: Settings) -> None:
     async def cancel_parity_check(ctx: Context, confirm: bool = False) -> dict[str, Any]:
         """Cancel the running parity check. Requires confirm=true."""
         return await guarded(ctx, do_cancel_parity, confirm)
+
+
+def register_dangerous(mcp: FastMCP, settings: Settings) -> None:
+    """Dangerous-tier array-topology tools. Registered only when BOTH
+    UNRAID_MCP_ALLOW_MUTATIONS and UNRAID_MCP_ALLOW_DANGEROUS are true."""
+
+    @mcp.tool(annotations=DESTRUCTIVE)
+    async def mount_array_disk(ctx: Context, disk_id: str, confirm: bool = False) -> dict[str, Any]:
+        """DANGEROUS. Mount a single array disk by id (from list_disks), bringing it
+        online. Operates on live storage — get the disk id right. Requires confirm=true."""
+        return await guarded(ctx, do_mount_array_disk, disk_id, confirm)
+
+    @mcp.tool(annotations=DESTRUCTIVE)
+    async def unmount_array_disk(
+        ctx: Context, disk_id: str, confirm: bool = False
+    ) -> dict[str, Any]:
+        """DANGEROUS. Unmount a single array disk by id (from list_disks). Data on the
+        disk becomes inaccessible to shares/services until it is remounted. Requires
+        confirm=true."""
+        return await guarded(ctx, do_unmount_array_disk, disk_id, confirm)
+
+    @mcp.tool(annotations=DESTRUCTIVE)
+    async def clear_disk_statistics(
+        ctx: Context, disk_id: str, confirm: bool = False
+    ) -> dict[str, Any]:
+        """DANGEROUS. Clear the read/write/error I/O counters for one array disk by id
+        (from list_disks). The statistics are reset and cannot be recovered. Requires
+        confirm=true."""
+        return await guarded(ctx, do_clear_disk_statistics, disk_id, confirm)
+
+    @mcp.tool(annotations=DESTRUCTIVE)
+    async def add_disk_to_array(
+        ctx: Context, disk_id: str, slot: int | None = None, confirm: bool = False
+    ) -> dict[str, Any]:
+        """DANGEROUS. Assign a physical disk (id from list_disks) to the array, optionally
+        at a specific slot. The array must be stopped first; assigning a disk to a data
+        slot can overwrite it and, once started, will be formatted/rebuilt. Requires
+        confirm=true."""
+        return await guarded(ctx, do_add_disk_to_array, disk_id, slot, confirm)
+
+    @mcp.tool(annotations=DESTRUCTIVE)
+    async def remove_disk_from_array(
+        ctx: Context, disk_id: str, confirm: bool = False
+    ) -> dict[str, Any]:
+        """DANGEROUS. Remove a disk (id from list_disks) from the array configuration. The
+        array must be stopped first; data on the removed disk becomes inaccessible.
+        Requires confirm=true."""
+        return await guarded(ctx, do_remove_disk_from_array, disk_id, confirm)

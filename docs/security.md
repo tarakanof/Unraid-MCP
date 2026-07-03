@@ -14,6 +14,32 @@ an agent can't change anything by accident, and a refusal never touches your ser
 There is intentionally **no host reboot/shutdown** tool: the Unraid GraphQL API
 doesn't expose those mutations, so neither does this server.
 
+## Permission tiers
+
+Tools are grouped into three tiers, each behind its own flag. The tiers are
+cumulative and the dangerous tier is gated by the mutations flag on top of its own —
+enabling `UNRAID_MCP_ALLOW_DANGEROUS` *without* `UNRAID_MCP_ALLOW_MUTATIONS` unlocks
+nothing.
+
+| Tier | Flag | Default | Unlocks |
+| --- | --- | --- | --- |
+| Read | *(always on)* | on | All monitoring/read tools. Never change anything. |
+| Mutate | `UNRAID_MCP_ALLOW_MUTATIONS` | off | Everyday writes: start/stop array, start/pause/resume/cancel parity, start/stop/restart Docker containers, start/stop/pause/resume/reboot/force-stop VMs, notification archive/unread/delete. |
+| Dangerous | `UNRAID_MCP_ALLOW_DANGEROUS` (requires mutations too) | off | High-blast-radius topology/removal ops (see below). |
+
+**Dangerous-tier tools** (all annotated `destructive`, all require `confirm=true`):
+
+- `mount_array_disk` — bring one array disk online.
+- `unmount_array_disk` — take one array disk offline; its data becomes inaccessible until remounted.
+- `clear_disk_statistics` — reset a disk's read/write/error I/O counters (unrecoverable).
+- `add_disk_to_array` — assign a physical disk to the array (array must be stopped; can overwrite/format the disk once started).
+- `remove_disk_from_array` — drop a disk from the array config (array must be stopped; data becomes inaccessible).
+- `remove_docker_container` — permanently delete a container, and optionally (`with_image=true`) its underlying image.
+
+Splitting these out means you can safely hand an agent everyday container/array
+control without also handing it the ability to reshape the array or delete
+containers — those stay locked until you deliberately opt into the dangerous tier.
+
 ## Least privilege
 
 Use a scoped Unraid API key. A `guest`/read key is enough for all the read-only

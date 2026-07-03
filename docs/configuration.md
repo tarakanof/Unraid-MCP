@@ -37,6 +37,7 @@ fix a hostname/IP mismatch.
 | `UNRAID_MCP_TLS_CERT` | – | TLS certificate (PEM) to serve the HTTP transport over HTTPS. Set with the key below. |
 | `UNRAID_MCP_TLS_KEY` | – | TLS private key (PEM). Both cert + key together enable HTTPS directly. |
 | `UNRAID_MCP_ALLOW_MUTATIONS` | `false` | Register the state-changing tools. Each still requires `confirm=true`. |
+| `UNRAID_MCP_ALLOW_DANGEROUS` | `false` | Register the high-blast-radius "dangerous" tools (array topology, container removal). No effect unless `UNRAID_MCP_ALLOW_MUTATIONS` is also `true`. Each still requires `confirm=true`. |
 | `UNRAID_MCP_ALLOW_RAW_QUERY` | `false` | Register the read-only raw GraphQL passthrough tool. |
 | `UNRAID_MCP_TIMEOUT` | `30` | HTTP timeout to the Unraid API (seconds). |
 | `UNRAID_MCP_LOG_LEVEL` | `INFO` | Log level (logs go to stderr): `DEBUG`/`INFO`/`WARNING`/`ERROR`. |

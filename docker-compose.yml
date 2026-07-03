@@ -32,6 +32,10 @@ services:
       # UNRAID_CA_BUNDLE: "/certs/unraid-ca.pem"
       # --- safety (read-only by default) ---
       UNRAID_MCP_ALLOW_MUTATIONS: "false"
+      # DANGER: unlocks array-topology + container-removal tools. No effect unless
+      # UNRAID_MCP_ALLOW_MUTATIONS is also "true". Keep "false" unless you really
+      # want an agent able to reshape the array or delete containers.
+      UNRAID_MCP_ALLOW_DANGEROUS: "false"
       UNRAID_MCP_ALLOW_RAW_QUERY: "false"
       # --- optional hardening / misc ---
       # If you publish on a LAN address, include that address or DNS name here
