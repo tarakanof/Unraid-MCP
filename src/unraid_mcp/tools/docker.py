@@ -13,9 +13,11 @@ from ..client import UnraidClient
 from ..config import Settings
 from ..errors import UnraidGraphQLError
 from ..formatting import (
+    shape_container,
     shape_container_logs,
     shape_containers,
     shape_docker_networks,
+    shape_docker_update_statuses,
     shape_mutation_result,
 )
 from ._base import (
@@ -42,7 +44,37 @@ def _matches(container: dict[str, Any], identifier: str) -> bool:
     return cid == identifier or container.get("name") == ident or cid.split(":")[-1] == identifier
 
 
+def _looks_like_id(identifier: str) -> bool:
+    """PrefixedIDs come back as ``<serverId>:<rawId>``; plain container names
+    never contain a colon, so this is a cheap, reliable discriminator."""
+    return ":" in identifier
+
+
+async def fetch_container_native(client: UnraidClient, container_id: str) -> dict[str, Any] | None:
+    """Try the native ``docker.container(id)`` query.
+
+    Returns the shaped container dict, or ``None`` if the API doesn't have
+    this field (old build) or the id doesn't resolve — both cases mean the
+    caller should fall back to the client-side list+filter path.
+    """
+    try:
+        data = await client.execute(queries.DOCKER_CONTAINER, {"id": container_id})
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            return None
+        raise
+    docker = (data or {}).get("docker") or {}
+    container = docker.get("container")
+    if container is None:
+        return None
+    return shape_container(container)
+
+
 async def fetch_container(client: UnraidClient, identifier: str) -> dict[str, Any]:
+    if _looks_like_id(identifier):
+        native = await fetch_container_native(client, identifier)
+        if native is not None:
+            return native
     for container in await fetch_containers(client):
         if _matches(container, identifier):
             return container
@@ -101,6 +133,19 @@ async def fetch_container_logs(
             ) from None
         raise
     return shape_container_logs(result)
+
+
+async def fetch_docker_updates(
+    client: UnraidClient, *, api_version: str | None = None
+) -> list[dict[str, Any]]:
+    try:
+        return shape_docker_update_statuses(await client.execute(queries.DOCKER_UPDATE_STATUSES))
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported(
+                "Docker container update status", api_version=api_version
+            ) from None
+        raise
 
 
 async def do_start_container(
@@ -165,6 +210,15 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         return await guarded(
             ctx, fetch_container_logs, container_id, tail, since, api_version=api_version
         )
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def check_docker_updates(ctx: Context) -> list[dict[str, Any]]:
+        """Per-container Docker image update status (name, update_status).
+        Reads cached image-update digests already computed by the Unraid API;
+        it does not trigger a fresh digest check (that's the
+        `refreshDockerDigests` mutation, out of scope for this tool)."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(ctx, fetch_docker_updates, api_version=api_version)
 
 
 def register_mutations(mcp: FastMCP, settings: Settings) -> None:

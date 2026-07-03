@@ -93,6 +93,47 @@ async def test_system_metrics_unsupported_api_raises_friendly_error(mocked_clien
             await system.fetch_metrics(client, api_version="7.1.0")
 
 
+async def test_services_happy_and_empty(mocked_client):
+    data = {
+        "services": [
+            {
+                "id": "svc:1",
+                "name": "api",
+                "online": True,
+                "uptime": {"timestamp": "2026-07-01T00:00:00.000Z"},
+                "version": "4.0.0",
+            }
+        ]
+    }
+    async with mocked_client(_resp(data)) as (c, r):
+        out = await system.fetch_services(c)
+    assert out == [
+        {
+            "name": "api",
+            "online": True,
+            "uptime": "2026-07-01T00:00:00.000Z",
+            "version": "4.0.0",
+        }
+    ]
+    assert _sent_query(r) == queries.SERVICES
+
+    async with mocked_client(_resp({"services": []})) as (c, r):
+        assert await system.fetch_services(c) == []
+
+
+async def test_services_unsupported_api_degrades(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "services" on type "Query".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client(resp) as (c, r):
+        with pytest.raises(ToolError, match="does not support"):
+            await system.fetch_services(c, api_version="7.1.0")
+
+
 async def test_array_status(mocked_client):
     data = {
         "array": {
@@ -274,6 +315,120 @@ async def test_container_logs_unsupported_api(mocked_client):
     async with mocked_client(err) as (c, r):
         with pytest.raises(ToolError, match="does not support"):
             await docker.fetch_container_logs(c, "1:abcdef", api_version="7.1.0")
+
+
+async def test_docker_updates_happy_and_empty(mocked_client):
+    data = {
+        "docker": {
+            "containerUpdateStatuses": [
+                {"name": "plex", "updateStatus": "UP_TO_DATE"},
+                {"name": "sonarr", "updateStatus": "UPDATE_AVAILABLE"},
+            ]
+        }
+    }
+    async with mocked_client(_resp(data)) as (c, r):
+        out = await docker.fetch_docker_updates(c)
+    assert out == [
+        {"name": "plex", "update_status": "UP_TO_DATE"},
+        {"name": "sonarr", "update_status": "UPDATE_AVAILABLE"},
+    ]
+    assert _sent_query(r) == queries.DOCKER_UPDATE_STATUSES
+
+    async with mocked_client(_resp({"docker": {"containerUpdateStatuses": []}})) as (c, r):
+        assert await docker.fetch_docker_updates(c) == []
+
+
+async def test_docker_updates_unsupported_api_degrades(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={
+            "errors": [
+                {"message": 'Cannot query field "containerUpdateStatuses" on type "Docker".'}
+            ],
+            "data": None,
+        },
+    )
+    async with mocked_client(resp) as (c, r):
+        with pytest.raises(ToolError, match="does not support"):
+            await docker.fetch_docker_updates(c, api_version="7.1.0")
+
+
+async def test_container_native_path_hit(mocked_client):
+    """A colon-bearing identifier (PrefixedID shape) uses the native single
+    -container query, not the list+filter fallback."""
+    data = {
+        "docker": {
+            "container": {
+                "id": "1:abcdef",
+                "names": ["/plex"],
+                "image": "plexinc/pms",
+                "state": "RUNNING",
+                "status": "Up 2 hours",
+                "autoStart": True,
+                "ports": [],
+            }
+        }
+    }
+    async with mocked_client(_resp(data)) as (c, r):
+        out = await docker.fetch_container(c, "1:abcdef")
+    assert out["id"] == "1:abcdef"
+    assert out["name"] == "plex"
+    assert r.call_count == 1
+    assert _sent_query(r) == queries.DOCKER_CONTAINER
+    assert _sent_vars(r) == {"id": "1:abcdef"}
+
+
+async def test_container_falls_back_on_old_api(mocked_client):
+    """Old API build lacks `docker.container`; the id lookup falls back to the
+    list+filter path, using exactly two HTTP calls in the expected order."""
+    missing_field_error = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "container" on type "Docker".'}],
+            "data": None,
+        },
+    )
+    list_data = {
+        "docker": {
+            "containers": [
+                {"id": "1:abcdef", "names": ["/plex"], "state": "RUNNING"},
+            ]
+        }
+    }
+    async with mocked_client([missing_field_error, _resp(list_data)]) as (c, r):
+        out = await docker.fetch_container(c, "1:abcdef")
+    assert out["id"] == "1:abcdef"
+    assert r.call_count == 2
+    calls = r.calls
+    assert json.loads(calls[0].request.content)["query"] == queries.DOCKER_CONTAINER
+    assert json.loads(calls[1].request.content)["query"] == queries.LIST_CONTAINERS
+
+
+async def test_container_null_native_result_falls_back(mocked_client):
+    """A stale/unknown id resolves native to null `container`; falls back to
+    the list+filter path (still 404s if not found there either)."""
+    native_null = _resp({"docker": {"container": None}})
+    list_data = {"docker": {"containers": []}}
+    async with mocked_client([native_null, _resp(list_data)]) as (c, r):
+        with pytest.raises(ToolError, match="No Docker container matching"):
+            await docker.fetch_container(c, "1:ghost")
+    assert r.call_count == 2
+
+
+async def test_container_name_lookup_stays_list_based(mocked_client):
+    """A plain name (no colon) never triggers the native id query."""
+    data = {
+        "docker": {
+            "containers": [
+                {"id": "1:abcdef", "names": ["/plex"], "state": "RUNNING"},
+            ]
+        }
+    }
+    async with mocked_client(_resp(data)) as (c, r):
+        out = await docker.fetch_container(c, "plex")
+    assert out["id"] == "1:abcdef"
+    assert r.call_count == 1
+    assert _sent_query(r) == queries.LIST_CONTAINERS
 
 
 async def test_vms_with_domains_and_fallback(mocked_client):

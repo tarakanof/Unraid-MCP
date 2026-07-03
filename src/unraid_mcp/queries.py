@@ -62,6 +62,12 @@ query GetSystemMetrics {
 }
 """
 
+SERVICES = """
+query GetServices {
+  services { id name online uptime { timestamp } version }
+}
+"""
+
 _ARRAY_DISK_SELECTION = "{ " + _ARRAY_DISK_FIELDS + " }"
 
 ARRAY_STATUS = """
@@ -130,6 +136,23 @@ query GetDockerNetworks {
 CONTAINER_LOGS = """
 query GetContainerLogs($id: PrefixedID!, $since: DateTime, $tail: Int) {
   docker { logs(id: $id, since: $since, tail: $tail) { containerId lines { timestamp message } cursor } }
+}
+"""
+
+DOCKER_UPDATE_STATUSES = """
+query GetDockerUpdateStatuses {
+  docker { containerUpdateStatuses { name updateStatus } }
+}
+"""
+
+DOCKER_CONTAINER = """
+query GetDockerContainer($id: PrefixedID!) {
+  docker {
+    container(id: $id) {
+      id names image state status autoStart
+      ports { ip privatePort publicPort type }
+    }
+  }
 }
 """
 
