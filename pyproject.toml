@@ -54,4 +54,10 @@ ignore = ["B008"]  # FastMCP/Pydantic use callables in defaults intentionally
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-ra"
+# Exclude the env-gated live smoke suite by default so plain `pytest` and CI
+# never touch the network. Run it explicitly with `pytest -m live` (the
+# command-line -m overrides this one).
+addopts = "-ra -m 'not live'"
+markers = [
+    "live: end-to-end smoke tests against a real Unraid server (opt-in; requires UNRAID_LIVE_TEST=1). Excluded by default.",
+]

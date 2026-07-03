@@ -57,6 +57,21 @@ Every tool needs: happy path, empty/None-field response, error mapping.
 Mutations additionally: refused without `confirm=true` **with no HTTP
 request made**.
 
+### Live smoke suite (opt-in)
+
+`tests/live/test_smoke_live.py` is marked `@pytest.mark.live` and runs against
+a **real** Unraid box. It is excluded by default (`addopts = -m "not live"`), so
+plain `pytest` and CI never touch the network. It asserts **shape invariants
+only** (keys present, sizes are `{bytes, human}`, lists of dicts) — never
+environment-specific values — so it passes against any box/API version. Tools
+unsupported by the box's API version `skip` via `UnraidGraphQLError`. Run it
+yourself:
+
+```sh
+UNRAID_LIVE_TEST=1 UNRAID_API_URL=https://<hash>.myunraid.net/graphql \
+    UNRAID_API_KEY=<your-key> uv run pytest -m live -q
+```
+
 ## When adding configuration
 
 Update `.env.example`, `docker-compose.yml`, `docs/configuration.md`, and
