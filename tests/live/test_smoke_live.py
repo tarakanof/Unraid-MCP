@@ -40,6 +40,12 @@ from unraid_mcp.config import load_settings
 from unraid_mcp.errors import UnraidGraphQLError
 from unraid_mcp.tools import array, docker, misc, notifications, shares, system, vm
 
+# Capability-degrading fetches (system.fetch_services, docker.fetch_docker_updates)
+# raise `ToolError("... does not support ...")` on old API builds rather than a
+# raw `UnraidGraphQLError` (see the #15 degradation contract in tools/_base.py:
+# `feature_unsupported`). `_run` below treats both as the same "unsupported by
+# this box" skip condition so these tools can share `LIST_READS` with the rest.
+
 pytestmark = [
     pytest.mark.live,
     pytest.mark.skipif(
@@ -122,7 +128,8 @@ async def _run(fetch: Callable[..., Awaitable[Any]], *args: Any) -> Any:
     Most reads surface unsupported fields as a raw ``UnraidGraphQLError``.
     Some fetches instead follow issue #15's degrading-fetch pattern and
     translate that into a friendly ``ToolError`` via ``_base.feature_unsupported``
-    (e.g. ``system.fetch_metrics``, ``misc.fetch_log_files``/``fetch_log_file``),
+    (e.g. ``system.fetch_metrics``, ``system.fetch_services``,
+    ``misc.fetch_log_files``/``fetch_log_file``, ``docker.fetch_docker_updates``),
     whose message contains "does not support" — treat both the same way and skip.
     """
     try:
@@ -155,11 +162,13 @@ LIST_READS: list[Callable[..., Awaitable[Any]]] = [
     array.fetch_disks,
     docker.fetch_containers,
     docker.fetch_docker_networks,
+    docker.fetch_docker_updates,
     misc.fetch_ups,
     misc.fetch_network_interfaces,
     misc.fetch_log_files,
     notifications.fetch_notifications,
     shares.fetch_shares,
+    system.fetch_services,
     vm.fetch_vms,
 ]
 

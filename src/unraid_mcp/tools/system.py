@@ -10,7 +10,7 @@ from .. import queries
 from ..client import UnraidClient
 from ..config import Settings
 from ..errors import UnraidGraphQLError
-from ..formatting import shape_metrics, shape_system_info
+from ..formatting import shape_metrics, shape_services, shape_system_info
 from ._base import READ_ONLY, feature_unsupported, get_app_context, guarded, unsupported_field_error
 
 
@@ -26,6 +26,17 @@ async def fetch_metrics(client: UnraidClient, *, api_version: str | None = None)
             raise feature_unsupported(
                 "live system metrics", requires="7.2+", api_version=api_version
             ) from None
+        raise
+
+
+async def fetch_services(
+    client: UnraidClient, *, api_version: str | None = None
+) -> list[dict[str, Any]]:
+    try:
+        return shape_services(await client.execute(queries.SERVICES))
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported("the services health list", api_version=api_version) from None
         raise
 
 
@@ -51,3 +62,10 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         temperatures."""
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, fetch_metrics, api_version=api_version)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_services(ctx: Context) -> list[dict[str, Any]]:
+        """Health of the Unraid services stack (API, dynamix, etc.): name,
+        online, uptime, version."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(ctx, fetch_services, api_version=api_version)

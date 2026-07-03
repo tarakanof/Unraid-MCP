@@ -211,6 +211,22 @@ def shape_metrics(data: dict | None) -> dict[str, Any]:
     return out
 
 
+def shape_services(data: dict | None) -> list[dict[str, Any]]:
+    services = (data or {}).get("services") or []
+    out = []
+    for s in services:
+        uptime = s.get("uptime") or {}
+        out.append(
+            {
+                "name": s.get("name"),
+                "online": s.get("online"),
+                "uptime": uptime.get("timestamp"),
+                "version": s.get("version"),
+            }
+        )
+    return out
+
+
 def shape_container(c: dict | None) -> dict[str, Any] | None:
     if not c:
         return None
@@ -290,6 +306,14 @@ def shape_log_file(data: dict | None) -> dict[str, Any]:
         "total_lines": f.get("totalLines"),
         "start_line": f.get("startLine"),
     }
+
+
+def shape_docker_update_statuses(data: dict | None) -> list[dict[str, Any]]:
+    docker = (data or {}).get("docker") or {}
+    return [
+        {"name": item.get("name"), "update_status": item.get("updateStatus")}
+        for item in (docker.get("containerUpdateStatuses") or [])
+    ]
 
 
 def shape_vms(data: dict | None) -> list[dict[str, Any]]:

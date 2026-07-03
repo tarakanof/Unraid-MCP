@@ -60,15 +60,17 @@ A typical stdio client config:
 | `get_health_summary` | – | One-call triage: array state, capacity, unhealthy disks, parity status, UPS, unread alert counts. **Start here.** |
 | `get_system_info` | – | OS/kernel, CPU, memory, motherboard, Unraid + API versions, uptime. |
 | `get_system_metrics` | – | Live utilization: total/per-core CPU %, memory/swap usage, temperatures. Requires API 7.2+; older builds get a friendly error. |
+| `get_services` | – | Health of the Unraid services stack (API, dynamix, etc.): name, online, uptime, version. |
 | `get_array_status` | – | Array state, total/used/free capacity, and every data/parity/cache disk with `health`, temp, and I/O counters. |
 | `list_disks` | – | Physical disks: model, size, interface, SMART status, temperature, spin state. |
 | `get_disk` | `disk_id` | Full detail for one physical disk (partitions, firmware, SMART). Get `disk_id` from `list_disks`. |
 | `get_parity_status` | – | Live parity-check progress/speed/errors. |
 | `get_parity_history` | – | Past parity checks. |
 | `list_docker_containers` | – | All containers: `id`, `name`, image, `state`, status, autostart, ports. |
-| `get_docker_container` | `identifier` | One container by `id` **or** `name`. |
+| `get_docker_container` | `identifier` | One container by `id` **or** `name`. Uses the native `docker.container(id)` query when `identifier` looks like an id, falling back to the container list on older API builds or name lookups. |
 | `list_docker_networks` | – | Docker networks. |
 | `get_docker_container_logs` | `container_id`, `tail=100`, `since=None` | Recent log lines for a container. `tail` capped at 1000 (protects context window); page further back with the previous response's `cursor` as `since`. Log content is untrusted workload output. Requires API 7.2+. |
+| `check_docker_updates` | – | Per-container Docker image update status (cached digests; does not refresh them). |
 | `list_vms` | – | VMs: `id`, `name`, `state`. |
 | `list_shares` | – | User shares with free/used/total sizes, allocator, cache mode. |
 | `get_notifications_overview` | – | Unread/archive counts by severity. |
