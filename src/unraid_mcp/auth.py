@@ -24,7 +24,7 @@ class StaticBearerAuthMiddleware:
         if not token:
             raise ValueError("StaticBearerAuthMiddleware requires a non-empty token")
         self._app = app
-        self._expected = f"Bearer {token}"
+        self._expected: bytes = f"Bearer {token}".encode()
 
     async def __call__(self, scope: dict, receive, send) -> None:
         scope_type = scope.get("type")
@@ -43,8 +43,10 @@ class StaticBearerAuthMiddleware:
             # Collect every Authorization header: 0 or >1 is rejected, so a
             # smuggled duplicate can't be validated by a proxy yet bypass us.
             values = [v for k, v in (scope.get("headers") or []) if k.lower() == b"authorization"]
-            provided = values[0].decode("latin-1") if len(values) == 1 else ""
-            # Constant-time comparison to avoid leaking the token via timing.
+            provided = values[0] if len(values) == 1 else b""
+            # Constant-time comparison on bytes to avoid leaking the token via
+            # timing; bytes never raise for non-ASCII/invalid-UTF-8 content,
+            # unlike str-vs-str hmac.compare_digest.
             if hmac.compare_digest(provided, self._expected):
                 await self._app(scope, receive, send)
                 return
