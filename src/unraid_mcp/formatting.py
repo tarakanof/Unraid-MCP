@@ -270,6 +270,28 @@ def shape_container_logs(data: dict | None) -> dict[str, Any]:
     }
 
 
+def shape_log_files(data: dict | None) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": f.get("name"),
+            "path": f.get("path"),
+            "size": _size_from_bytes(f.get("size")),
+            "modified_at": f.get("modifiedAt"),
+        }
+        for f in (data or {}).get("logFiles") or []
+    ]
+
+
+def shape_log_file(data: dict | None) -> dict[str, Any]:
+    f = (data or {}).get("logFile") or {}
+    return {
+        "path": f.get("path"),
+        "content": f.get("content"),
+        "total_lines": f.get("totalLines"),
+        "start_line": f.get("startLine"),
+    }
+
+
 def shape_vms(data: dict | None) -> list[dict[str, Any]]:
     vms = (data or {}).get("vms") or {}
     if not isinstance(vms, dict):

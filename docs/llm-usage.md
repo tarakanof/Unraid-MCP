@@ -77,6 +77,8 @@ A typical stdio client config:
 | `list_network_interfaces` | – | NICs with IPs, speed, state. |
 | `get_connect_status` | – | Registration/license + remote-access status. |
 | `whoami` | – | The authenticated API user and its roles (use to confirm the key's scope). |
+| `list_log_files` | – | List system log files: name, path, size, last-modified time. |
+| `read_log_file` | `path`, `lines=100`, `start_line=None` | Read a slice of a log file for triage. `path` must come from `list_log_files` (`/var/log` only); `lines` capped at 500; use `total_lines`/`start_line` in the response to page. |
 | `run_graphql_query` | `query`, `variables=None` | **Only if enabled.** Run an arbitrary **read-only** GraphQL query (mutations/subscriptions are rejected). Escape hatch for fields without a dedicated tool. |
 
 ### Mutating (only if the operator enabled mutations; **all require `confirm=true`**)

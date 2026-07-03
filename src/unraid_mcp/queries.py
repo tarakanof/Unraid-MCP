@@ -256,6 +256,20 @@ VM_RESUME = "mutation ResumeVM($id: PrefixedID!) { vm { resume(id: $id) } }"
 VM_FORCE_STOP = "mutation ForceStopVM($id: PrefixedID!) { vm { forceStop(id: $id) } }"
 VM_REBOOT = "mutation RebootVM($id: PrefixedID!) { vm { reboot(id: $id) } }"
 
+LOG_FILES = """
+query GetLogFiles {
+  logFiles { name path size modifiedAt }
+}
+"""
+
+LOG_FILE = """
+query GetLogFile($path: String!, $lines: Int, $startLine: Int) {
+  logFile(path: $path, lines: $lines, startLine: $startLine) {
+    path content totalLines startLine
+  }
+}
+"""
+
 ARCHIVE_NOTIFICATION = """
 mutation ArchiveNotification($id: PrefixedID!) {
   archiveNotification(id: $id) { id title importance type }

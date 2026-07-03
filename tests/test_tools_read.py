@@ -445,3 +445,106 @@ async def test_health_summary_flags_missing_assigned_disk(mocked_client):
     assert out["overall"] == "attention"
     assert out["unhealthy_disks"][0]["health"] == "missing"
     assert out["disk_count"] == 2
+
+
+async def test_list_log_files(mocked_client):
+    data = {
+        "logFiles": [
+            {
+                "name": "syslog",
+                "path": "/var/log/syslog",
+                "size": 4096,
+                "modifiedAt": "2026-07-01T00:00:00Z",
+            }
+        ]
+    }
+    async with mocked_client(_resp(data)) as (c, r):
+        out = await misc.fetch_log_files(c)
+    assert out == [
+        {
+            "name": "syslog",
+            "path": "/var/log/syslog",
+            "size": {"bytes": 4096, "human": "4.0 KiB"},
+            "modified_at": "2026-07-01T00:00:00Z",
+        }
+    ]
+    assert _sent_query(r) == queries.LOG_FILES
+
+
+async def test_list_log_files_empty(mocked_client):
+    async with mocked_client(_resp({"logFiles": []})) as (c, r):
+        assert await misc.fetch_log_files(c) == []
+
+
+async def test_list_log_files_unsupported_api(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "logFiles" on type "Query".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client(resp) as (c, r):
+        with pytest.raises(ToolError, match="does not support"):
+            await misc.fetch_log_files(c, api_version="7.1.0")
+
+
+async def test_read_log_file_happy_path(mocked_client):
+    data = {
+        "logFile": {
+            "path": "/var/log/syslog",
+            "content": "line1\nline2\n",
+            "totalLines": 500,
+            "startLine": 400,
+        }
+    }
+    async with mocked_client(_resp(data)) as (c, r):
+        out = await misc.fetch_log_file(c, "/var/log/syslog", lines=100, start_line=400)
+    assert out == {
+        "path": "/var/log/syslog",
+        "content": "line1\nline2\n",
+        "total_lines": 500,
+        "start_line": 400,
+    }
+    assert _sent_vars(r) == {"path": "/var/log/syslog", "lines": 100, "startLine": 400}
+
+
+async def test_read_log_file_omits_start_line_when_none(mocked_client):
+    data = {"logFile": {"path": "/var/log/syslog", "content": "x", "totalLines": 1, "startLine": 0}}
+    async with mocked_client(_resp(data)) as (c, r):
+        await misc.fetch_log_file(c, "/var/log/syslog")
+    assert _sent_vars(r) == {"path": "/var/log/syslog", "lines": 100}
+
+
+async def test_read_log_file_lines_clamp_no_http(mocked_client):
+    async with mocked_client(_resp({})) as (c, r):
+        with pytest.raises(ToolError, match="500"):
+            await misc.fetch_log_file(c, "/var/log/syslog", lines=5000)
+    assert r.call_count == 0
+
+
+async def test_read_log_file_rejects_path_outside_var_log_no_http(mocked_client):
+    async with mocked_client(_resp({})) as (c, r):
+        with pytest.raises(ToolError, match="list_log_files"):
+            await misc.fetch_log_file(c, "/etc/shadow")
+    assert r.call_count == 0
+
+
+async def test_read_log_file_rejects_empty_path_no_http(mocked_client):
+    async with mocked_client(_resp({})) as (c, r):
+        with pytest.raises(ToolError, match="list_log_files"):
+            await misc.fetch_log_file(c, "")
+    assert r.call_count == 0
+
+
+async def test_read_log_file_unsupported_api(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "logFile" on type "Query".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client(resp) as (c, r):
+        with pytest.raises(ToolError, match="does not support"):
+            await misc.fetch_log_file(c, "/var/log/syslog", api_version="7.1.0")
