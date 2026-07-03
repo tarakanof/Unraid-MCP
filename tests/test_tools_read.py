@@ -133,6 +133,51 @@ async def test_vms_with_domains_and_fallback(mocked_client):
         assert (await vm.fetch_vms(c))[0]["state"] == "SHUTOFF"
 
 
+async def test_vms_modern_schema_single_request(mocked_client):
+    """LIST_VMS succeeds on the first try: no retry, exactly one HTTP call."""
+    async with mocked_client(
+        _resp({"vms": {"domains": [{"id": "u1", "name": "win", "state": "RUNNING"}]}})
+    ) as (c, r):
+        out = await vm.fetch_vms(c)
+    assert out == [{"id": "u1", "name": "win", "state": "RUNNING"}]
+    assert r.call_count == 1
+    assert _sent_query(r) == queries.LIST_VMS
+
+
+async def test_vms_legacy_schema_retries_once(mocked_client):
+    """LIST_VMS fails because `domains` doesn't exist on this build; the
+    retry with LIST_VMS_LEGACY succeeds, using exactly two HTTP calls."""
+    missing_field_error = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "domains" on type "Vms".'}],
+            "data": None,
+        },
+    )
+    legacy_success = _resp({"vms": {"domain": [{"id": "u2", "name": "lin", "state": "SHUTOFF"}]}})
+    async with mocked_client([missing_field_error, legacy_success]) as (c, r):
+        out = await vm.fetch_vms(c)
+    assert out == [{"id": "u2", "name": "lin", "state": "SHUTOFF"}]
+    assert r.call_count == 2
+    assert _sent_query(r) == queries.LIST_VMS_LEGACY
+
+
+async def test_vms_unrelated_graphql_error_not_retried(mocked_client):
+    """A GraphQL error unrelated to the `domains` field must not trigger a
+    retry; it propagates as a ToolError after a single HTTP call."""
+    unrelated_error = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "foo" on type "Vms".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client(unrelated_error) as (c, r):
+        with pytest.raises(UnraidGraphQLError):
+            await vm.fetch_vms(c)
+    assert r.call_count == 1
+
+
 async def test_shares(mocked_client):
     async with mocked_client(_resp({"shares": [{"name": "appdata", "size": "1048576"}]})) as (c, r):
         out = await shares.fetch_shares(c)
