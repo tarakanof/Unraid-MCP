@@ -104,6 +104,33 @@ async def test_connect_error_maps_to_connection_error():
         assert KEY not in str(exc.value)
 
 
+async def test_redirect_with_location_raises_connection_error():
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(
+                301, headers={"Location": "https://tower.local/graphql?token=secret"}
+            )
+        )
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            with pytest.raises(UnraidConnectionError) as exc:
+                await client.execute("query { x }")
+        message = str(exc.value)
+        assert "https://tower.local" in message
+        assert "UNRAID_API_URL" in message
+        assert "token=secret" not in message
+
+
+async def test_redirect_without_location_raises_clean_error():
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(302))
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            with pytest.raises(UnraidConnectionError) as exc:
+                await client.execute("query { x }")
+        assert "302" in str(exc.value)
+
+
 async def test_non_json_response_raises_server_error():
     with respx.mock:
         respx.post(URL).mock(return_value=httpx.Response(200, text="<html>not json</html>"))
