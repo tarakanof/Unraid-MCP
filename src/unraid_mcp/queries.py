@@ -105,6 +105,15 @@ query ListVMs {
 }
 """
 
+# Fallback for older Unraid API builds whose `vms` type does not yet expose
+# `domains` (only the legacy `domain` field). See ``fetch_vms`` in
+# ``tools/vm.py`` for the retry logic that selects between these two.
+LIST_VMS_LEGACY = """
+query ListVMsLegacy {
+  vms { id domain { id name state } }
+}
+"""
+
 SHARES = """
 query GetSharesInfo {
   shares { id name free used size comment allocator cache cow color }

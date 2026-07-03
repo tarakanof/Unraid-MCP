@@ -9,12 +9,26 @@ from mcp.server.fastmcp import Context, FastMCP
 from .. import queries
 from ..client import UnraidClient
 from ..config import Settings
+from ..errors import UnraidGraphQLError
 from ..formatting import shape_mutation_result, shape_vms
 from ._base import DESTRUCTIVE, MUTATING, READ_ONLY, guarded, require_confirm
 
 
+def _is_missing_domains_field_error(exc: UnraidGraphQLError) -> bool:
+    """True if the error is specifically GraphQL rejecting the `domains`
+    field (older Unraid API builds only expose the legacy `domain` field)."""
+    message = str(exc)
+    return "Cannot query field" in message and "domains" in message
+
+
 async def fetch_vms(client: UnraidClient) -> list[dict[str, Any]]:
-    return shape_vms(await client.execute(queries.LIST_VMS))
+    try:
+        data = await client.execute(queries.LIST_VMS)
+    except UnraidGraphQLError as exc:
+        if not _is_missing_domains_field_error(exc):
+            raise
+        data = await client.execute(queries.LIST_VMS_LEGACY)
+    return shape_vms(data)
 
 
 async def do_start_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
