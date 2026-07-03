@@ -129,8 +129,9 @@ async def _run(fetch: Callable[..., Awaitable[Any]], *args: Any) -> Any:
     Some fetches instead follow issue #15's degrading-fetch pattern and
     translate that into a friendly ``ToolError`` via ``_base.feature_unsupported``
     (e.g. ``system.fetch_metrics``, ``system.fetch_services``,
-    ``misc.fetch_log_files``/``fetch_log_file``, ``docker.fetch_docker_updates``),
-    whose message contains "does not support" — treat both the same way and skip.
+    ``system.fetch_system_time``, ``misc.fetch_log_files``/``fetch_log_file``,
+    ``docker.fetch_docker_updates``), whose message contains "does not support" —
+    treat both the same way and skip.
     """
     try:
         return await fetch(*args)
@@ -154,6 +155,7 @@ DICT_READS: list[Callable[..., Awaitable[Any]]] = [
     notifications.fetch_overview,
     system.fetch_system_info,
     system.fetch_metrics,
+    system.fetch_system_time,
 ]
 
 # READ_ONLY fetches whose logic returns a list of dicts.
