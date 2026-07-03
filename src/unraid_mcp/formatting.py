@@ -15,7 +15,11 @@ from __future__ import annotations
 from typing import Any
 
 _FAILED_STATUSES = {"DISK_DSBL", "DISK_INVALID", "DISK_WRONG", "DISK_DSBL_NEW", "DISK_NP_DSBL"}
-_MISSING_STATUSES = {"DISK_NP", "DISK_NP_MISSING"}
+# DISK_NP means "no device present" - an empty/unassigned array slot, which is a
+# normal, healthy state when the array has spare slots. DISK_NP_MISSING means a
+# disk that *is* assigned to the array is not present - a real problem.
+_EMPTY_STATUSES = {"DISK_NP"}
+_MISSING_STATUSES = {"DISK_NP_MISSING"}
 _NEW_STATUSES = {"DISK_NEW"}
 
 
@@ -68,6 +72,8 @@ def array_disk_health(status: str | None, warning: Any = 0, critical: Any = 0) -
         return "healthy"
     if status in _FAILED_STATUSES:
         return "failed"
+    if status in _EMPTY_STATUSES:
+        return "empty"
     if status in _MISSING_STATUSES:
         return "missing"
     if status in _NEW_STATUSES:
@@ -281,11 +287,17 @@ def summarize_health(
     notifications_overview: dict[str, Any],
 ) -> dict[str, Any]:
     """Compose a compact, triage-friendly health roll-up from the shaped parts."""
-    disks = (
-        (array_out.get("parities") or [])
-        + (array_out.get("data_disks") or [])
-        + (array_out.get("caches") or [])
-    )
+    disks = [
+        d
+        for d in (
+            (array_out.get("parities") or [])
+            + (array_out.get("data_disks") or [])
+            + (array_out.get("caches") or [])
+        )
+        # empty array slots (no device assigned) are not real disks - exclude them
+        # from the disk count entirely so it reflects actual installed devices.
+        if d and d.get("health") != "empty"
+    ]
     unhealthy = [d for d in disks if d and d.get("health") not in ("healthy", None)]
     unread = (notifications_overview or {}).get("unread") or {}
     has_attention = bool(unhealthy or unread.get("alert") or unread.get("warning"))

@@ -69,6 +69,33 @@ async def test_disks_and_disk_details(mocked_client):
         assert _sent_vars(r) == {"id": "1:a"}
 
 
+async def test_disk_details_null_raises_friendly_error(mocked_client):
+    async with mocked_client(_resp({"disk": None})) as (c, r):
+        with pytest.raises(ToolError, match="No disk matching"):
+            await array.fetch_disk(c, "1:nope")
+
+
+async def test_disk_details_graphql_not_found_raises_friendly_error(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={"errors": [{"message": "Disk not found for id 1:nope"}], "data": None},
+    )
+    async with mocked_client(resp) as (c, r):
+        with pytest.raises(ToolError, match="No disk matching") as exc:
+            await array.fetch_disk(c, "1:nope")
+    assert "Disk not found" not in str(exc.value)
+
+
+async def test_disk_details_unrelated_graphql_error_passes_through(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={"errors": [{"message": "Authentication required"}], "data": None},
+    )
+    async with mocked_client(resp) as (c, r):
+        with pytest.raises(UnraidGraphQLError, match="Authentication required"):
+            await array.fetch_disk(c, "1:whatever")
+
+
 async def test_docker_list_and_resolve(mocked_client):
     data = {
         "docker": {
@@ -220,3 +247,47 @@ async def test_health_summary_degrades_when_ups_unavailable(mocked_client):
         out = await misc.fetch_health(c)
     assert out["overall"] == "ok"
     assert out["ups"] == []
+
+
+async def test_health_summary_ignores_empty_array_slots(mocked_client):
+    array_resp = _resp(
+        {
+            "array": {
+                "state": "STARTED",
+                "capacity": {"kilobytes": {"total": "1", "used": "0", "free": "1"}},
+                "disks": [
+                    {"name": "disk1", "status": "DISK_OK"},
+                    {"name": "disk2", "status": "DISK_NP"},
+                ],
+            }
+        }
+    )
+    ups_resp = _resp({"upsDevices": []})
+    notif_resp = _resp({"notifications": {"overview": {"unread": {"alert": 0, "warning": 0}}}})
+    async with mocked_client([array_resp, ups_resp, notif_resp]) as (c, r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "ok"
+    assert out["unhealthy_disks"] == []
+    assert out["disk_count"] == 1
+
+
+async def test_health_summary_flags_missing_assigned_disk(mocked_client):
+    array_resp = _resp(
+        {
+            "array": {
+                "state": "STARTED",
+                "capacity": {"kilobytes": {"total": "1", "used": "0", "free": "1"}},
+                "disks": [
+                    {"name": "disk1", "status": "DISK_OK"},
+                    {"name": "disk2", "status": "DISK_NP_MISSING"},
+                ],
+            }
+        }
+    )
+    ups_resp = _resp({"upsDevices": []})
+    notif_resp = _resp({"notifications": {"overview": {"unread": {"alert": 0, "warning": 0}}}})
+    async with mocked_client([array_resp, ups_resp, notif_resp]) as (c, r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "attention"
+    assert out["unhealthy_disks"][0]["health"] == "missing"
+    assert out["disk_count"] == 2
