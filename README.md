@@ -24,9 +24,10 @@ logged. The details are in [docs/security.md](docs/security.md).
 
 ## What you get
 
-Read-only tools for the stuff you'd actually want to check: system info, array and
-disk health, parity, Docker containers/networks, VMs, shares, notifications, UPS,
-network interfaces, and a one-shot `get_health_summary` for quick triage.
+Read-only tools for the stuff you'd actually want to check: system info, live CPU/
+memory/temperature metrics, array and disk health, parity, Docker containers/networks,
+VMs, shares, notifications, UPS, network interfaces, and a one-shot `get_health_summary`
+for quick triage.
 
 Opt-in mutating tools (start/stop the array, control Docker/VMs, run parity checks,
 manage notifications) only show up when you set `UNRAID_MCP_ALLOW_MUTATIONS=true`, and

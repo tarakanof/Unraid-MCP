@@ -117,11 +117,21 @@ def _check_shapes(obj: Any) -> None:
 
 async def _run(fetch: Callable[..., Awaitable[Any]], *args: Any) -> Any:
     """Call a read fetch, turning a capability-degradation error into a skip so
-    tools unsupported by this API version don't fail the run."""
+    tools unsupported by this API version don't fail the run.
+
+    Most reads surface unsupported fields as a raw ``UnraidGraphQLError``.
+    ``system.fetch_metrics`` (issue #16) instead translates that into a
+    friendly ``ToolError`` via ``_base.feature_unsupported`` (issue #15's
+    degradation contract), so it's also treated as a skip here.
+    """
     try:
         return await fetch(*args)
     except UnraidGraphQLError as exc:
         pytest.skip(f"unsupported by this Unraid API version: {exc}")
+    except ToolError as exc:
+        if "does not support" in str(exc):
+            pytest.skip(f"unsupported by this Unraid API version: {exc}")
+        raise
 
 
 # ── Read tools ───────────────────────────────────────────────────────────────
@@ -135,6 +145,7 @@ DICT_READS: list[Callable[..., Awaitable[Any]]] = [
     misc.fetch_health,
     notifications.fetch_overview,
     system.fetch_system_info,
+    system.fetch_metrics,
 ]
 
 # READ_ONLY fetches whose logic returns a list of dicts.

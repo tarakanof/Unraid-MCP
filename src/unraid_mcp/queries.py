@@ -45,6 +45,23 @@ query GetSystemInfo {
 }
 """
 
+# Live utilization snapshot. Selects conservatively — omits `hottest`/`coolest`
+# on TemperatureSummary (they force full nested TemperatureSensor selections)
+# and `percentUser`/`percentSystem`/etc. on CpuLoad (per-core total is enough
+# signal for an agent). Every field verified against the upstream SDL.
+SYSTEM_METRICS = """
+query GetSystemMetrics {
+  metrics {
+    cpu { percentTotal cpus { percentTotal } }
+    memory { total used free available percentTotal swapTotal swapUsed swapFree percentSwapTotal }
+    temperature {
+      summary { average warningCount criticalCount }
+      sensors { name current { value unit } }
+    }
+  }
+}
+"""
+
 _ARRAY_DISK_SELECTION = "{ " + _ARRAY_DISK_FIELDS + " }"
 
 ARRAY_STATUS = """
