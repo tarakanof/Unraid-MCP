@@ -183,6 +183,99 @@ async def test_docker_networks(mocked_client):
         assert await docker.fetch_docker_networks(c) == [{"name": "bridge"}]
 
 
+async def test_container_logs_happy_path(mocked_client):
+    data = {
+        "docker": {
+            "logs": {
+                "containerId": "1:abcdef",
+                "lines": [
+                    {"timestamp": "2024-01-01T00:00:00Z", "message": "starting up"},
+                    {"timestamp": "2024-01-01T00:00:01Z", "message": "ready"},
+                ],
+                "cursor": "2024-01-01T00:00:01Z",
+            }
+        }
+    }
+    async with mocked_client(_resp(data)) as (c, r):
+        out = await docker.fetch_container_logs(c, "1:abcdef", tail=10)
+    assert out["container_id"] == "1:abcdef"
+    assert out["lines"] == [
+        {"timestamp": "2024-01-01T00:00:00Z", "message": "starting up", "truncated": False},
+        {"timestamp": "2024-01-01T00:00:01Z", "message": "ready", "truncated": False},
+    ]
+    assert out["cursor"] == "2024-01-01T00:00:01Z"
+    assert out["truncated"] is False
+    assert _sent_vars(r) == {"id": "1:abcdef", "since": None, "tail": 10}
+
+
+async def test_container_logs_long_line_truncated(mocked_client):
+    long_message = "x" * 2500
+    data = {
+        "docker": {
+            "logs": {
+                "containerId": "1:abcdef",
+                "lines": [{"timestamp": "2024-01-01T00:00:00Z", "message": long_message}],
+                "cursor": None,
+            }
+        }
+    }
+    async with mocked_client(_resp(data)) as (c, r):
+        out = await docker.fetch_container_logs(c, "1:abcdef")
+    line = out["lines"][0]
+    assert line["truncated"] is True
+    assert len(line["message"]) < len(long_message)
+    assert line["message"].endswith("[truncated]")
+    assert out["truncated"] is True
+
+
+async def test_container_logs_tail_clamp_no_http_call(mocked_client):
+    async with mocked_client(_resp({})) as (c, r):
+        with pytest.raises(ToolError, match="exceeds the maximum"):
+            await docker.fetch_container_logs(c, "1:abcdef", tail=5000)
+    assert r.call_count == 0
+
+
+async def test_container_logs_non_positive_tail_no_http_call(mocked_client):
+    async with mocked_client(_resp({})) as (c, r):
+        with pytest.raises(ToolError):
+            await docker.fetch_container_logs(c, "1:abcdef", tail=0)
+    assert r.call_count == 0
+
+
+async def test_container_logs_bad_since_no_http_call(mocked_client):
+    async with mocked_client(_resp({})) as (c, r):
+        with pytest.raises(ToolError, match="Invalid 'since'"):
+            await docker.fetch_container_logs(c, "1:abcdef", since="not-a-date")
+    assert r.call_count == 0
+
+
+async def test_container_logs_unknown_id(mocked_client):
+    err = httpx.Response(
+        200, json={"errors": [{"message": "No container with id 1:nope"}], "data": None}
+    )
+    async with mocked_client(err) as (c, r):
+        # fetch_* propagates non-"unsupported field" GraphQL errors untouched;
+        # `_base.guarded` (the @mcp.tool boundary) is what turns it into a
+        # friendly ToolError for the client, and does not misclassify it as
+        # an unsupported-API error.
+        with pytest.raises(UnraidGraphQLError) as ei:
+            await docker.fetch_container_logs(c, "1:nope")
+        assert "does not support" not in str(ei.value)
+
+
+async def test_container_logs_unsupported_api(mocked_client):
+    err = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "logs" on type "Docker".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client(err) as (c, r):
+        with pytest.raises(ToolError, match="does not support"):
+            await docker.fetch_container_logs(c, "1:abcdef", api_version="7.1.0")
+
+
 async def test_vms_with_domains_and_fallback(mocked_client):
     async with mocked_client(
         _resp({"vms": {"domains": [{"id": "u1", "name": "win", "state": "RUNNING"}]}})

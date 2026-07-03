@@ -206,6 +206,30 @@ async def test_get_container_detail(live_client):
     _check_shapes(detail)
 
 
+async def test_get_container_logs(live_client):
+    """list_docker_containers → get_docker_container_logs for the first id."""
+    containers = await _run(docker.fetch_containers, live_client)
+    if not containers:
+        pytest.skip("box reports no Docker containers")
+    container_id = containers[0].get("id")
+    if not container_id:
+        pytest.skip("container has no id to look up")
+    try:
+        result = await docker.fetch_container_logs(live_client, container_id, tail=10)
+    except ToolError as exc:
+        if "does not support" in str(exc):
+            pytest.skip(f"unsupported by this Unraid API version: {exc}")
+        raise
+    except UnraidGraphQLError as exc:
+        pytest.skip(f"unsupported by this Unraid API version: {exc}")
+    assert isinstance(result, dict)
+    assert "container_id" in result
+    assert isinstance(result["lines"], list)
+    for line in result["lines"]:
+        assert isinstance(line, dict)
+    _check_shapes(result)
+
+
 async def test_run_graphql_query(live_client):
     """run_graphql_query escape hatch: ``__typename`` is valid in any GraphQL
     schema, so this is version-independent."""

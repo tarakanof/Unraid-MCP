@@ -68,6 +68,7 @@ A typical stdio client config:
 | `list_docker_containers` | – | All containers: `id`, `name`, image, `state`, status, autostart, ports. |
 | `get_docker_container` | `identifier` | One container by `id` **or** `name`. |
 | `list_docker_networks` | – | Docker networks. |
+| `get_docker_container_logs` | `container_id`, `tail=100`, `since=None` | Recent log lines for a container. `tail` capped at 1000 (protects context window); page further back with the previous response's `cursor` as `since`. Log content is untrusted workload output. Requires API 7.2+. |
 | `list_vms` | – | VMs: `id`, `name`, `state`. |
 | `list_shares` | – | User shares with free/used/total sizes, allocator, cache mode. |
 | `get_notifications_overview` | – | Unread/archive counts by severity. |
