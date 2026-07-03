@@ -53,6 +53,70 @@ async def test_mutations_callable_when_enabled(settings_factory):
             assert refused.isError is True
 
 
+async def test_probe_failure_does_not_block_startup(settings_factory):
+    """A failed version probe must never prevent the server from serving tools.
+
+    The probe (queries.API_PROBE) is the first request in the lifespan; we make
+    every GraphQL call return a validation error. list_tools + get_system_info
+    must still succeed, with probed versions left None.
+    """
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(
+                200, json={"errors": [{"message": "Something broke"}], "data": None}
+            )
+        )
+        mcp = build_server(settings_factory(allow_mutations=False))
+        async with create_connected_server_and_client_session(
+            mcp, raise_exceptions=True
+        ) as session:
+            tools = {t.name for t in (await session.list_tools()).tools}
+            assert "get_system_info" in tools
+
+
+async def test_system_info_exposes_probed_versions(settings_factory):
+    """get_system_info merges the startup-probed versions at the top level."""
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "info": {
+                            "os": {"hostname": "tower"},
+                            "versions": {"core": {"api": "7.2.0", "unraid": "7.2.0"}},
+                        }
+                    }
+                },
+            )
+        )
+        mcp = build_server(settings_factory(allow_mutations=False))
+        async with create_connected_server_and_client_session(
+            mcp, raise_exceptions=True
+        ) as session:
+            result = await session.call_tool("get_system_info", {})
+            assert result.isError is False
+            assert result.structuredContent["api_version"] == "7.2.0"
+            assert result.structuredContent["unraid_version"] == "7.2.0"
+
+
+async def test_app_context_carries_probed_versions(settings_factory):
+    """get_app_context surfaces the versions stored on AppContext at startup."""
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {"info": {"versions": {"core": {"api": "7.1.0", "unraid": "7.1.5"}}}}
+                },
+            )
+        )
+        mcp = build_server(settings_factory())
+        async with mcp._mcp_server.lifespan(mcp._mcp_server) as ctx:
+            assert ctx.api_version == "7.1.0"
+            assert ctx.unraid_version == "7.1.5"
+
+
 async def test_unraid_http_client_ignores_proxy_environment(settings_factory, monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.local:8080")
     mcp = build_server(settings_factory())

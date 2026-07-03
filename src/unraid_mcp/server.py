@@ -10,8 +10,10 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
+from . import queries
 from .client import UnraidClient
 from .config import Settings
+from .errors import UnraidError
 from .logging import get_logger
 from .tools import register_all
 
@@ -32,6 +34,30 @@ class AppContext:
 
     client: UnraidClient
     settings: Settings
+    # Versions probed once at startup (see lifespan). Left None if the probe
+    # fails or the fields are absent — never blocks startup. Tools read these to
+    # explain capability gaps (see tools/_base.feature_unsupported).
+    api_version: str | None = None
+    unraid_version: str | None = None
+
+
+async def _probe_versions(client: UnraidClient) -> tuple[str | None, str | None]:
+    """Resolve (api_version, unraid_version) via a cheap GraphQL probe.
+
+    Never raises: any failure returns (None, None). Missing keys degrade to
+    None so startup is never blocked by an old/limited API build.
+    """
+    try:
+        data = await client.execute(queries.API_PROBE)
+    except UnraidError as exc:
+        log.warning("API version probe failed; continuing without versions: %s", exc)
+        return None, None
+    except Exception as exc:  # noqa: BLE001 - startup must never be blocked by the probe
+        log.warning("API version probe raised unexpectedly; continuing: %s", exc)
+        return None, None
+    core = ((data or {}).get("info") or {}).get("versions") or {}
+    core = core.get("core") or {}
+    return core.get("api"), core.get("unraid")
 
 
 def _transport_security(settings: Settings) -> TransportSecuritySettings | None:
@@ -70,13 +96,21 @@ def build_server(settings: Settings) -> FastMCP:
                 http,
                 host_label=settings.host_for_messages,
             )
+            api_version, unraid_version = await _probe_versions(client)
             log.info(
-                "unraid-mcp ready (target=%s, mutations=%s, raw_query=%s)",
+                "unraid-mcp ready (target=%s, mutations=%s, raw_query=%s, api=%s, unraid=%s)",
                 settings.host_for_messages,
                 settings.allow_mutations,
                 settings.allow_raw_query,
+                api_version,
+                unraid_version,
             )
-            yield AppContext(client=client, settings=settings)
+            yield AppContext(
+                client=client,
+                settings=settings,
+                api_version=api_version,
+                unraid_version=unraid_version,
+            )
 
     mcp = FastMCP(
         "unraid",

@@ -20,6 +20,17 @@ _ARRAY_DISK_FIELDS = (
 
 # ── Queries ────────────────────────────────────────────────────────────────
 
+# Cheap startup probe: resolves the connected API/Unraid versions so tools can
+# self-diagnose and degrade gracefully. Selects only fields present on every
+# supported build. UPPER_CASE so the schema-drift script validates it too.
+API_PROBE = """
+query GetApiProbe {
+  info {
+    versions { core { api unraid } }
+  }
+}
+"""
+
 SYSTEM_INFO = """
 query GetSystemInfo {
   info {
