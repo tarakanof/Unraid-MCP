@@ -245,6 +245,31 @@ def shape_docker_networks(data: dict | None) -> list[dict[str, Any]]:
     return docker.get("networks") or []
 
 
+_LOG_LINE_MAX_CHARS = 2000
+_TRUNCATION_MARKER = "… [truncated]"
+
+
+def _shape_log_line(line: dict | None) -> dict[str, Any]:
+    line = line or {}
+    message = line.get("message") or ""
+    truncated = len(message) > _LOG_LINE_MAX_CHARS
+    if truncated:
+        message = message[:_LOG_LINE_MAX_CHARS] + _TRUNCATION_MARKER
+    return {"timestamp": line.get("timestamp"), "message": message, "truncated": truncated}
+
+
+def shape_container_logs(data: dict | None) -> dict[str, Any]:
+    docker = (data or {}).get("docker") or {}
+    logs = docker.get("logs") or {}
+    lines = [_shape_log_line(line) for line in (logs.get("lines") or [])]
+    return {
+        "container_id": logs.get("containerId"),
+        "lines": lines,
+        "cursor": logs.get("cursor"),
+        "truncated": any(line["truncated"] for line in lines),
+    }
+
+
 def shape_vms(data: dict | None) -> list[dict[str, Any]]:
     vms = (data or {}).get("vms") or {}
     if not isinstance(vms, dict):

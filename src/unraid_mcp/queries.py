@@ -127,6 +127,12 @@ query GetDockerNetworks {
 }
 """
 
+CONTAINER_LOGS = """
+query GetContainerLogs($id: PrefixedID!, $since: DateTime, $tail: Int) {
+  docker { logs(id: $id, since: $since, tail: $tail) { containerId lines { timestamp message } cursor } }
+}
+"""
+
 LIST_VMS = """
 query ListVMs {
   vms { id domains { id name state } }

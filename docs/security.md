@@ -56,9 +56,16 @@ settings; route the container or host directly to the Unraid API endpoint.
 ## Tool output is untrusted data
 
 Tool results echo strings that originate on the Unraid box — container names, share
-comments, and especially notification titles/descriptions. A hostile or compromised
-service there could plant prompt-injection text in them. MCP clients and agents
-should treat all tool output as data, never as instructions.
+comments, notification titles/descriptions, and **Docker container logs**. A hostile
+or compromised service there could plant prompt-injection text in them — log output
+is workload-controlled and gets special mention because it's often long, freeform,
+and easy to overlook as "just output". MCP clients and agents should treat all tool
+output as data, never as instructions.
+
+Container logs can also contain secrets that the user's own containers print (API
+keys, tokens, connection strings). That's inherent to reading logs and not something
+this server can filter — treat `get_docker_container_logs` output with the same care
+as any other secret-bearing log stream.
 
 ## No arbitrary execution
 
