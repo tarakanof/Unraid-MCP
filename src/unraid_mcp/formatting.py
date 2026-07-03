@@ -150,6 +150,67 @@ def shape_system_info(data: dict | None) -> dict[str, Any]:
     return (data or {}).get("info") or {}
 
 
+def shape_metrics(data: dict | None) -> dict[str, Any]:
+    """Shape the ``metrics`` live-utilization snapshot.
+
+    ``cpu``/``memory``/``temperature`` are each independently nullable on the
+    upstream ``Metrics`` type, so a partial response (e.g. no temperature
+    sensors configured) still yields the fields that ARE present — callers
+    must not assume all three keys exist.
+    """
+    metrics = (data or {}).get("metrics") or {}
+    out: dict[str, Any] = {}
+
+    cpu = metrics.get("cpu")
+    if cpu is not None:
+        out["cpu"] = {
+            "percent_total": round(cpu.get("percentTotal"), 1)
+            if cpu.get("percentTotal") is not None
+            else None,
+            "per_core": [
+                round(c.get("percentTotal"), 1) if c.get("percentTotal") is not None else None
+                for c in (cpu.get("cpus") or [])
+            ],
+        }
+
+    memory = metrics.get("memory")
+    if memory is not None:
+        out["memory"] = {
+            "total": _size_from_bytes(memory.get("total")),
+            "used": _size_from_bytes(memory.get("used")),
+            "free": _size_from_bytes(memory.get("free")),
+            "available": _size_from_bytes(memory.get("available")),
+            "percent_total": memory.get("percentTotal"),
+            "swap_total": _size_from_bytes(memory.get("swapTotal")),
+            "swap_used": _size_from_bytes(memory.get("swapUsed")),
+            "swap_free": _size_from_bytes(memory.get("swapFree")),
+            "percent_swap_total": memory.get("percentSwapTotal"),
+        }
+
+    temperature = metrics.get("temperature")
+    if temperature is not None:
+        summary = temperature.get("summary") or {}
+        out["temperature"] = {
+            "summary": {
+                "average": summary.get("average"),
+                "warning_count": summary.get("warningCount"),
+                "critical_count": summary.get("criticalCount"),
+            },
+            "sensors": [
+                {
+                    "name": s.get("name"),
+                    "current": {
+                        "value": (s.get("current") or {}).get("value"),
+                        "unit": (s.get("current") or {}).get("unit"),
+                    },
+                }
+                for s in (temperature.get("sensors") or [])
+            ],
+        }
+
+    return out
+
+
 def shape_container(c: dict | None) -> dict[str, Any] | None:
     if not c:
         return None

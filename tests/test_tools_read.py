@@ -32,6 +32,67 @@ async def test_system_info(mocked_client):
     assert _sent_query(route) == queries.SYSTEM_INFO
 
 
+async def test_system_metrics(mocked_client):
+    data = {
+        "metrics": {
+            "cpu": {
+                "percentTotal": 12.345,
+                "cpus": [{"percentTotal": 5.05}, {"percentTotal": 19.999}],
+            },
+            "memory": {
+                "total": 17179869184,
+                "used": 8589934592,
+                "free": 8589934592,
+                "available": 8589934592,
+                "percentTotal": 50.0,
+                "swapTotal": 4294967296,
+                "swapUsed": 0,
+                "swapFree": 4294967296,
+                "percentSwapTotal": 0.0,
+            },
+            "temperature": {
+                "summary": {"average": 42.5, "warningCount": 0, "criticalCount": 0},
+                "sensors": [{"name": "CPU", "current": {"value": 45.0, "unit": "C"}}],
+            },
+        }
+    }
+    async with mocked_client(_resp(data)) as (client, route):
+        out = await system.fetch_metrics(client)
+    assert out["cpu"] == {"percent_total": 12.3, "per_core": [5.0, 20.0]}
+    assert out["memory"]["total"] == {"bytes": 17179869184, "human": "16.0 GiB"}
+    assert out["memory"]["percent_total"] == 50.0
+    assert out["temperature"]["summary"]["warning_count"] == 0
+    assert _sent_query(route) == queries.SYSTEM_METRICS
+
+
+async def test_system_metrics_partial_response_still_returns_cpu_memory(mocked_client):
+    data = {
+        "metrics": {
+            "cpu": {"percentTotal": 1.0, "cpus": []},
+            "memory": {"total": 1024, "used": 512, "free": 512, "available": 512},
+            "temperature": None,
+        }
+    }
+    async with mocked_client(_resp(data)) as (client, route):
+        out = await system.fetch_metrics(client)
+    assert "cpu" in out
+    assert "memory" in out
+    assert "temperature" not in out
+
+
+async def test_system_metrics_unsupported_api_raises_friendly_error(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "metrics" on type "Query".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client(resp) as (client, route):
+        with pytest.raises(ToolError, match="does not support"):
+            await system.fetch_metrics(client, api_version="7.1.0")
+
+
 async def test_array_status(mocked_client):
     data = {
         "array": {

@@ -9,6 +9,7 @@ from unraid_mcp.formatting import (
     human_size,
     kib_to_bytes,
     shape_array_status,
+    shape_metrics,
     shape_mutation_result,
     shape_physical_disk,
 )
@@ -37,6 +38,55 @@ def test_human_size(num, expected):
 )
 def test_kib_to_bytes(value, expected):
     assert kib_to_bytes(value) == expected
+
+
+def test_shape_metrics_shapes_cpu_memory_temperature():
+    raw = {
+        "metrics": {
+            "cpu": {
+                "percentTotal": 12.345,
+                "cpus": [{"percentTotal": 5.05}, {"percentTotal": 19.999}],
+            },
+            "memory": {
+                "total": 17179869184,
+                "used": 8589934592,
+                "free": 8589934592,
+                "available": 8589934592,
+                "percentTotal": 50.0,
+                "swapTotal": 4294967296,
+                "swapUsed": 0,
+                "swapFree": 4294967296,
+                "percentSwapTotal": 0.0,
+            },
+            "temperature": {
+                "summary": {"average": 42.5, "warningCount": 0, "criticalCount": 0},
+                "sensors": [{"name": "CPU", "current": {"value": 45.0, "unit": "C"}}],
+            },
+        }
+    }
+    out = shape_metrics(raw)
+    assert out["cpu"] == {"percent_total": 12.3, "per_core": [5.0, 20.0]}
+    assert out["memory"]["total"] == {"bytes": 17179869184, "human": "16.0 GiB"}
+    assert out["memory"]["swap_free"] == {"bytes": 4294967296, "human": "4.0 GiB"}
+    assert out["memory"]["percent_total"] == 50.0
+    assert out["temperature"]["summary"]["average"] == 42.5
+    assert out["temperature"]["sensors"] == [
+        {"name": "CPU", "current": {"value": 45.0, "unit": "C"}}
+    ]
+
+
+def test_shape_metrics_partial_response_omits_missing_temperature():
+    raw = {
+        "metrics": {
+            "cpu": {"percentTotal": 1.0, "cpus": []},
+            "memory": {"total": 1024, "used": 512, "free": 512, "available": 512},
+            "temperature": None,
+        }
+    }
+    out = shape_metrics(raw)
+    assert "cpu" in out
+    assert "memory" in out
+    assert "temperature" not in out
 
 
 def test_shape_array_status_converts_capacity_and_disks():

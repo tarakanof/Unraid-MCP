@@ -9,12 +9,24 @@ from mcp.server.fastmcp import Context, FastMCP
 from .. import queries
 from ..client import UnraidClient
 from ..config import Settings
-from ..formatting import shape_system_info
-from ._base import READ_ONLY, get_app_context, guarded
+from ..errors import UnraidGraphQLError
+from ..formatting import shape_metrics, shape_system_info
+from ._base import READ_ONLY, feature_unsupported, get_app_context, guarded, unsupported_field_error
 
 
 async def fetch_system_info(client: UnraidClient) -> dict[str, Any]:
     return shape_system_info(await client.execute(queries.SYSTEM_INFO))
+
+
+async def fetch_metrics(client: UnraidClient, *, api_version: str | None = None) -> dict[str, Any]:
+    try:
+        return shape_metrics(await client.execute(queries.SYSTEM_METRICS))
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported(
+                "live system metrics", requires="7.2+", api_version=api_version
+            ) from None
+        raise
 
 
 def register(mcp: FastMCP, settings: Settings) -> None:
@@ -32,3 +44,10 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             "api_version": app.api_version,
             "unraid_version": app.unraid_version,
         }
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_system_metrics(ctx: Context) -> dict[str, Any]:
+        """Get live utilization: total/per-core CPU %, memory/swap usage,
+        temperatures."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(ctx, fetch_metrics, api_version=api_version)

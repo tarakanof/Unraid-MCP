@@ -59,6 +59,7 @@ A typical stdio client config:
 |------|------|-----------|
 | `get_health_summary` | – | One-call triage: array state, capacity, unhealthy disks, parity status, UPS, unread alert counts. **Start here.** |
 | `get_system_info` | – | OS/kernel, CPU, memory, motherboard, Unraid + API versions, uptime. |
+| `get_system_metrics` | – | Live utilization: total/per-core CPU %, memory/swap usage, temperatures. Requires API 7.2+; older builds get a friendly error. |
 | `get_array_status` | – | Array state, total/used/free capacity, and every data/parity/cache disk with `health`, temp, and I/O counters. |
 | `list_disks` | – | Physical disks: model, size, interface, SMART status, temperature, spin state. |
 | `get_disk` | `disk_id` | Full detail for one physical disk (partitions, firmware, SMART). Get `disk_id` from `list_disks`. |
