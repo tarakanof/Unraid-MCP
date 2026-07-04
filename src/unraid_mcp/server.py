@@ -15,6 +15,8 @@ from .client import UnraidClient
 from .config import Settings
 from .errors import UnraidError
 from .logging import get_logger
+from .prompts import register_prompts
+from .resources import register_resources
 from .tools import register_all
 
 log = get_logger(__name__)
@@ -122,4 +124,8 @@ def build_server(settings: Settings) -> FastMCP:
         transport_security=_transport_security(settings),
     )
     register_all(mcp, settings)
+    # Resources and prompts are always on: both are read-only and reuse the
+    # same fetch_* functions the read tools do (no new GraphQL surface).
+    register_resources(mcp, settings)
+    register_prompts(mcp, settings)
     return mcp
