@@ -96,6 +96,8 @@ A typical stdio client config:
 | `stop_docker_container` | `container_id`, `confirm` | Stops a service. |
 | `restart_docker_container` | `container_id`, `confirm` | Atomic on current APIs (native restart); falls back to stop-then-start on older builds (then **not atomic** — if start fails it's left stopped). |
 | `pause_docker_container` / `unpause_docker_container` | `container_id`, `confirm` | Freeze/resume a container's processes without stopping it. No fallback on older API builds — errors clearly if unsupported. |
+| `update_docker_container` | `container_id`, `confirm` | Pull latest image and **recreate** the container (brief downtime). id from `list_docker_containers` / `check_docker_updates`. |
+| `update_docker_containers` | `container_ids`, `confirm` | Batch update: pull + recreate each. List must be non-empty and ≤ 20 ids per call. |
 | `start_vm` / `pause_vm` / `resume_vm` | `vm_id`, `confirm` | id from `list_vms`. |
 | `stop_vm` | `vm_id`, `confirm` | Graceful shutdown. |
 | `reboot_vm` | `vm_id`, `confirm` | Reboot. |
@@ -120,6 +122,7 @@ opted in — do not try to work around it.
 | `add_disk_to_array` | `disk_id`, `slot=None`, `confirm` | **Array must be stopped.** Assigning a data slot can overwrite/format the disk once started. |
 | `remove_disk_from_array` | `disk_id`, `confirm` | **Array must be stopped.** Data on the removed disk becomes inaccessible. |
 | `remove_docker_container` | `container_id`, `with_image=False`, `confirm` | **Permanent.** `with_image=true` also deletes the underlying image. |
+| `update_all_docker_containers` | `confirm` | **Fleet-wide.** Pull + recreate **every** container with an available update — restarts many services at once. Prefer `update_docker_container(s)` for a specific target. |
 
 > There is intentionally **no host reboot/shutdown** tool — the Unraid GraphQL API doesn't expose it.
 
@@ -139,9 +142,13 @@ opted in — do not try to work around it.
   - **Array start/stop** — `start_array`/`stop_array` return `{"state": "...", ...}`,
     where `start_array` also includes `capacity` normalized to `{bytes, human}`
     (just like `get_array_status`).
-  - **Object-returning ops** — `start_docker_container`, `archive_notification`,
-    `archive_all_notifications`, `delete_notification`, etc. return the flattened
-    payload (e.g. the affected container, or `{unread, archive}` counts).
+  - **Object-returning ops** — `start_docker_container`, `update_docker_container`,
+    `archive_notification`, `archive_all_notifications`, `delete_notification`, etc.
+    return the flattened payload (e.g. the affected container, or `{unread, archive}`
+    counts).
+  - **List-returning ops** — `update_docker_containers` / `update_all_docker_containers`
+    return a **list** of the recreated containers (`{id, names, state, status}` each);
+    an empty list means nothing had an update to apply.
 - **Disk health words** (on array disks): `healthy`, `warning`, `critical`, `failed`,
   `missing`, `new`, `unknown`.
 - **Enums you'll see:** array `state` `STARTED|STOPPED|...`; container `state`

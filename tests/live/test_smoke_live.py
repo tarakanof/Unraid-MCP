@@ -286,6 +286,8 @@ MUTATION_REFUSALS: list[tuple[str, Callable[[UnraidClient], Awaitable[Any]]]] = 
     ("restart_container", lambda c: docker.do_restart_container(c, "x", confirm=False)),
     ("pause_container", lambda c: docker.do_pause_container(c, "x", confirm=False)),
     ("unpause_container", lambda c: docker.do_unpause_container(c, "x", confirm=False)),
+    ("update_container", lambda c: docker.do_update_container(c, "x", confirm=False)),
+    ("update_containers", lambda c: docker.do_update_containers(c, ["x"], confirm=False)),
     (
         "archive_notification",
         lambda c: notifications.do_archive_notification(c, "x", confirm=False),
@@ -310,6 +312,7 @@ MUTATION_REFUSALS: list[tuple[str, Callable[[UnraidClient], Awaitable[Any]]]] = 
     ("add_disk_to_array", lambda c: array.do_add_disk_to_array(c, "x", confirm=False)),
     ("remove_disk_from_array", lambda c: array.do_remove_disk_from_array(c, "x", confirm=False)),
     ("remove_docker_container", lambda c: docker.do_remove_container(c, "x", confirm=False)),
+    ("update_all_docker_containers", lambda c: docker.do_update_all_containers(c, confirm=False)),
 ]
 
 

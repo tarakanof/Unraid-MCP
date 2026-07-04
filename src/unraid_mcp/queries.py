@@ -309,6 +309,20 @@ mutation UnpauseContainer($id: PrefixedID!) {
 }
 """
 
+# Pull the latest image and recreate the container. Returns the recreated
+# DockerContainer; `updateContainers` recreates a batch and returns a LIST.
+UPDATE_CONTAINER = """
+mutation UpdateContainer($id: PrefixedID!) {
+  docker { updateContainer(id: $id) { id names state status } }
+}
+"""
+
+UPDATE_CONTAINERS = """
+mutation UpdateContainers($ids: [PrefixedID!]!) {
+  docker { updateContainers(ids: $ids) { id names state status } }
+}
+"""
+
 VM_START = "mutation StartVM($id: PrefixedID!) { vm { start(id: $id) } }"
 VM_STOP = "mutation StopVM($id: PrefixedID!) { vm { stop(id: $id) } }"
 VM_PAUSE = "mutation PauseVM($id: PrefixedID!) { vm { pause(id: $id) } }"
@@ -399,5 +413,13 @@ mutation RemoveDiskFromArray($input: ArrayDiskInput!) {
 REMOVE_DOCKER_CONTAINER = """
 mutation RemoveDockerContainer($id: PrefixedID!, $withImage: Boolean) {
   docker { removeContainer(id: $id, withImage: $withImage) }
+}
+"""
+
+# Fleet-wide: pull + recreate EVERY container with an available update. Returns
+# the LIST of recreated DockerContainers.
+UPDATE_ALL_CONTAINERS = """
+mutation UpdateAllContainers {
+  docker { updateAllContainers { id names state status } }
 }
 """

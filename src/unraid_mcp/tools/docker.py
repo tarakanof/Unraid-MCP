@@ -19,6 +19,7 @@ from ..formatting import (
     shape_docker_networks,
     shape_docker_update_statuses,
     shape_mutation_result,
+    shape_mutation_result_list,
 )
 from ._base import (
     DESTRUCTIVE,
@@ -32,6 +33,9 @@ from ._base import (
 )
 
 MAX_LOG_TAIL = 1000
+# Cap for the batch update tool — keeps a single call's blast radius (and the
+# server-side pull+recreate load) bounded. Enforced before any network I/O.
+MAX_UPDATE_CONTAINERS = 20
 
 
 async def fetch_containers(client: UnraidClient) -> list[dict[str, Any]]:
@@ -215,7 +219,75 @@ async def do_unpause_container(
     return shape_mutation_result(result)
 
 
+async def do_update_container(
+    client: UnraidClient,
+    container_id: str,
+    confirm: bool = False,
+    *,
+    api_version: str | None = None,
+) -> dict[str, Any]:
+    """Pull the latest image for one container and recreate it."""
+    require_confirm(confirm, f"update (pull + recreate) container '{container_id}'")
+    if not container_id or not container_id.strip():
+        raise ToolError(
+            "container_id must be a non-empty container id (see list_docker_containers)."
+        )
+    try:
+        result = await client.execute(queries.UPDATE_CONTAINER, {"id": container_id})
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported("Docker container updates", api_version=api_version) from None
+        raise
+    return shape_mutation_result(result)
+
+
+async def do_update_containers(
+    client: UnraidClient,
+    container_ids: list[str],
+    confirm: bool = False,
+    *,
+    api_version: str | None = None,
+) -> list[dict[str, Any]]:
+    """Pull the latest image for a batch of containers and recreate them."""
+    require_confirm(
+        confirm, f"update (pull + recreate) {len(container_ids)} container(s): {container_ids}"
+    )
+    if not container_ids:
+        raise ToolError(
+            "container_ids must be a non-empty list of container ids (see list_docker_containers)."
+        )
+    if len(container_ids) > MAX_UPDATE_CONTAINERS:
+        raise ToolError(
+            f"Too many container ids: {len(container_ids)} exceeds the maximum of "
+            f"{MAX_UPDATE_CONTAINERS} per call. Split the update into smaller batches."
+        )
+    try:
+        result = await client.execute(queries.UPDATE_CONTAINERS, {"ids": container_ids})
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported("Docker container updates", api_version=api_version) from None
+        raise
+    return shape_mutation_result_list(result)
+
+
 # ── Dangerous-tier logic ────────────────────────────────────────────────────
+
+
+async def do_update_all_containers(
+    client: UnraidClient,
+    confirm: bool = False,
+    *,
+    api_version: str | None = None,
+) -> list[dict[str, Any]]:
+    """Pull + recreate EVERY container that has an available image update."""
+    require_confirm(confirm, "update (pull + recreate) EVERY container with an available update")
+    try:
+        result = await client.execute(queries.UPDATE_ALL_CONTAINERS)
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported("Docker container updates", api_version=api_version) from None
+        raise
+    return shape_mutation_result_list(result)
 
 
 async def do_remove_container(
@@ -338,6 +410,33 @@ def register_mutations(mcp: FastMCP, settings: Settings) -> None:
             ctx, do_unpause_container, container_id, confirm, api_version=api_version
         )
 
+    @mcp.tool(annotations=DESTRUCTIVE)
+    async def update_docker_container(
+        ctx: Context, container_id: str, confirm: bool = False
+    ) -> dict[str, Any]:
+        """Update one Docker container: pull its latest image and RECREATE the
+        container (id from list_docker_containers / check_docker_updates). The
+        running container is replaced — brief downtime while it restarts on the
+        new image. Requires confirm=true."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(
+            ctx, do_update_container, container_id, confirm, api_version=api_version
+        )
+
+    @mcp.tool(annotations=DESTRUCTIVE)
+    async def update_docker_containers(
+        ctx: Context, container_ids: list[str], confirm: bool = False
+    ) -> list[dict[str, Any]]:
+        """Update a batch of Docker containers: pull each latest image and
+        RECREATE those containers (ids from list_docker_containers /
+        check_docker_updates). Each is replaced with brief downtime. The list
+        must be non-empty and hold at most 20 ids per call. Requires
+        confirm=true."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(
+            ctx, do_update_containers, container_ids, confirm, api_version=api_version
+        )
+
 
 def register_dangerous(mcp: FastMCP, settings: Settings) -> None:
     """Dangerous-tier Docker tools. Registered only when BOTH
@@ -353,3 +452,17 @@ def register_dangerous(mcp: FastMCP, settings: Settings) -> None:
         containers using that image would then need to re-pull it). Requires
         confirm=true."""
         return await guarded(ctx, do_remove_container, container_id, with_image, confirm)
+
+    @mcp.tool(annotations=DESTRUCTIVE)
+    async def update_all_docker_containers(
+        ctx: Context, confirm: bool = False
+    ) -> list[dict[str, Any]]:
+        """DANGEROUS. Update EVERY Docker container that has an available image
+        update: for each one this pulls the new image and RECREATES the
+        container. This is fleet-wide — it can restart many services at once,
+        each incurring brief downtime, and any container that breaks on its new
+        image is affected simultaneously. There is no per-container selection
+        here; use update_docker_container / update_docker_containers to update a
+        specific target instead. Requires confirm=true."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(ctx, do_update_all_containers, confirm, api_version=api_version)
