@@ -41,6 +41,11 @@ MUTATION_TOOLS = {
     "archive_all_notifications",
     "mark_notification_unread",
     "delete_notification",
+    "archive_notifications",
+    "unarchive_notifications",
+    "unarchive_all_notifications",
+    "delete_archived_notifications",
+    "create_notification",
 }
 # Dangerous-tier tools — registered only when allow_mutations AND allow_dangerous.
 DANGEROUS_TOOLS = {
@@ -487,6 +492,188 @@ async def test_delete_notification_with_confirm_sends_type(mocked_client):
         await notifications.do_delete_notification(client, "n1", "ARCHIVE", confirm=True)
         body = json.loads(route.calls.last.request.content)
         assert body["variables"] == {"id": "n1", "type": "ARCHIVE"}
+
+
+# ── Notification lifecycle bulk ops (#24) ────────────────────────────────────
+
+_OVERVIEW_PAYLOAD = {
+    "unread": {"info": 1, "warning": 0, "alert": 0, "total": 1},
+    "archive": {"info": 2, "warning": 1, "alert": 0, "total": 3},
+}
+
+
+async def test_archive_notifications_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await notifications.do_archive_notifications(client, ["n1"], confirm=False)
+        assert route.call_count == 0
+
+
+async def test_archive_notifications_rejects_empty_ids_pre_network(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await notifications.do_archive_notifications(client, [], confirm=True)
+        assert route.call_count == 0
+
+
+async def test_archive_notifications_with_confirm_sends_ids(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"archiveNotifications": _OVERVIEW_PAYLOAD}})
+    ) as (client, route):
+        result = await notifications.do_archive_notifications(client, ["n1", "n2"], confirm=True)
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.ARCHIVE_NOTIFICATIONS
+        assert body["variables"] == {"ids": ["n1", "n2"]}
+        assert result == _OVERVIEW_PAYLOAD
+
+
+async def test_unarchive_notifications_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await notifications.do_unarchive_notifications(client, ["n1"], confirm=False)
+        assert route.call_count == 0
+
+
+async def test_unarchive_notifications_rejects_empty_ids_pre_network(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await notifications.do_unarchive_notifications(client, [], confirm=True)
+        assert route.call_count == 0
+
+
+async def test_unarchive_notifications_with_confirm_sends_ids(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"unarchiveNotifications": _OVERVIEW_PAYLOAD}})
+    ) as (client, route):
+        result = await notifications.do_unarchive_notifications(client, ["n1"], confirm=True)
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.UNARCHIVE_NOTIFICATIONS
+        assert body["variables"] == {"ids": ["n1"]}
+        assert result == _OVERVIEW_PAYLOAD
+
+
+async def test_unarchive_all_notifications_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await notifications.do_unarchive_all(client, None, confirm=False)
+        assert route.call_count == 0
+
+
+async def test_unarchive_all_notifications_rejects_invalid_importance_pre_network(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await notifications.do_unarchive_all(client, "CRITICAL", confirm=True)
+        assert route.call_count == 0
+
+
+async def test_unarchive_all_notifications_with_confirm_sends_importance(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"unarchiveAll": _OVERVIEW_PAYLOAD}})
+    ) as (client, route):
+        result = await notifications.do_unarchive_all(client, "WARNING", confirm=True)
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.UNARCHIVE_ALL_NOTIFICATIONS
+        assert body["variables"] == {"importance": "WARNING"}
+        assert result == _OVERVIEW_PAYLOAD
+
+
+async def test_delete_archived_notifications_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await notifications.do_delete_archived_notifications(client, confirm=False)
+        assert route.call_count == 0
+
+
+async def test_delete_archived_notifications_with_confirm_sends(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"deleteArchivedNotifications": _OVERVIEW_PAYLOAD}})
+    ) as (client, route):
+        result = await notifications.do_delete_archived_notifications(client, confirm=True)
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.DELETE_ARCHIVED_NOTIFICATIONS
+        assert body["variables"] == {}
+        assert result == _OVERVIEW_PAYLOAD
+
+
+async def test_create_notification_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await notifications.do_create_notification(
+                client,
+                "Backup done",
+                "Backup",
+                "Nightly backup finished OK.",
+                "INFO",
+                confirm=False,
+            )
+        assert route.call_count == 0
+
+
+async def test_create_notification_rejects_invalid_importance_pre_network(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await notifications.do_create_notification(
+                client,
+                "Backup done",
+                "Backup",
+                "Nightly backup finished OK.",
+                "CRITICAL",
+                confirm=True,
+            )
+        assert route.call_count == 0
+
+
+async def test_create_notification_with_confirm_sends_input(mocked_client):
+    payload = {
+        "id": "n9",
+        "title": "Backup done",
+        "subject": "Backup",
+        "description": "Nightly backup finished OK.",
+        "importance": "INFO",
+        "link": None,
+        "type": "UNREAD",
+        "timestamp": "2026-07-04T00:00:00Z",
+    }
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"createNotification": payload}})
+    ) as (client, route):
+        result = await notifications.do_create_notification(
+            client, "Backup done", "Backup", "Nightly backup finished OK.", "INFO", confirm=True
+        )
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.CREATE_NOTIFICATION
+        assert body["variables"] == {
+            "input": {
+                "title": "Backup done",
+                "subject": "Backup",
+                "description": "Nightly backup finished OK.",
+                "importance": "INFO",
+            }
+        }
+        assert result == payload
+
+
+async def test_create_notification_includes_link_when_given(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"createNotification": {"id": "n9"}}})
+    ) as (client, route):
+        await notifications.do_create_notification(
+            client,
+            "Backup done",
+            "Backup",
+            "Nightly backup finished OK.",
+            "INFO",
+            link="https://example.com",
+            confirm=True,
+        )
+        body = json.loads(route.calls.last.request.content)
+        assert body["variables"]["input"] == {
+            "title": "Backup done",
+            "subject": "Backup",
+            "description": "Nightly backup finished OK.",
+            "importance": "INFO",
+            "link": "https://example.com",
+        }
 
 
 # ── Dangerous-tier: array disk ops ───────────────────────────────────────────

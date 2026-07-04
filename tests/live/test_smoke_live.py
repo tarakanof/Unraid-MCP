@@ -298,6 +298,26 @@ MUTATION_REFUSALS: list[tuple[str, Callable[[UnraidClient], Awaitable[Any]]]] = 
         "delete_notification",
         lambda c: notifications.do_delete_notification(c, "x", "UNREAD", confirm=False),
     ),
+    (
+        "archive_notifications",
+        lambda c: notifications.do_archive_notifications(c, ["x"], confirm=False),
+    ),
+    (
+        "unarchive_notifications",
+        lambda c: notifications.do_unarchive_notifications(c, ["x"], confirm=False),
+    ),
+    (
+        "unarchive_all_notifications",
+        lambda c: notifications.do_unarchive_all(c, None, confirm=False),
+    ),
+    (
+        "delete_archived_notifications",
+        lambda c: notifications.do_delete_archived_notifications(c, confirm=False),
+    ),
+    (
+        "create_notification",
+        lambda c: notifications.do_create_notification(c, "x", "x", "x", "INFO", confirm=False),
+    ),
     ("start_vm", lambda c: vm.do_start_vm(c, "x", confirm=False)),
     ("stop_vm", lambda c: vm.do_stop_vm(c, "x", confirm=False)),
     ("pause_vm", lambda c: vm.do_pause_vm(c, "x", confirm=False)),

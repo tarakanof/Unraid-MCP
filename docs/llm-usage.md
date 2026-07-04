@@ -107,6 +107,11 @@ A typical stdio client config:
 | `archive_all_notifications` | `importance=None`, `confirm` | Bulk archive (optionally one severity). |
 | `mark_notification_unread` | `notification_id`, `confirm` | Move an archived notification back to unread. |
 | `delete_notification` | `notification_id`, `notification_type`, `confirm` | **Permanent.** `notification_type` ∈ `UNREAD`/`ARCHIVE` (where it currently lives). |
+| `archive_notifications` | `ids`, `confirm` | Bulk-archive unread notifications by id (non-empty list, from `list_notifications`). |
+| `unarchive_notifications` | `ids`, `confirm` | Bulk-move archived notifications back to unread by id (non-empty list). |
+| `unarchive_all_notifications` | `importance=None`, `confirm` | Unarchive everything (optionally one severity). |
+| `delete_archived_notifications` | `confirm` | **Permanent.** Deletes every archived notification in one call. |
+| `create_notification` | `title`, `subject`, `description`, `importance`, `link=None`, `confirm` | **Agent→operator channel.** Posts a notification into the Unraid WebGUI bell so you can leave the operator a persistent message (e.g. "disk 2 SMART errors climbing"). `importance` ∈ `INFO`/`WARNING`/`ALERT` (required). |
 
 ### Dangerous (only if the operator enabled **both** mutations and dangerous; **all require `confirm=true`**)
 
@@ -143,9 +148,12 @@ opted in — do not try to work around it.
     where `start_array` also includes `capacity` normalized to `{bytes, human}`
     (just like `get_array_status`).
   - **Object-returning ops** — `start_docker_container`, `update_docker_container`,
-    `archive_notification`, `archive_all_notifications`, `delete_notification`, etc.
-    return the flattened payload (e.g. the affected container, or `{unread, archive}`
-    counts).
+    `archive_notification`, `archive_all_notifications`, `delete_notification`,
+    `archive_notifications`, `unarchive_notifications`, `unarchive_all_notifications`,
+    `delete_archived_notifications`, etc. return the flattened payload (e.g. the
+    affected container, or `{unread, archive}` counts). `create_notification`
+    returns the created `Notification` object (id, title, subject, description,
+    importance, link, type, timestamp).
   - **List-returning ops** — `update_docker_containers` / `update_all_docker_containers`
     return a **list** of the recreated containers (`{id, names, state, status}` each);
     an empty list means nothing had an update to apply.

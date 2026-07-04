@@ -24,8 +24,17 @@ nothing.
 | Tier | Flag | Default | Unlocks |
 | --- | --- | --- | --- |
 | Read | *(always on)* | on | All monitoring/read tools. Never change anything. |
-| Mutate | `UNRAID_MCP_ALLOW_MUTATIONS` | off | Everyday writes: start/stop array, start/pause/resume/cancel parity, start/stop/restart/update Docker containers (single + batch), start/stop/pause/resume/reboot/force-stop/reset VMs, notification archive/unread/delete. |
+| Mutate | `UNRAID_MCP_ALLOW_MUTATIONS` | off | Everyday writes: start/stop array, start/pause/resume/cancel parity, start/stop/restart/update Docker containers (single + batch), start/stop/pause/resume/reboot/force-stop/reset VMs, notification archive/unarchive/unread/delete (single and bulk, plus `create_notification` — see below). `delete_archived_notifications` is annotated `destructive` (irreversible bulk delete) but lives in this tier, not the dangerous one. |
 | Dangerous | `UNRAID_MCP_ALLOW_DANGEROUS` (requires mutations too) | off | High-blast-radius topology/removal ops (see below). |
+
+**Notification lifecycle tools** (mutate tier, all require `confirm=true`):
+
+- `archive_notifications` / `unarchive_notifications` — bulk archive/unarchive by id.
+- `unarchive_all_notifications` — bulk unarchive, optionally filtered by severity.
+- `delete_archived_notifications` — annotated `destructive`: permanently deletes
+  **every** archived notification in one call (irreversible).
+- `create_notification` — the agent→operator channel: posts a notification into the
+  Unraid WebGUI bell so an agent can leave the operator a persistent message.
 
 **Dangerous-tier tools** (all annotated `destructive`, all require `confirm=true`):
 

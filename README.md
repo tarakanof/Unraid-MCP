@@ -31,7 +31,10 @@ for quick triage.
 
 Opt-in mutating tools (start/stop the array, control Docker/VMs, run parity checks,
 manage notifications) only show up when you set `UNRAID_MCP_ALLOW_MUTATIONS=true`, and
-every one of them needs `confirm=true`.
+every one of them needs `confirm=true`. That includes `create_notification` — an
+agent→operator channel that posts a persistent message straight into the Unraid
+WebGUI's notification bell, so an agent that spots a problem can leave a note where
+you'll actually see it.
 
 A third **dangerous** tier (`UNRAID_MCP_ALLOW_DANGEROUS=true`) unlocks high-blast-radius
 operations — array topology (add/remove/mount/unmount a disk, clear disk statistics),
