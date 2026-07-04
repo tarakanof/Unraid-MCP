@@ -69,8 +69,8 @@ docker run --rm -p 127.0.0.1:6750:6750 \
 ```
 
 This publishes the port on localhost only. To reach it from other machines, drop the
-`127.0.0.1:` prefix — but set `UNRAID_MCP_ALLOWED_HOSTS` and put TLS in front first
-(see [docs/security.md](docs/security.md)).
+`127.0.0.1:` prefix — but set `UNRAID_MCP_ALLOWED_HOSTS` and put TLS in front first.
+[docs/connectivity.md](docs/connectivity.md) has copy-paste recipes per topology.
 
 Or grab [`docker-compose.yml`](docker-compose.yml), fill in the values, and
 `docker compose up -d`.
@@ -140,8 +140,14 @@ Local stdio clients launch the server themselves:
 ```
 
 Claude Desktop uses the same `mcpServers` shape. For remote/HTTP, point the client at
-`http://<host>:6750/mcp` and send `Authorization: Bearer <token>`. Put the HTTP
-transport behind TLS before exposing it beyond localhost or a trusted LAN.
+`http://<host>:6750/mcp` and send `Authorization: Bearer <token>`.
+
+To reach the HTTP transport from another machine — LAN, Tailscale, WireGuard, an
+SSH tunnel, or behind SWAG/NPM/Caddy with a real TLS cert — see
+[docs/connectivity.md](docs/connectivity.md). It has a decision table, copy-paste
+recipes per topology (including a drop-in SWAG proxy-conf), the exact
+`UNRAID_MCP_ALLOWED_HOSTS` value for each, and why public-internet exposure is a
+deliberate non-goal.
 
 Writing an agent against this? [docs/llm-usage.md](docs/llm-usage.md) has the tool
 catalog, conventions, and a drop-in system-prompt snippet.
@@ -202,6 +208,7 @@ published — see [`.github/workflows/docker-publish.yml`](.github/workflows/doc
 ## Docs
 
 - [docs/configuration.md](docs/configuration.md) — every environment variable, transports, TLS
+- [docs/connectivity.md](docs/connectivity.md) — reach the HTTP transport per topology (LAN, Tailscale, WireGuard, SWAG/NPM/Caddy)
 - [docs/security.md](docs/security.md) — the security model
 - [docs/llm-usage.md](docs/llm-usage.md) — tool catalog + guide for LLM agents
 - [deploy/unraid/](deploy/unraid/) — running it on Unraid
