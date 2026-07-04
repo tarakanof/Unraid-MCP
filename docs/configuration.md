@@ -51,6 +51,9 @@ fix a hostname/IP mismatch.
   remote clients (and the Docker/Unraid deployment). Clients connect to
   `http://<host>:<port>/mcp` with `Authorization: Bearer <UNRAID_MCP_BEARER_TOKEN>`.
   See [security.md](security.md) for how this transport is gated.
+  `GET /health` is the one exception: it's unauthenticated, returns a static
+  `200 {"status":"ok"}`, and never calls the Unraid API — a liveness probe for
+  Docker `HEALTHCHECK`/uptime monitors so they don't need the bearer token.
 
 ## TLS to the Unraid API (self-signed certs)
 
