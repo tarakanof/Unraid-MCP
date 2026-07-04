@@ -79,7 +79,9 @@ When you run `streamable-http`:
   localhost binds. For a non-localhost bind, set `UNRAID_MCP_ALLOWED_HOSTS` to keep
   it on — the server warns if you don't.
 - **TLS:** set `UNRAID_MCP_TLS_CERT` + `UNRAID_MCP_TLS_KEY` to serve HTTPS directly,
-  or terminate TLS at a reverse proxy. The server warns loudly if it's serving
+  or terminate TLS at a reverse proxy — see [connectivity.md](connectivity.md) for
+  concrete recipes (LAN, Tailscale, WireGuard, SWAG/NPM/Caddy) and the exact
+  `UNRAID_MCP_ALLOWED_HOSTS` value for each. The server warns loudly if it's serving
   plaintext on a non-localhost address. Don't expose it to untrusted networks.
 - **One unauthenticated exception:** `GET /health` bypasses the bearer gate
   entirely. It's a static `200 {"status":"ok"}` — no version/build info, and it
