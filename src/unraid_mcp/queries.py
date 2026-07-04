@@ -156,6 +156,19 @@ query GetDockerContainer($id: PrefixedID!) {
 }
 """
 
+# ── Subscriptions ────────────────────────────────────────────────────────────
+
+# graphql-transport-ws subscription sampled one-shot by ``get_docker_container_stats``.
+# Takes NO arguments and emits ONE container per event (``DockerContainerStats!``,
+# singular); the sampler accumulates events keyed by ``id`` until a full cycle is
+# seen (see tools/docker.py). ``memUsage``/``netIO``/``blockIO`` are pre-formatted
+# strings from the API (e.g. "65.56MiB / 31.25GiB"), NOT byte counts.
+DOCKER_CONTAINER_STATS = """
+subscription DockerContainerStats {
+  dockerContainerStats { id cpuPercent memUsage memPercent netIO blockIO }
+}
+"""
+
 LIST_VMS = """
 query ListVMs {
   vms { id domains { id name state } }

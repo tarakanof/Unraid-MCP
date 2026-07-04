@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ssl
+
 import pytest
 
 from unraid_mcp.config import load_settings
@@ -161,6 +163,62 @@ def test_allow_dangerous_parsing(clean_env, raw, expected):
         clean_env.setenv(k, v)
     clean_env.setenv("UNRAID_MCP_ALLOW_DANGEROUS", raw)
     assert load_settings(_env_file=None).allow_dangerous is expected
+
+
+@pytest.mark.parametrize(
+    "api_url,expected",
+    [
+        ("https://tower.local/graphql", "wss://tower.local/graphql"),
+        ("http://10.0.0.5:8080/graphql", "ws://10.0.0.5:8080/graphql"),
+        ("https://tower.local", "wss://tower.local/graphql"),  # path appended first
+    ],
+)
+def test_ws_url_derives_scheme_from_api_url(clean_env, api_url, expected):
+    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv("UNRAID_API_URL", api_url)
+    assert load_settings(_env_file=None).ws_url() == expected
+
+
+def test_ssl_context_verify_true_is_default_verifying(clean_env):
+    for k, v in REQUIRED.items():
+        clean_env.setenv(k, v)
+    ctx = load_settings(_env_file=None).ssl_context()
+    assert isinstance(ctx, ssl.SSLContext)
+    assert ctx.check_hostname is True
+    assert ctx.verify_mode is ssl.CERT_REQUIRED
+
+
+def test_ssl_context_verify_false_disables_verification(clean_env):
+    for k, v in REQUIRED.items():
+        clean_env.setenv(k, v)
+    clean_env.setenv("UNRAID_VERIFY_SSL", "false")
+    ctx = load_settings(_env_file=None).ssl_context()
+    assert isinstance(ctx, ssl.SSLContext)
+    assert ctx.check_hostname is False
+    assert ctx.verify_mode is ssl.CERT_NONE
+
+
+def test_ssl_context_ca_bundle_takes_precedence_and_verifies(clean_env):
+    # A CA bundle is trusted (verifying) even when verify_ssl is false — parity
+    # with tls_verify(), which returns the bundle path over the bool. Uses the
+    # system default cafile as a real, loadable PEM.
+    cafile = ssl.get_default_verify_paths().cafile
+    if not cafile:
+        pytest.skip("no system default CA bundle available to load")
+    for k, v in REQUIRED.items():
+        clean_env.setenv(k, v)
+    clean_env.setenv("UNRAID_VERIFY_SSL", "false")
+    clean_env.setenv("UNRAID_CA_BUNDLE", cafile)
+    ctx = load_settings(_env_file=None).ssl_context()
+    assert isinstance(ctx, ssl.SSLContext)
+    assert ctx.check_hostname is True
+    assert ctx.verify_mode is ssl.CERT_REQUIRED
+
+
+def test_ssl_context_is_none_for_plaintext_ws(clean_env):
+    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv("UNRAID_API_URL", "http://10.0.0.5:8080/graphql")
+    assert load_settings(_env_file=None).ssl_context() is None
 
 
 def test_port_and_timeout_coerced_from_strings(clean_env):

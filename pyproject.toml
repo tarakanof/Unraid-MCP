@@ -13,6 +13,7 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "graphql-core>=3.2.11",
+    "websockets>=13",
 ]
 
 [project.optional-dependencies]

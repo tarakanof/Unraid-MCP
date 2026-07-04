@@ -7,8 +7,9 @@ logs, ``repr()``, or error messages.
 
 from __future__ import annotations
 
+import ssl
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -121,6 +122,40 @@ class Settings(BaseSettings):
     def tls_verify(self) -> bool | str:
         """Value for ``httpx`` ``verify``: a CA-bundle path if set, else the bool."""
         return self.ca_bundle if self.ca_bundle else self.verify_ssl
+
+    def ws_url(self) -> str:
+        """The ``ws(s)://`` endpoint derived from ``api_url``.
+
+        Subscriptions use the same host/path as the HTTP GraphQL endpoint but a
+        websocket scheme: ``wss`` from ``https``, ``ws`` from ``http``.
+        """
+        parsed = urlparse(self.api_url)
+        scheme = "wss" if parsed.scheme == "https" else "ws"
+        return urlunparse((scheme, parsed.netloc, parsed.path or "/graphql", "", "", ""))
+
+    def ssl_context(self) -> ssl.SSLContext | None:
+        """``ssl.SSLContext`` for the websocket path, mirroring :meth:`tls_verify`.
+
+        ``httpx`` accepts ``verify: bool | cafile``; ``websockets`` needs an
+        ``SSLContext``, so this reproduces the same three cases in lock-step with
+        the HTTP client:
+
+          * ``ca_bundle`` set   → a verifying context trusting that bundle
+            (takes precedence over ``verify_ssl``, exactly like ``tls_verify``);
+          * ``verify_ssl`` False → verification disabled;
+          * otherwise           → the default verifying context.
+
+        Returns ``None`` for a plaintext ``ws://`` endpoint (no TLS).
+        """
+        if urlparse(self.ws_url()).scheme != "wss":
+            return None
+        if self.ca_bundle:
+            return ssl.create_default_context(cafile=self.ca_bundle)
+        ctx = ssl.create_default_context()
+        if not self.verify_ssl:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        return ctx
 
     @property
     def binds_localhost(self) -> bool:

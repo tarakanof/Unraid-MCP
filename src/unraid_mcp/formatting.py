@@ -12,6 +12,7 @@ Every size field is emitted as ``{"bytes": int|None, "human": str|None}``.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 _FAILED_STATUSES = {"DISK_DSBL", "DISK_INVALID", "DISK_WRONG", "DISK_DSBL_NEW", "DISK_NP_DSBL"}
@@ -259,6 +260,56 @@ def shape_containers(data: dict | None) -> list[dict[str, Any]]:
 def shape_docker_networks(data: dict | None) -> list[dict[str, Any]]:
     docker = (data or {}).get("docker") or {}
     return docker.get("networks") or []
+
+
+# Full ANSI CSI escape: ``ESC [`` + params (0x30-0x3f) + intermediates (0x20-0x2f)
+# + a final byte (0x40-0x7e). The `dockerContainerStats` subscription forwards raw
+# ``docker stats`` terminal output, so the first event of each cycle carries a
+# screen-repaint code (``ESC [ H`` / ``ESC [ J``) embedded in ``id`` (verified live
+# in #27). Stripping only the ESC byte would leave ``[H`` garbage, so remove the
+# whole sequence first, then any remaining bare C0/DEL control chars.
+_ANSI_CSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_C0_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def sanitize_control(value: Any) -> Any:
+    """Strip ANSI CSI escapes and C0/DEL control characters from a string.
+
+    Non-strings pass through unchanged. Idempotent and pure. Applied to the
+    subscription ``id`` **before** keying/dedup (so a polluted first-of-cycle id
+    matches its clean ``list_docker_containers`` id) and defensively to the
+    string metric fields.
+    """
+    if not isinstance(value, str):
+        return value
+    return _C0_CONTROL.sub("", _ANSI_CSI.sub("", value))
+
+
+def shape_container_stats(events: list[dict] | None) -> list[dict[str, Any]]:
+    """Shape collected ``dockerContainerStats`` ``next`` payloads into a snapshot.
+
+    ``events`` is a list of GraphQL ``data`` objects (each ``{"dockerContainerStats":
+    {...}}``), one per container, already deduped by the sampler. ``id`` and the
+    pre-formatted string metrics are control-char-sanitized here (defence in depth on
+    top of the sampler's keying). ``mem_usage``/``net_io``/``block_io`` are passed
+    through as the API's pre-formatted strings (e.g. "65.56MiB / 31.25GiB") — they are
+    composite usage/limit pairs, NOT single byte counts, so they deliberately do NOT
+    use the ``{bytes, human}`` shape (no ``human`` without a matching ``bytes``).
+    """
+    out: list[dict[str, Any]] = []
+    for event in events or []:
+        stats = (event or {}).get("dockerContainerStats") or {}
+        out.append(
+            {
+                "id": sanitize_control(stats.get("id")),
+                "cpu_percent": stats.get("cpuPercent"),
+                "mem_percent": stats.get("memPercent"),
+                "mem_usage": sanitize_control(stats.get("memUsage")),
+                "net_io": sanitize_control(stats.get("netIO")),
+                "block_io": sanitize_control(stats.get("blockIO")),
+            }
+        )
+    return out
 
 
 _LOG_LINE_MAX_CHARS = 2000
