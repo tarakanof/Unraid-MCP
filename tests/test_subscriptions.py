@@ -99,6 +99,20 @@ async def _sample(script, *, deadline_s=5.0):
 # ── Happy path ────────────────────────────────────────────────────────────────
 
 
+async def test_keyless_frame_is_ignored_not_treated_as_cycle_repeat():
+    """A ``next`` frame whose key() is None (missing/empty id) must be skipped:
+    with was_new=False it would otherwise satisfy is_complete and silently
+    truncate the sample after the first container."""
+    keyless = json.dumps(
+        {"type": "next", "payload": {"data": {"dockerContainerStats": {"cpuPercent": 0.1}}}}
+    )
+    script = [_ack(), _next("a"), keyless, _next("b"), _next("a")]
+    _, (events, deadline_hit) = await _sample(script)
+    ids = [(e["dockerContainerStats"]["id"]) for e in events]
+    assert ids == ["a", "b"]  # keyless frame neither collected nor completing
+    assert deadline_hit is False
+
+
 async def test_happy_path_multi_container_full_cycle():
     script = [_ack(), _next("a"), _next("b"), _next("c"), _next("a")]
     transport, (events, deadline_hit) = await _sample(script)

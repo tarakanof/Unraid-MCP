@@ -154,7 +154,12 @@ async def sample_subscription(
             if mtype == "next":
                 data = (msg.get("payload") or {}).get("data") or {}
                 k = key(data)
-                was_new = k is not None and k not in collected
+                if k is None:
+                    # Keyless frame: neither a new reading nor a cycle-repeat
+                    # signal. It must not reach is_complete, where was_new=False
+                    # would masquerade as a repeat and truncate the sample.
+                    continue
+                was_new = k not in collected
                 if was_new:
                     # Keep the first reading per key; a later repeat (the next
                     # cycle starting) signals completeness but must not overwrite it.
