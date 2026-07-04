@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.6.0 - 2026-07-04
+
+Resources, prompts, and live per-container stats (milestone v0.6.0). Completes
+the initial capability roadmap.
+
+### Added
+
+- MCP **resources**: `unraid://health` and `unraid://system-info` — same JSON
+  as the matching read tools, readable without spending a tool call; clean,
+  secret-free error when the box is unreachable (#26).
+- MCP **prompt** `triage` (optional `focus` argument) — walks an agent
+  top-down from `get_health_summary` into whichever subsystem needs attention;
+  never runs mutating tools without operator confirmation (#26).
+- `get_docker_container_stats` — one-shot sample of the `dockerContainerStats`
+  GraphQL **subscription** over `graphql-transport-ws`: per-container CPU%,
+  memory%, and mem/net/block I/O in a single bounded call (~2s typical, 12s
+  hard cap, never hangs). Includes control-character sanitization of upstream
+  `docker stats` output and TLS/proxy parity with the HTTP client; the API key
+  travels only in `connection_init` and never appears in errors or logs
+  (#65, investigation #27).
+- `list_plugins` — installed Unraid plugins from the `plugins` and
+  `installedUnraidPlugins` queries, unioned and source-tagged (#28).
+
+### Fixed
+
+- Subscription sampler: keyless `next` frames are skipped instead of being
+  mistaken for the cycle-repeat signal, which could silently truncate a stats
+  snapshot (#66).
+
+### Dependencies
+
+- New runtime dependency: `websockets>=13` (pure Python, no transitive deps).
+
 ## 0.5.0 - 2026-07-04
 
 Safe mutation expansion (milestone v0.5.0) on top of the observability tools
