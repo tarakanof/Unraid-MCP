@@ -393,6 +393,51 @@ def shape_me(data: dict | None) -> dict[str, Any]:
     return (data or {}).get("me") or {}
 
 
+def shape_plugins(data: dict | None) -> list[dict[str, Any]]:
+    """Shape the ``plugins`` root query: rich per-plugin metadata."""
+    plugins = (data or {}).get("plugins") or []
+    return [
+        {
+            "name": p.get("name"),
+            "version": p.get("version"),
+            "has_api_module": p.get("hasApiModule"),
+            "has_cli_module": p.get("hasCliModule"),
+            "source": "plugins",
+        }
+        for p in plugins
+    ]
+
+
+def shape_installed_unraid_plugins(
+    data: dict | None, known_names: set[str] | None = None
+) -> list[dict[str, Any]]:
+    """Shape the ``installedUnraidPlugins`` root query: a coarser list of
+    installed ``.plg`` filenames (OS-level plugins), with only the metadata
+    this query provides (a name — no version/module info).
+
+    ``known_names`` (the names already returned by :func:`shape_plugins`) lets
+    callers dedupe entries that are already represented by the richer
+    ``plugins`` list, so a plugin isn't shown twice under two different
+    ``source`` values.
+    """
+    known = known_names or set()
+    out = []
+    for filename in (data or {}).get("installedUnraidPlugins") or []:
+        base = filename[:-4] if filename.endswith(".plg") else filename
+        if filename in known or base in known:
+            continue
+        out.append(
+            {
+                "name": filename,
+                "version": None,
+                "has_api_module": None,
+                "has_cli_module": None,
+                "source": "installed_unraid_plugins",
+            }
+        )
+    return out
+
+
 def shape_connect_status(data: dict | None) -> dict[str, Any]:
     data = data or {}
     return {"registration": data.get("registration"), "remote_access": data.get("remoteAccess")}

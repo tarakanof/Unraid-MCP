@@ -250,6 +250,23 @@ query GetMe {
 }
 """
 
+# Rich per-plugin metadata (name/version/module flags).
+PLUGINS = """
+query ListPlugins {
+  plugins { name version hasApiModule hasCliModule }
+}
+"""
+
+# Root ``installedUnraidPlugins`` — a separate root query returning just the
+# installed .plg filenames (a coarser, OS-level view than ``plugins`` above).
+# Fetched as a second, independently-degrading call in ``fetch_plugins`` (see
+# tools/misc.py), matching the ``SYSTEM_INFO``/``FLASH`` pattern.
+INSTALLED_UNRAID_PLUGINS = """
+query GetInstalledUnraidPlugins {
+  installedUnraidPlugins
+}
+"""
+
 # ── Mutations ────────────────────────────────────────────────────────────────
 
 START_ARRAY = """
