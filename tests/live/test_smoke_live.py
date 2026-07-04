@@ -168,6 +168,7 @@ LIST_READS: list[Callable[..., Awaitable[Any]]] = [
     misc.fetch_ups,
     misc.fetch_network_interfaces,
     misc.fetch_log_files,
+    misc.fetch_plugins,
     notifications.fetch_notifications,
     shares.fetch_shares,
     system.fetch_services,

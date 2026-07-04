@@ -621,6 +621,87 @@ async def test_ups_network_me_connect(mocked_client):
         assert out["remote_access"]["accessType"] == "DISABLED"
 
 
+async def test_plugins_union_happy_path(mocked_client):
+    plugins_resp = _resp(
+        {
+            "plugins": [
+                {
+                    "name": "dynamix.docker.manager",
+                    "version": "2024.01.01",
+                    "hasApiModule": True,
+                    "hasCliModule": False,
+                }
+            ]
+        }
+    )
+    installed_resp = _resp(
+        {"installedUnraidPlugins": ["dynamix.docker.manager.plg", "community.applications.plg"]}
+    )
+    async with mocked_client([plugins_resp, installed_resp]) as (c, r):
+        out = await misc.fetch_plugins(c)
+    assert out == [
+        {
+            "name": "dynamix.docker.manager",
+            "version": "2024.01.01",
+            "has_api_module": True,
+            "has_cli_module": False,
+            "source": "plugins",
+        },
+        {
+            "name": "community.applications.plg",
+            "version": None,
+            "has_api_module": None,
+            "has_cli_module": None,
+            "source": "installed_unraid_plugins",
+        },
+    ]
+    assert _sent_query(r) == queries.INSTALLED_UNRAID_PLUGINS
+
+
+async def test_plugins_empty_and_none_fields(mocked_client):
+    async with mocked_client(_resp({"plugins": [], "installedUnraidPlugins": []})) as (c, r):
+        assert await misc.fetch_plugins(c) == []
+    async with mocked_client(_resp({"plugins": None, "installedUnraidPlugins": None})) as (c, r):
+        assert await misc.fetch_plugins(c) == []
+
+
+async def test_plugins_degrades_when_installed_unraid_plugins_unavailable(mocked_client):
+    plugins_resp = _resp(
+        {"plugins": [{"name": "p1", "version": "1", "hasApiModule": None, "hasCliModule": None}]}
+    )
+    installed_err = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "installedUnraidPlugins" on type "Query".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client([plugins_resp, installed_err]) as (c, r):
+        out = await misc.fetch_plugins(c)
+    assert out == [
+        {
+            "name": "p1",
+            "version": "1",
+            "has_api_module": None,
+            "has_cli_module": None,
+            "source": "plugins",
+        }
+    ]
+
+
+async def test_plugins_unsupported_raises_friendly_error(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "plugins" on type "Query".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client(resp) as (c, r):
+        with pytest.raises(ToolError, match="does not support"):
+            await misc.fetch_plugins(c, api_version="7.0.0")
+
+
 async def test_health_summary_composes(mocked_client):
     array_resp = _resp(
         {
