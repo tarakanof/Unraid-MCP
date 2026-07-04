@@ -75,6 +75,13 @@ This publishes the port on localhost only. To reach it from other machines, drop
 Or grab [`docker-compose.yml`](docker-compose.yml), fill in the values, and
 `docker compose up -d`.
 
+`GET /health` is an unauthenticated liveness check — no bearer token, no call to
+the Unraid API, just a static `200 {"status":"ok"}`. Point Docker `HEALTHCHECK`,
+uptime monitors, or a reverse-proxy upstream check at it instead of embedding the
+bearer token in monitoring config. (This is separate from the `unraid://health`
+MCP resource below, which does summarize real array/disk/UPS state and requires
+the bearer token like every other `/mcp` request.)
+
 Use a URL whose hostname matches the Unraid certificate. The MyUnraid hostname
 shown by Unraid usually works with `UNRAID_VERIFY_SSL=true`. If you use a LAN IP
 URL and the cert does not include that IP, a CA bundle cannot fix hostname

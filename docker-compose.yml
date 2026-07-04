@@ -18,6 +18,15 @@ services:
       # Bind localhost by default. Publish 6750:6750 only on a trusted LAN or
       # behind TLS/auth-aware ingress.
       - "${UNRAID_MCP_PUBLISHED_ADDR:-127.0.0.1}:6750:6750"
+    healthcheck:
+      # GET /health is unauthenticated and never calls the Unraid API; the
+      # image has no curl/wget, so use urllib. Also baked into the image as
+      # a HEALTHCHECK; declared here too so `docker compose up` shows status.
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:6750/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     environment:
       # --- required ---
       UNRAID_API_URL: "${UNRAID_API_URL:?Set UNRAID_API_URL, e.g. https://yourhash.myunraid.net/graphql}"

@@ -81,6 +81,11 @@ When you run `streamable-http`:
 - **TLS:** set `UNRAID_MCP_TLS_CERT` + `UNRAID_MCP_TLS_KEY` to serve HTTPS directly,
   or terminate TLS at a reverse proxy. The server warns loudly if it's serving
   plaintext on a non-localhost address. Don't expose it to untrusted networks.
+- **One unauthenticated exception:** `GET /health` bypasses the bearer gate
+  entirely. It's a static `200 {"status":"ok"}` — no version/build info, and it
+  never calls the Unraid API — so an unauthenticated caller learns nothing beyond
+  "the process is up" and can't use it to probe the box. Every other path still
+  401s without a valid token.
 
 ## Outbound API path
 

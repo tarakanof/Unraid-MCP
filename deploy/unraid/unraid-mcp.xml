@@ -21,6 +21,8 @@ SETUP:
 2) Set UNRAID_API_URL to this server's GraphQL endpoint using a hostname that matches the cert, e.g. https://yourhash.myunraid.net/graphql.
 3) Set a long random UNRAID_MCP_BEARER_TOKEN (for example, openssl rand -hex 32).
 Put the container behind a TLS reverse proxy (or set UNRAID_MCP_TLS_CERT/KEY) before exposing it beyond your LAN.
+
+The image has a built-in Docker HEALTHCHECK that polls the unauthenticated GET /health liveness endpoint (no bearer token needed, no call to the Unraid API), so the container's health shows up in Unraid's Docker tab without any extra configuration.
   ]]></Overview>
   <Category>Tools: Network:Management</Category>
   <WebUI/>

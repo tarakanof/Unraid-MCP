@@ -24,9 +24,9 @@ ENV UNRAID_MCP_TRANSPORT=streamable-http \
     UNRAID_MCP_PORT=6750
 EXPOSE 6750
 
-# Liveness: the MCP port is accepting connections. Probe the configured bind
-# address (wildcard binds are reachable via loopback).
+# Liveness: GET /health returns 200 with no auth required and no upstream
+# call, so the check never needs the bearer token or the Unraid API.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import os,socket; h=os.environ.get('UNRAID_MCP_HOST','0.0.0.0'); socket.create_connection(('127.0.0.1' if h in ('0.0.0.0','::') else h, int(os.environ.get('UNRAID_MCP_PORT','6750'))), 3)" || exit 1
+    CMD python -c "import os,urllib.request as u; h=os.environ.get('UNRAID_MCP_HOST','0.0.0.0'); h='127.0.0.1' if h in ('0.0.0.0','::') else h; p=os.environ.get('UNRAID_MCP_PORT','6750'); u.urlopen(f'http://{h}:{p}/health', timeout=3)" || exit 1
 
 ENTRYPOINT ["unraid-mcp"]
