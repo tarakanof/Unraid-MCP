@@ -302,6 +302,7 @@ MUTATION_REFUSALS: list[tuple[str, Callable[[UnraidClient], Awaitable[Any]]]] = 
     ("resume_vm", lambda c: vm.do_resume_vm(c, "x", confirm=False)),
     ("reboot_vm", lambda c: vm.do_reboot_vm(c, "x", confirm=False)),
     ("force_stop_vm", lambda c: vm.do_force_stop_vm(c, "x", confirm=False)),
+    ("reset_vm", lambda c: vm.do_reset_vm(c, "x", confirm=False)),
     # Dangerous tier — same tripwire client, never the live one.
     ("mount_array_disk", lambda c: array.do_mount_array_disk(c, "x", confirm=False)),
     ("unmount_array_disk", lambda c: array.do_unmount_array_disk(c, "x", confirm=False)),

@@ -61,10 +61,18 @@ async def do_force_stop_vm(client: UnraidClient, vm_id: str, confirm: bool) -> d
     return shape_mutation_result(await client.execute(queries.VM_FORCE_STOP, {"id": vm_id}))
 
 
+async def do_reset_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
+    require_confirm(
+        confirm, f"hard-reset VM '{vm_id}' (like the reset button — unsaved guest state is lost)"
+    )
+    return shape_mutation_result(await client.execute(queries.VM_RESET, {"id": vm_id}))
+
+
 def register(mcp: FastMCP, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def list_vms(ctx: Context) -> list[dict[str, Any]]:
-        """List virtual machines with id, name, and state."""
+        """List virtual machines with id, name, and state (state values come
+        from the `VmState` enum)."""
         return await guarded(ctx, fetch_vms)
 
 
@@ -99,3 +107,9 @@ def register_mutations(mcp: FastMCP, settings: Settings) -> None:
         """Force-stop (hard power off) a VM by id — may lose unsaved guest state.
         Requires confirm=true."""
         return await guarded(ctx, do_force_stop_vm, vm_id, confirm)
+
+    @mcp.tool(annotations=DESTRUCTIVE)
+    async def reset_vm(ctx: Context, vm_id: str, confirm: bool = False) -> dict[str, Any]:
+        """Hard-reset a VM by id — like pressing the physical reset button;
+        unsaved guest state is lost. Requires confirm=true."""
+        return await guarded(ctx, do_reset_vm, vm_id, confirm)

@@ -315,6 +315,7 @@ VM_PAUSE = "mutation PauseVM($id: PrefixedID!) { vm { pause(id: $id) } }"
 VM_RESUME = "mutation ResumeVM($id: PrefixedID!) { vm { resume(id: $id) } }"
 VM_FORCE_STOP = "mutation ForceStopVM($id: PrefixedID!) { vm { forceStop(id: $id) } }"
 VM_REBOOT = "mutation RebootVM($id: PrefixedID!) { vm { reboot(id: $id) } }"
+VM_RESET = "mutation ResetVM($id: PrefixedID!) { vm { reset(id: $id) } }"
 
 LOG_FILES = """
 query GetLogFiles {

@@ -24,7 +24,7 @@ nothing.
 | Tier | Flag | Default | Unlocks |
 | --- | --- | --- | --- |
 | Read | *(always on)* | on | All monitoring/read tools. Never change anything. |
-| Mutate | `UNRAID_MCP_ALLOW_MUTATIONS` | off | Everyday writes: start/stop array, start/pause/resume/cancel parity, start/stop/restart Docker containers, start/stop/pause/resume/reboot/force-stop VMs, notification archive/unread/delete. |
+| Mutate | `UNRAID_MCP_ALLOW_MUTATIONS` | off | Everyday writes: start/stop array, start/pause/resume/cancel parity, start/stop/restart Docker containers, start/stop/pause/resume/reboot/force-stop/reset VMs, notification archive/unread/delete. |
 | Dangerous | `UNRAID_MCP_ALLOW_DANGEROUS` (requires mutations too) | off | High-blast-radius topology/removal ops (see below). |
 
 **Dangerous-tier tools** (all annotated `destructive`, all require `confirm=true`):

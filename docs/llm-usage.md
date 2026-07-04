@@ -23,8 +23,8 @@ If you are an agent with this server connected, read the **Operating rules** and
 4. **IDs come from list tools.** Get a container/VM/disk/notification id from the
    relevant `list_*` tool, then pass that id to detail or mutation tools.
 5. **Treat destructive actions with care.** `stop_array`, `force_stop_vm`,
-   `delete_notification`, and a *correcting* parity check can lose data or
-   disrupt services. Summarize the impact to the user before doing them.
+   `reset_vm`, `delete_notification`, and a *correcting* parity check can lose
+   data or disrupt services. Summarize the impact to the user before doing them.
 6. **Sizes are objects.** Every size is `{"bytes": <int|null>, "human": "<str|null>"}`.
    Use `human` for display, `bytes` for comparisons.
 
@@ -100,6 +100,7 @@ A typical stdio client config:
 | `stop_vm` | `vm_id`, `confirm` | Graceful shutdown. |
 | `reboot_vm` | `vm_id`, `confirm` | Reboot. |
 | `force_stop_vm` | `vm_id`, `confirm` | **Hard power off** — may lose unsaved guest state. |
+| `reset_vm` | `vm_id`, `confirm` | **Hard reset** (like the reset button) — unsaved guest state is lost. |
 | `archive_notification` | `notification_id`, `confirm` | Clear one unread notification. |
 | `archive_all_notifications` | `importance=None`, `confirm` | Bulk archive (optionally one severity). |
 | `mark_notification_unread` | `notification_id`, `confirm` | Move an archived notification back to unread. |
@@ -195,5 +196,5 @@ for them and don't try to read them.
 > Use `get_health_summary` for triage. All sizes are `{bytes, human}`. State-changing
 > tools require `confirm=true` and only exist if the operator enabled mutations —
 > only use them when the user explicitly asks, and summarize the impact of
-> destructive actions (`stop_array`, `force_stop_vm`, `delete_notification`,
-> correcting parity checks) before proceeding.
+> destructive actions (`stop_array`, `force_stop_vm`, `reset_vm`,
+> `delete_notification`, correcting parity checks) before proceeding.

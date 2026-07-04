@@ -34,6 +34,7 @@ MUTATION_TOOLS = {
     "resume_vm",
     "reboot_vm",
     "force_stop_vm",
+    "reset_vm",
     "archive_notification",
     "archive_all_notifications",
     "mark_notification_unread",
@@ -282,6 +283,34 @@ async def test_force_stop_vm_requires_confirm(mocked_client):
         with pytest.raises(ToolError):
             await vm.do_force_stop_vm(client, "uuid-1", confirm=False)
         assert route.call_count == 0
+
+
+async def test_reset_vm_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await vm.do_reset_vm(client, "uuid-1", confirm=False)
+        assert route.call_count == 0
+
+
+async def test_reset_vm_with_confirm_sends(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {"vm": {"reset": True}}})) as (
+        client,
+        route,
+    ):
+        result = await vm.do_reset_vm(client, "uuid-1", confirm=True)
+        assert route.call_count == 1
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.VM_RESET
+        assert body["variables"] == {"id": "uuid-1"}
+        assert result == {"ok": True}
+
+
+async def test_reset_vm_propagates_graphql_error(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"errors": [{"message": "vm not found"}], "data": None})
+    ) as (client, route):
+        with pytest.raises(UnraidGraphQLError):
+            await vm.do_reset_vm(client, "uuid-1", confirm=True)
 
 
 async def test_delete_notification_requires_confirm(mocked_client):
