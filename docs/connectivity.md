@@ -41,6 +41,14 @@ Standard proxy shape for every reverse-proxy recipe: **subdomain only**
 `UNRAID_MCP_ALLOWED_HOSTS`. Subpath hosting (`example.com/mcp/...`) is possible
 with a path rewrite but is not covered here.
 
+> **Expected startup warning when TLS terminates upstream.** In the Tailscale,
+> SWAG, NPM, Caddy, and WireGuard recipes the MCP container binds `0.0.0.0` with
+> no cert of its own, so it logs `Serving PLAINTEXT HTTP on a non-localhost
+> address …` at startup. That's expected — the plaintext hop is container- or
+> tailnet-internal and the client-facing connection is HTTPS. It only matters if
+> that plaintext port is actually reachable from an untrusted network (it
+> shouldn't be — don't publish `6750` to the LAN in these recipes).
+
 ## How the Host allow-list matches
 
 `UNRAID_MCP_ALLOWED_HOSTS` drives DNS-rebinding protection. Getting the exact
@@ -61,8 +69,9 @@ does (`config.py::http_allowed_hosts` + the MCP SDK's `TransportSecurityMiddlewa
   `http://tower.local:6750/mcp` sends `Host: tower.local:6750` — **with port** —
   so the allow-list needs `tower.local:6750`. This is why proxy recipes (TLS on
   443) list a bare name and the LAN recipe lists `name:6750`.
-- A wildcard-port entry `name:*` matches that name on **any** port (e.g.
-  `tower.local:*`). Handy if clients reach the box under one name but varying
+- A wildcard-port entry `name:*` matches that name on **any** port, but a port
+  must be present: `tower.local:*` matches `tower.local:6750`, **not** bare
+  `tower.local`. Handy if clients reach the box under one name but varying
   ports; otherwise prefer the exact form.
 - **`Origin` is separate and rarely matters here.** The SDK only rejects a
   request on `Origin` if the header is *present* and unlisted; non-browser MCP
@@ -167,8 +176,10 @@ host-level plugin:
 
 **Fallback — host-level Tailscale plugin.** On builds without the per-container
 toggle, run the Unraid Community Apps **Tailscale** plugin on the host and
-`tailscale serve https / http://127.0.0.1:6750` there (publish the MCP port on
-`127.0.0.1` only so nothing but Tailscale can reach it). The client URL is then
+`tailscale serve --bg http://127.0.0.1:6750` there (the `--bg` flag keeps the
+serve config running in the background; older CLIs used the positional
+`serve https / <target>` form). Publish the MCP port on `127.0.0.1` only so
+nothing but Tailscale can reach it. The client URL is then
 `https://<tower>.<your-tailnet>.ts.net/mcp`, and `UNRAID_MCP_ALLOWED_HOSTS` is
 that same bare host name. Same shape, host-wide instead of per-container.
 
@@ -256,10 +267,10 @@ In NPM, add a **Proxy Host**:
 - **Scheme**: `http`, **Forward Hostname/IP**: the MCP container or the Unraid
   LAN IP, **Forward Port**: `6750`
 - **SSL** tab: request a Let's Encrypt cert, enable **Force SSL** and **HTTP/2**.
-- **Websockets Support**: **on**. NPM buffers proxied responses by default;
-  the websockets toggle switches the location to an HTTP/1.1 upgrade-capable
-  proxy, which is what lets the SSE stream flow. If streaming still stalls, add
-  to the **Advanced** tab:
+- **Websockets Support**: **on**. This makes NPM proxy over HTTP/1.1 with the
+  upgrade headers. NPM still buffers proxied responses by default, though, so if
+  the SSE stream stalls (responses withheld until the stream closes) add
+  `proxy_buffering off;` in the **Advanced** tab:
 
   ```nginx
   proxy_buffering off;
