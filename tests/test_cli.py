@@ -31,9 +31,12 @@ ENV_VARS = (
 
 
 @pytest.fixture
-def clean_env(monkeypatch):
+def clean_env(monkeypatch, tmp_path):
     for var in ENV_VARS:
         monkeypatch.delenv(var, raising=False)
+    # Settings reads a `.env` from the current directory; chdir to an empty
+    # tmp dir so a developer's local .env can't leak into these tests.
+    monkeypatch.chdir(tmp_path)
     return monkeypatch
 
 
