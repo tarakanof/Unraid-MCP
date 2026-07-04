@@ -17,11 +17,13 @@ from ..errors import UnraidGraphQLError
 from ..formatting import (
     shape_array_status,
     shape_connect_status,
+    shape_installed_unraid_plugins,
     shape_log_file,
     shape_log_files,
     shape_me,
     shape_network_interfaces,
     shape_notifications_overview,
+    shape_plugins,
     shape_ups,
     summarize_health,
 )
@@ -128,6 +130,35 @@ async def fetch_log_file(
         raise
 
 
+async def fetch_plugins(
+    client: UnraidClient, *, api_version: str | None = None
+) -> list[dict[str, Any]]:
+    """List installed plugins, combining two upstream root queries into one list.
+
+    ``plugins`` gives rich per-plugin metadata (name/version/module flags);
+    ``installedUnraidPlugins`` gives just installed ``.plg`` filenames (a
+    coarser, OS-level view). Both are unioned into a single list, each entry
+    tagged with its ``source`` — entries already covered by ``plugins`` are
+    not duplicated from ``installedUnraidPlugins``. ``installedUnraidPlugins``
+    degrades gracefully (older builds without it just contribute nothing extra);
+    if ``plugins`` itself is unsupported, the whole tool raises a friendly error.
+    """
+    try:
+        plugins = shape_plugins(await client.execute(queries.PLUGINS))
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported("plugin list", api_version=api_version) from None
+        raise
+    known_names = {p["name"] for p in plugins if p.get("name")}
+    installed = await safe_query(
+        client,
+        queries.INSTALLED_UNRAID_PLUGINS,
+        lambda data: shape_installed_unraid_plugins(data, known_names),
+        [],
+    )
+    return plugins + installed
+
+
 async def fetch_health(client: UnraidClient) -> dict[str, Any]:
     array = shape_array_status(await client.execute(queries.ARRAY_STATUS))
     ups = await safe_query(client, queries.UPS_DEVICES, shape_ups, [])
@@ -164,6 +195,15 @@ def register(mcp: FastMCP, settings: Settings) -> None:
     async def get_connect_status(ctx: Context) -> dict[str, Any]:
         """Get Unraid registration/license and remote-access (Connect) status."""
         return await guarded(ctx, fetch_connect_status)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def list_plugins(ctx: Context) -> list[dict[str, Any]]:
+        """List installed Unraid plugins: name, version, and whether they have API/CLI
+        modules (from the `plugins` query), unioned with installed `.plg` filenames not
+        otherwise represented (from `installedUnraidPlugins`). Each entry's `source`
+        field indicates which query it came from."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(ctx, fetch_plugins, api_version=api_version)
 
     @mcp.tool(annotations=READ_ONLY)
     async def get_health_summary(ctx: Context) -> dict[str, Any]:
