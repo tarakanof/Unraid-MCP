@@ -94,7 +94,8 @@ A typical stdio client config:
 | `pause_parity_check` / `resume_parity_check` / `cancel_parity_check` | `confirm` | Control a running check. |
 | `start_docker_container` | `container_id`, `confirm` | id from `list_docker_containers`. |
 | `stop_docker_container` | `container_id`, `confirm` | Stops a service. |
-| `restart_docker_container` | `container_id`, `confirm` | Stop then start; **not atomic** (if start fails it's left stopped). |
+| `restart_docker_container` | `container_id`, `confirm` | Atomic on current APIs (native restart); falls back to stop-then-start on older builds (then **not atomic** — if start fails it's left stopped). |
+| `pause_docker_container` / `unpause_docker_container` | `container_id`, `confirm` | Freeze/resume a container's processes without stopping it. No fallback on older API builds — errors clearly if unsupported. |
 | `start_vm` / `pause_vm` / `resume_vm` | `vm_id`, `confirm` | id from `list_vms`. |
 | `stop_vm` | `vm_id`, `confirm` | Graceful shutdown. |
 | `reboot_vm` | `vm_id`, `confirm` | Reboot. |

@@ -26,6 +26,8 @@ MUTATION_TOOLS = {
     "start_docker_container",
     "stop_docker_container",
     "restart_docker_container",
+    "pause_docker_container",
+    "unpause_docker_container",
     "start_vm",
     "stop_vm",
     "pause_vm",
@@ -182,13 +184,97 @@ async def test_stop_container_requires_confirm(mocked_client):
         assert route.call_count == 0
 
 
-async def test_restart_container_stops_then_starts(mocked_client):
-    resp = httpx.Response(200, json={"data": {"docker": {}}})
-    async with mocked_client([resp, resp]) as (client, route):
+async def test_restart_container_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_restart_container(client, "1:abc", confirm=False)
+        assert route.call_count == 0
+
+
+async def test_restart_container_uses_native_mutation(mocked_client):
+    resp = httpx.Response(
+        200, json={"data": {"docker": {"restart": {"id": "1:abc", "state": "RUNNING"}}}}
+    )
+    async with mocked_client(resp) as (client, route):
         await docker.do_restart_container(client, "1:abc", confirm=True)
-        assert route.call_count == 2
+        assert route.call_count == 1
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.RESTART_CONTAINER
+        assert body["variables"] == {"id": "1:abc"}
+
+
+async def test_restart_container_falls_back_on_old_api(mocked_client):
+    unsupported = httpx.Response(
+        200,
+        json={"errors": [{"message": 'Cannot query field "restart" on type "DockerMutations".'}]},
+    )
+    stop_resp = httpx.Response(200, json={"data": {"docker": {"stop": {"id": "1:abc"}}}})
+    start_resp = httpx.Response(200, json={"data": {"docker": {"start": {"id": "1:abc"}}}})
+    async with mocked_client([unsupported, stop_resp, start_resp]) as (client, route):
+        await docker.do_restart_container(client, "1:abc", confirm=True)
+        assert route.call_count == 3
         queries_sent = [json.loads(call.request.content)["query"] for call in route.calls]
-        assert queries_sent == [queries.STOP_CONTAINER, queries.START_CONTAINER]
+        assert queries_sent == [
+            queries.RESTART_CONTAINER,
+            queries.STOP_CONTAINER,
+            queries.START_CONTAINER,
+        ]
+
+
+async def test_pause_container_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_pause_container(client, "1:abc", confirm=False)
+        assert route.call_count == 0
+
+
+async def test_pause_container_sends_id_variable(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"docker": {"pause": {"id": "1:abc"}}}})
+    ) as (client, route):
+        await docker.do_pause_container(client, "1:abc", confirm=True)
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.PAUSE_CONTAINER
+        assert body["variables"] == {"id": "1:abc"}
+
+
+async def test_pause_container_unsupported_api_raises_friendly_error(mocked_client):
+    unsupported = httpx.Response(
+        200,
+        json={"errors": [{"message": 'Cannot query field "pause" on type "DockerMutations".'}]},
+    )
+    async with mocked_client(unsupported) as (client, route):
+        with pytest.raises(ToolError, match="does not support"):
+            await docker.do_pause_container(client, "1:abc", confirm=True, api_version="2.100.0")
+        assert route.call_count == 1
+
+
+async def test_unpause_container_requires_confirm(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_unpause_container(client, "1:abc", confirm=False)
+        assert route.call_count == 0
+
+
+async def test_unpause_container_sends_id_variable(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"docker": {"unpause": {"id": "1:abc"}}}})
+    ) as (client, route):
+        await docker.do_unpause_container(client, "1:abc", confirm=True)
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.UNPAUSE_CONTAINER
+        assert body["variables"] == {"id": "1:abc"}
+
+
+async def test_unpause_container_unsupported_api_raises_friendly_error(mocked_client):
+    unsupported = httpx.Response(
+        200,
+        json={"errors": [{"message": 'Cannot query field "unpause" on type "DockerMutations".'}]},
+    )
+    async with mocked_client(unsupported) as (client, route):
+        with pytest.raises(ToolError, match="does not support"):
+            await docker.do_unpause_container(client, "1:abc", confirm=True)
+        assert route.call_count == 1
 
 
 async def test_force_stop_vm_requires_confirm(mocked_client):
