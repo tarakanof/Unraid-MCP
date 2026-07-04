@@ -68,6 +68,12 @@ certificate is trusted and the URL hostname matches the certificate. Options:
 4. **Disable verification** — set `UNRAID_VERIFY_SSL=false` only on a trusted LAN.
    The server logs a warning when you do this.
 
+These same settings govern the short-lived websocket that
+`get_docker_container_stats` opens for the `dockerContainerStats` subscription:
+the `wss://` endpoint is derived from `UNRAID_API_URL`, and `UNRAID_VERIFY_SSL` /
+`UNRAID_CA_BUNDLE` are honored identically to the HTTP client (proxy env vars are
+ignored on both paths).
+
 Outbound requests to the Unraid API ignore ambient proxy environment variables
 such as `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`, so the API path is not
 silently routed through a process-level proxy. Configure direct network routing

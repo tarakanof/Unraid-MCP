@@ -244,6 +244,38 @@ async def test_get_container_logs(live_client):
     _check_shapes(result)
 
 
+async def test_get_docker_container_stats(live_client):
+    """One-shot sample of the dockerContainerStats subscription (#65).
+
+    Opens a real short-lived websocket to the box. Shape-invariant only: an
+    envelope with a ``containers`` list of per-container dicts whose ids are
+    control-char-free. Skips where the subscription is unsupported (old API
+    build) or produces no sample (no running containers) — both surface as a
+    ``ToolError`` from ``fetch_container_stats``."""
+    settings = load_settings()
+    try:
+        result = await docker.fetch_container_stats(live_client, settings=settings, timeout_s=15.0)
+    except ToolError as exc:
+        # Old build (feature_unsupported) or no-sample both raise ToolError.
+        pytest.skip(f"stats subscription unavailable on this box: {exc}")
+    except UnraidGraphQLError as exc:
+        pytest.skip(f"unsupported by this Unraid API version: {exc}")
+    assert isinstance(result, dict)
+    assert isinstance(result["containers"], list)
+    assert result["sampled"] == len(result["containers"])
+    assert isinstance(result["partial"], bool)
+    for c in result["containers"]:
+        assert isinstance(c, dict)
+        assert isinstance(c["id"], str)
+        assert "\x1b" not in c["id"]  # control chars stripped
+        assert isinstance(c["cpu_percent"], (int, float))
+        assert isinstance(c["mem_percent"], (int, float))
+        # Pre-formatted composite strings, not {bytes, human} size dicts.
+        for field in ("mem_usage", "net_io", "block_io"):
+            assert c[field] is None or isinstance(c[field], str)
+    _check_shapes(result)
+
+
 async def test_read_log_file(live_client):
     """list_log_files → read_log_file: exercise paging against a real log."""
     log_files = await _run(misc.fetch_log_files, live_client)

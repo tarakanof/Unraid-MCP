@@ -8,7 +8,9 @@ from unraid_mcp.formatting import (
     array_disk_health,
     human_size,
     kib_to_bytes,
+    sanitize_control,
     shape_array_status,
+    shape_container_stats,
     shape_flash,
     shape_metrics,
     shape_mutation_result,
@@ -315,3 +317,74 @@ def test_shape_mutation_result_keeps_multifield_overview():
 )
 def test_array_disk_health(status, warning, critical, expected):
     assert array_disk_health(status, warning, critical) == expected
+
+
+# ── Control-char sanitization + container-stats shaping (#65) ─────────────────
+
+
+@pytest.mark.parametrize(
+    "polluted,clean",
+    [
+        # The exact shape from #27: ANSI cursor-home CSI embedded in the id.
+        ("docker:abc123\x1b[Hdef", "docker:abc123def"),
+        ("docker:\x1b[Jabc123", "docker:abc123"),
+        ("docker:\x1b[2Jabc", "docker:abc"),  # CSI with a numeric parameter
+        ("docker:a\x00b\x07c\x1fd", "docker:abcd"),  # bare C0 controls
+        ("docker:clean", "docker:clean"),  # already clean → unchanged
+    ],
+)
+def test_sanitize_control_strips_ansi_and_c0(polluted, clean):
+    assert sanitize_control(polluted) == clean
+
+
+def test_sanitize_control_passes_non_strings_through():
+    assert sanitize_control(None) is None
+    assert sanitize_control(42) == 42
+
+
+def test_sanitize_control_is_idempotent():
+    once = sanitize_control("docker:abc\x1b[Hdef")
+    assert sanitize_control(once) == once
+
+
+def test_shape_container_stats_cleans_id_and_passes_strings():
+    events = [
+        {
+            "dockerContainerStats": {
+                "id": "docker:first\x1b[H",  # polluted first-of-cycle id
+                "cpuPercent": 12.5,
+                "memPercent": 3.2,
+                "memUsage": "65.56MiB / 31.25GiB",
+                "netIO": "1.2kB / 3.4kB",
+                "blockIO": "0B / 8.19kB",
+            }
+        },
+        {
+            "dockerContainerStats": {
+                "id": "docker:second",
+                "cpuPercent": 0.0,
+                "memPercent": 1.0,
+                "memUsage": "10MiB / 1GiB",
+                "netIO": "0B / 0B",
+                "blockIO": "0B / 0B",
+            }
+        },
+    ]
+    out = shape_container_stats(events)
+    assert out[0]["id"] == "docker:first"  # control chars stripped
+    assert out[0]["cpu_percent"] == 12.5
+    assert out[0]["mem_percent"] == 3.2
+    # Pre-formatted composite strings pass through verbatim — no {bytes, human}.
+    assert out[0]["mem_usage"] == "65.56MiB / 31.25GiB"
+    assert out[0]["net_io"] == "1.2kB / 3.4kB"
+    assert out[0]["block_io"] == "0B / 8.19kB"
+    assert out[1]["id"] == "docker:second"
+    # No size-shaped dict slipped in (would carry a "human"/"bytes" pair).
+    for entry in out:
+        for value in entry.values():
+            assert not (isinstance(value, dict) and "human" in value)
+
+
+def test_shape_container_stats_empty():
+    assert shape_container_stats([]) == []
+    assert shape_container_stats(None) == []

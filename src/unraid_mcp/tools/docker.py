@@ -8,13 +8,15 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
-from .. import queries
+from .. import queries, subscriptions
 from ..client import UnraidClient
 from ..config import Settings
 from ..errors import UnraidGraphQLError
 from ..formatting import (
+    sanitize_control,
     shape_container,
     shape_container_logs,
+    shape_container_stats,
     shape_containers,
     shape_docker_networks,
     shape_docker_update_statuses,
@@ -36,6 +38,11 @@ MAX_LOG_TAIL = 1000
 # Cap for the batch update tool — keeps a single call's blast radius (and the
 # server-side pull+recreate load) bounded. Enforced before any network I/O.
 MAX_UPDATE_CONTAINERS = 20
+
+# One-shot sample bound for get_docker_container_stats. Live #27 measured first
+# event ≈1.6s and a full 32-container cycle ≈2.1s, so ~12s leaves generous slack
+# yet still guarantees the synchronous tool call returns (never hangs).
+STATS_TIMEOUT_S = 12.0
 
 
 async def fetch_containers(client: UnraidClient) -> list[dict[str, Any]]:
@@ -150,6 +157,82 @@ async def fetch_docker_updates(
                 "Docker container update status", api_version=api_version
             ) from None
         raise
+
+
+def _stats_key(data: dict[str, Any]) -> str | None:
+    """Dedup key for a ``dockerContainerStats`` event: the SANITIZED ``id``.
+
+    Sanitizing before keying is load-bearing — the first event of each streaming
+    cycle carries an ANSI escape in ``id`` (#27); without stripping it that
+    container mis-keys against its clean ``list_docker_containers`` id and would be
+    double-counted across cycles.
+    """
+    stats = (data or {}).get("dockerContainerStats") or {}
+    cleaned = sanitize_control(stats.get("id"))
+    return cleaned or None
+
+
+def _stats_complete(collected: dict[str, dict[str, Any]], was_new: bool) -> bool:
+    """A full cycle is captured once the stream repeats a container we've already
+    seen (the API cycles through every container, one event each, then repeats)."""
+    return not was_new and len(collected) >= 1
+
+
+async def fetch_container_stats(
+    client: UnraidClient,  # unused: the ws path opens its own short-lived socket (#27)
+    *,
+    settings: Settings,
+    connect: Any = None,
+    timeout_s: float = STATS_TIMEOUT_S,
+    api_version: str | None = None,
+) -> dict[str, Any]:
+    """Sample per-container CPU%/mem% via the ``dockerContainerStats`` subscription.
+
+    Opens a fresh ``graphql-transport-ws`` websocket, accumulates one event per
+    container until a full cycle is seen (or ``timeout_s`` elapses), and returns a
+    snapshot envelope. Bounded — never hangs. ``connect`` is injectable for tests;
+    it defaults to the real :func:`subscriptions.open_ws`.
+    """
+    open_conn = connect or subscriptions.open_ws
+    api_key = settings.api_key.get_secret_value()
+    try:
+        async with open_conn(
+            settings.ws_url(), settings.ssl_context(), open_timeout=timeout_s
+        ) as transport:
+            events, deadline_hit = await subscriptions.sample_subscription(
+                transport,
+                api_key=api_key,
+                query=queries.DOCKER_CONTAINER_STATS,
+                deadline_s=timeout_s,
+                key=_stats_key,
+                is_complete=_stats_complete,
+            )
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported(
+                "per-container Docker container stats", api_version=api_version
+            ) from None
+        raise
+
+    containers = shape_container_stats(events)
+    if not containers:
+        raise ToolError(
+            f"The Docker stats subscription produced no sample within {timeout_s:.0f}s. "
+            "Either no containers are running, or this Unraid API build does not "
+            "support the dockerContainerStats subscription."
+        )
+    note = None
+    if deadline_hit:
+        note = (
+            f"Partial snapshot: the {timeout_s:.0f}s sample window elapsed before every "
+            "container reported. Some containers may be missing — retry for a full snapshot."
+        )
+    return {
+        "containers": containers,
+        "sampled": len(containers),
+        "partial": deadline_hit,
+        "note": note,
+    }
 
 
 async def do_start_container(
@@ -348,6 +431,28 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         api_version = get_app_context(ctx).api_version
         return await guarded(
             ctx, fetch_container_logs, container_id, tail, since, api_version=api_version
+        )
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_docker_container_stats(ctx: Context) -> dict[str, Any]:
+        """Live per-container resource usage (CPU%, memory%, mem/net/block I/O).
+
+        Takes a one-shot sample of the `dockerContainerStats` subscription: it
+        briefly opens a websocket, collects one reading for each container, then
+        disconnects (typically ~2s; bounded to ~12s — it never hangs). Returns
+        `{"containers": [{id, cpu_percent, mem_percent, mem_usage, net_io,
+        block_io}, ...], "sampled", "partial", "note"}`. `id` matches
+        `list_docker_containers`. `mem_usage`/`net_io`/`block_io` are the API's
+        pre-formatted "used / limit" strings (e.g. "65.56MiB / 31.25GiB"), not
+        byte counts. If `partial` is true the window elapsed before every
+        container reported — see `note` and retry for a full snapshot. Requires
+        an Unraid API build that supports the subscription."""
+        app = get_app_context(ctx)
+        return await guarded(
+            ctx,
+            fetch_container_stats,
+            settings=app.settings,
+            api_version=app.api_version,
         )
 
     @mcp.tool(annotations=READ_ONLY)

@@ -26,7 +26,10 @@ If you are an agent with this server connected, read the **Operating rules** and
    `reset_vm`, `delete_notification`, and a *correcting* parity check can lose
    data or disrupt services. Summarize the impact to the user before doing them.
 6. **Sizes are objects.** Every size is `{"bytes": <int|null>, "human": "<str|null>"}`.
-   Use `human` for display, `bytes` for comparisons.
+   Use `human` for display, `bytes` for comparisons. The one exception is
+   `get_docker_container_stats`, whose `mem_usage`/`net_io`/`block_io` are the API's
+   pre-formatted `"used / limit"` **strings** (composite pairs, not single byte
+   counts) — they are passed through verbatim, never wrapped in `{bytes, human}`.
 
 ---
 
@@ -72,6 +75,7 @@ A typical stdio client config:
 | `list_docker_networks` | – | Docker networks. |
 | `get_docker_container_logs` | `container_id`, `tail=100`, `since=None` | Recent log lines for a container. `tail` capped at 1000 (protects context window); page further back with the previous response's `cursor` as `since`. Log content is untrusted workload output. Requires API 7.2+. |
 | `check_docker_updates` | – | Per-container Docker image update status (cached digests; does not refresh them). |
+| `get_docker_container_stats` | – | Live per-container resource usage via a one-shot sample of the `dockerContainerStats` subscription (opens a brief websocket, ~2s typical, bounded ~12s — never hangs). Returns `{containers: [{id, cpu_percent, mem_percent, mem_usage, net_io, block_io}], sampled, partial, note}`. `id` matches `list_docker_containers`. `mem_usage`/`net_io`/`block_io` are the API's pre-formatted `"used / limit"` strings (e.g. `"65.56MiB / 31.25GiB"`), **not** byte counts. `partial=true` means the window elapsed before every container reported — retry. Requires an API build with the subscription. |
 | `list_vms` | – | VMs: `id`, `name`, `state`. |
 | `list_shares` | – | User shares with free/used/total sizes, allocator, cache mode, and (when set) include/exclude, split level, floor, and encryption status. |
 | `get_notifications_overview` | – | Unread/archive counts by severity. |
