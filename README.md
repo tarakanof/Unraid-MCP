@@ -44,6 +44,11 @@ container with an available image update in one shot. It only takes effect when
 tools are flagged destructive and still require `confirm=true`. See
 [docs/security.md](docs/security.md) for the full tier breakdown.
 
+Beyond tools, the server also exposes two MCP **resources** (`unraid://health` and
+`unraid://system-info`) that a client can read without spending a tool call, and a
+**`triage`** prompt that walks an agent through investigating the box. See
+[Resources & prompts](#resources--prompts) below.
+
 The full tool catalog and agent-side conventions live in
 [docs/llm-usage.md](docs/llm-usage.md).
 
@@ -133,6 +138,43 @@ transport behind TLS before exposing it beyond localhost or a trusted LAN.
 
 Writing an agent against this? [docs/llm-usage.md](docs/llm-usage.md) has the tool
 catalog, conventions, and a drop-in system-prompt snippet.
+
+## Resources & prompts
+
+The server exposes MCP **resources** and **prompts** in addition to tools. They add no
+new API surface — each resource returns exactly the same JSON as the matching read tool,
+and the prompt just orchestrates existing tools.
+
+**Resources** (read-only, always available):
+
+| URI | Same data as | Contents |
+| --- | --- | --- |
+| `unraid://health` | `get_health_summary` | Array state, capacity, unhealthy disks, parity status, UPS, unread notification counts |
+| `unraid://system-info` | `get_system_info` | OS/kernel, CPU, memory, motherboard, versions, uptime, flash identity |
+
+**Prompt** (always available):
+
+| Name | Argument | What it does |
+| --- | --- | --- |
+| `triage` | `focus` (optional string) | Instructs the agent to start from `get_health_summary`, then drill into whichever subsystem (disks, notifications, parity, UPS, services) is unhealthy. `focus` narrows the investigation to a named subsystem. |
+
+If the box is unreachable, a resource read fails with a clean, secret-free error rather
+than crashing the client.
+
+**How clients surface these:**
+
+- **Claude Desktop** — open the chat's attachment (`+` / paperclip) menu and pick
+  **Add from Unraid** to attach a resource (e.g. the health summary) into the
+  conversation. Prompts appear in the same menu (sometimes shown as "commands" or
+  slash-style entries); choose **triage**, fill in the optional `focus`, and it drops
+  the triage instructions into your message.
+- **Claude Code** — MCP resources are referenced with `@unraid:` mentions (type `@` and
+  pick the server/resource), and MCP prompts are exposed as slash commands, e.g.
+  `/unraid:triage` with an optional focus argument. Run `/mcp` to inspect what the
+  `unraid` server offers.
+- **Any MCP client / SDK** — list and read via the standard MCP calls:
+  `resources/list` then `resources/read` with `uri: "unraid://health"`; `prompts/list`
+  then `prompts/get` with `name: "triage"` and `arguments: {"focus": "disks"}`.
 
 ## Develop
 
