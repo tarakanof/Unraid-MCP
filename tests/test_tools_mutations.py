@@ -28,6 +28,8 @@ MUTATION_TOOLS = {
     "restart_docker_container",
     "pause_docker_container",
     "unpause_docker_container",
+    "update_docker_container",
+    "update_docker_containers",
     "start_vm",
     "stop_vm",
     "pause_vm",
@@ -48,6 +50,7 @@ DANGEROUS_TOOLS = {
     "add_disk_to_array",
     "remove_disk_from_array",
     "remove_docker_container",
+    "update_all_docker_containers",
 }
 
 
@@ -276,6 +279,162 @@ async def test_unpause_container_unsupported_api_raises_friendly_error(mocked_cl
         with pytest.raises(ToolError, match="does not support"):
             await docker.do_unpause_container(client, "1:abc", confirm=True)
         assert route.call_count == 1
+
+
+# ── Docker container updates (pull + recreate) ───────────────────────────────
+
+
+async def test_update_container_requires_confirm_no_request(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_update_container(client, "1:abc", confirm=False)
+        assert route.call_count == 0
+
+
+async def test_update_container_with_confirm_sends_and_shapes(mocked_client):
+    async with mocked_client(
+        httpx.Response(
+            200,
+            json={
+                "data": {
+                    "docker": {
+                        "updateContainer": {
+                            "id": "1:abc",
+                            "names": ["/plex"],
+                            "state": "RUNNING",
+                            "status": "Up 2 seconds",
+                        }
+                    }
+                }
+            },
+        )
+    ) as (client, route):
+        result = await docker.do_update_container(client, "1:abc", confirm=True)
+        assert route.call_count == 1
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.UPDATE_CONTAINER
+        assert body["variables"] == {"id": "1:abc"}
+        assert result == {
+            "id": "1:abc",
+            "names": ["/plex"],
+            "state": "RUNNING",
+            "status": "Up 2 seconds",
+        }
+
+
+async def test_update_container_rejects_blank_id_pre_network(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_update_container(client, "   ", confirm=True)
+        assert route.call_count == 0
+
+
+async def test_update_container_old_api_friendly_error(mocked_client):
+    async with mocked_client(
+        httpx.Response(
+            200,
+            json={
+                "errors": [{"message": 'Cannot query field "updateContainer" on type "Docker".'}],
+                "data": None,
+            },
+        )
+    ) as (client, route):
+        with pytest.raises(ToolError) as excinfo:
+            await docker.do_update_container(client, "1:abc", confirm=True)
+        assert "does not support" in str(excinfo.value)
+
+
+async def test_update_containers_requires_confirm_no_request(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_update_containers(client, ["1:a", "1:b"], confirm=False)
+        assert route.call_count == 0
+
+
+async def test_update_containers_with_confirm_sends_and_shapes_list(mocked_client):
+    async with mocked_client(
+        httpx.Response(
+            200,
+            json={
+                "data": {
+                    "docker": {
+                        "updateContainers": [
+                            {"id": "1:a", "names": ["/a"], "state": "RUNNING", "status": "Up"},
+                            {"id": "1:b", "names": ["/b"], "state": "RUNNING", "status": "Up"},
+                        ]
+                    }
+                }
+            },
+        )
+    ) as (client, route):
+        result = await docker.do_update_containers(client, ["1:a", "1:b"], confirm=True)
+        assert route.call_count == 1
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.UPDATE_CONTAINERS
+        assert body["variables"] == {"ids": ["1:a", "1:b"]}
+        assert isinstance(result, list)
+        assert [c["id"] for c in result] == ["1:a", "1:b"]
+
+
+async def test_update_containers_rejects_empty_list_pre_network(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_update_containers(client, [], confirm=True)
+        assert route.call_count == 0
+
+
+async def test_update_containers_rejects_over_cap_pre_network(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        ids = [f"1:{i}" for i in range(docker.MAX_UPDATE_CONTAINERS + 1)]
+        with pytest.raises(ToolError):
+            await docker.do_update_containers(client, ids, confirm=True)
+        assert route.call_count == 0
+
+
+async def test_update_all_containers_requires_confirm_no_request(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_update_all_containers(client, confirm=False)
+        assert route.call_count == 0
+
+
+async def test_update_all_containers_with_confirm_sends_and_shapes_list(mocked_client):
+    async with mocked_client(
+        httpx.Response(
+            200,
+            json={
+                "data": {
+                    "docker": {
+                        "updateAllContainers": [
+                            {"id": "1:a", "names": ["/a"], "state": "RUNNING", "status": "Up"}
+                        ]
+                    }
+                }
+            },
+        )
+    ) as (client, route):
+        result = await docker.do_update_all_containers(client, confirm=True)
+        assert route.call_count == 1
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.UPDATE_ALL_CONTAINERS
+        assert [c["id"] for c in result] == ["1:a"]
+
+
+async def test_update_all_containers_old_api_friendly_error(mocked_client):
+    async with mocked_client(
+        httpx.Response(
+            200,
+            json={
+                "errors": [
+                    {"message": 'Cannot query field "updateAllContainers" on type "Docker".'}
+                ],
+                "data": None,
+            },
+        )
+    ) as (client, route):
+        with pytest.raises(ToolError) as excinfo:
+            await docker.do_update_all_containers(client, confirm=True)
+        assert "does not support" in str(excinfo.value)
 
 
 async def test_force_stop_vm_requires_confirm(mocked_client):

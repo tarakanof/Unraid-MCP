@@ -24,7 +24,7 @@ nothing.
 | Tier | Flag | Default | Unlocks |
 | --- | --- | --- | --- |
 | Read | *(always on)* | on | All monitoring/read tools. Never change anything. |
-| Mutate | `UNRAID_MCP_ALLOW_MUTATIONS` | off | Everyday writes: start/stop array, start/pause/resume/cancel parity, start/stop/restart Docker containers, start/stop/pause/resume/reboot/force-stop/reset VMs, notification archive/unread/delete. |
+| Mutate | `UNRAID_MCP_ALLOW_MUTATIONS` | off | Everyday writes: start/stop array, start/pause/resume/cancel parity, start/stop/restart/update Docker containers (single + batch), start/stop/pause/resume/reboot/force-stop/reset VMs, notification archive/unread/delete. |
 | Dangerous | `UNRAID_MCP_ALLOW_DANGEROUS` (requires mutations too) | off | High-blast-radius topology/removal ops (see below). |
 
 **Dangerous-tier tools** (all annotated `destructive`, all require `confirm=true`):
@@ -35,6 +35,7 @@ nothing.
 - `add_disk_to_array` — assign a physical disk to the array (array must be stopped; can overwrite/format the disk once started).
 - `remove_disk_from_array` — drop a disk from the array config (array must be stopped; data becomes inaccessible).
 - `remove_docker_container` — permanently delete a container, and optionally (`with_image=true`) its underlying image.
+- `update_all_docker_containers` — pull + recreate **every** container with an available update; fleet-wide, restarts many services at once (each with brief downtime). Updating one specific container stays in the everyday mutate tier (`update_docker_container` / `update_docker_containers`).
 
 Splitting these out means you can safely hand an agent everyday container/array
 control without also handing it the ability to reshape the array or delete

@@ -444,6 +444,25 @@ def shape_mutation_result(data: dict | None) -> dict[str, Any]:
     return {"ok": True, "result": payload}
 
 
+def shape_mutation_result_list(data: dict | None) -> list[dict[str, Any]]:
+    """Flatten a GraphQL mutation response whose payload is a LIST.
+
+    Some Docker mutations (``updateContainers`` / ``updateAllContainers``)
+    return ``[DockerContainer!]!``. This mirrors :func:`shape_mutation_result`
+    but for the list case: peel the single-key wrapper dicts (GraphQL root +
+    mutation field) down to the list, then return each element as-is (already
+    field-filtered by the query selection, e.g. ``{id, names, state, status}``).
+    A non-list payload (or an errored/empty response) yields ``[]``.
+    """
+    payload: Any = data or {}
+    while isinstance(payload, dict) and len(payload) == 1:
+        inner = next(iter(payload.values()))
+        if not isinstance(inner, (dict, list)):
+            break
+        payload = inner
+    return list(payload) if isinstance(payload, list) else []
+
+
 def summarize_health(
     array_out: dict[str, Any],
     ups_list: list[dict[str, Any]],
