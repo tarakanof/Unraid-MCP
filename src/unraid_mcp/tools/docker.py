@@ -167,9 +167,51 @@ async def do_stop_container(
 async def do_restart_container(
     client: UnraidClient, container_id: str, confirm: bool
 ) -> dict[str, Any]:
+    """Restart a container.
+
+    Tries the native ``docker.restart`` mutation (atomic on current Unraid
+    APIs). If the connected build predates that field, falls back to the
+    original stop-then-start sequence — not atomic; if start fails the
+    container is left stopped.
+    """
     require_confirm(confirm, f"restart container '{container_id}'")
-    await client.execute(queries.STOP_CONTAINER, {"id": container_id})
-    result = await client.execute(queries.START_CONTAINER, {"id": container_id})
+    try:
+        result = await client.execute(queries.RESTART_CONTAINER, {"id": container_id})
+    except UnraidGraphQLError as exc:
+        if not unsupported_field_error(exc):
+            raise
+        await client.execute(queries.STOP_CONTAINER, {"id": container_id})
+        result = await client.execute(queries.START_CONTAINER, {"id": container_id})
+    return shape_mutation_result(result)
+
+
+async def do_pause_container(
+    client: UnraidClient, container_id: str, confirm: bool, *, api_version: str | None = None
+) -> dict[str, Any]:
+    require_confirm(confirm, f"pause container '{container_id}'")
+    try:
+        result = await client.execute(queries.PAUSE_CONTAINER, {"id": container_id})
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported(
+                "pausing Docker containers", api_version=api_version
+            ) from None
+        raise
+    return shape_mutation_result(result)
+
+
+async def do_unpause_container(
+    client: UnraidClient, container_id: str, confirm: bool, *, api_version: str | None = None
+) -> dict[str, Any]:
+    require_confirm(confirm, f"unpause container '{container_id}'")
+    try:
+        result = await client.execute(queries.UNPAUSE_CONTAINER, {"id": container_id})
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported(
+                "unpausing Docker containers", api_version=api_version
+            ) from None
+        raise
     return shape_mutation_result(result)
 
 
@@ -266,9 +308,35 @@ def register_mutations(mcp: FastMCP, settings: Settings) -> None:
     async def restart_docker_container(
         ctx: Context, container_id: str, confirm: bool = False
     ) -> dict[str, Any]:
-        """Restart a Docker container by id (stop then start). Not atomic — if the
-        start fails the container is left stopped. Requires confirm=true."""
+        """Restart a Docker container by id. Atomic on current Unraid APIs (native
+        `docker.restart`); on older builds falls back to stop-then-start, which is
+        not atomic — if the start fails the container is left stopped.
+        Requires confirm=true."""
         return await guarded(ctx, do_restart_container, container_id, confirm)
+
+    @mcp.tool(annotations=MUTATING)
+    async def pause_docker_container(
+        ctx: Context, container_id: str, confirm: bool = False
+    ) -> dict[str, Any]:
+        """Pause a running Docker container by id (freezes its processes; does not
+        stop or remove it). Requires confirm=true. Requires an Unraid API build
+        that supports `docker.pause` — no fallback exists on older builds."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(
+            ctx, do_pause_container, container_id, confirm, api_version=api_version
+        )
+
+    @mcp.tool(annotations=MUTATING)
+    async def unpause_docker_container(
+        ctx: Context, container_id: str, confirm: bool = False
+    ) -> dict[str, Any]:
+        """Unpause a paused Docker container by id, resuming its processes.
+        Requires confirm=true. Requires an Unraid API build that supports
+        `docker.unpause` — no fallback exists on older builds."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(
+            ctx, do_unpause_container, container_id, confirm, api_version=api_version
+        )
 
 
 def register_dangerous(mcp: FastMCP, settings: Settings) -> None:

@@ -284,6 +284,8 @@ MUTATION_REFUSALS: list[tuple[str, Callable[[UnraidClient], Awaitable[Any]]]] = 
     ("start_container", lambda c: docker.do_start_container(c, "x", confirm=False)),
     ("stop_container", lambda c: docker.do_stop_container(c, "x", confirm=False)),
     ("restart_container", lambda c: docker.do_restart_container(c, "x", confirm=False)),
+    ("pause_container", lambda c: docker.do_pause_container(c, "x", confirm=False)),
+    ("unpause_container", lambda c: docker.do_unpause_container(c, "x", confirm=False)),
     (
         "archive_notification",
         lambda c: notifications.do_archive_notification(c, "x", confirm=False),

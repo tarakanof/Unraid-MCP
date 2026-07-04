@@ -291,6 +291,24 @@ mutation StopContainer($id: PrefixedID!) {
 }
 """
 
+RESTART_CONTAINER = """
+mutation RestartContainer($id: PrefixedID!) {
+  docker { restart(id: $id) { id names state status } }
+}
+"""
+
+PAUSE_CONTAINER = """
+mutation PauseContainer($id: PrefixedID!) {
+  docker { pause(id: $id) { id names state status } }
+}
+"""
+
+UNPAUSE_CONTAINER = """
+mutation UnpauseContainer($id: PrefixedID!) {
+  docker { unpause(id: $id) { id names state status } }
+}
+"""
+
 VM_START = "mutation StartVM($id: PrefixedID!) { vm { start(id: $id) } }"
 VM_STOP = "mutation StopVM($id: PrefixedID!) { vm { stop(id: $id) } }"
 VM_PAUSE = "mutation PauseVM($id: PrefixedID!) { vm { pause(id: $id) } }"
