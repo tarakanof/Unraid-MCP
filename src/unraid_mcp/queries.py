@@ -375,6 +375,50 @@ mutation DeleteNotification($id: PrefixedID!, $type: NotificationType!) {
 }
 """
 
+ARCHIVE_NOTIFICATIONS = """
+mutation ArchiveNotifications($ids: [PrefixedID!]!) {
+  archiveNotifications(ids: $ids) {
+    unread { info warning alert total }
+    archive { info warning alert total }
+  }
+}
+"""
+
+UNARCHIVE_NOTIFICATIONS = """
+mutation UnarchiveNotifications($ids: [PrefixedID!]!) {
+  unarchiveNotifications(ids: $ids) {
+    unread { info warning alert total }
+    archive { info warning alert total }
+  }
+}
+"""
+
+UNARCHIVE_ALL_NOTIFICATIONS = """
+mutation UnarchiveAllNotifications($importance: NotificationImportance) {
+  unarchiveAll(importance: $importance) {
+    unread { info warning alert total }
+    archive { info warning alert total }
+  }
+}
+"""
+
+DELETE_ARCHIVED_NOTIFICATIONS = """
+mutation DeleteArchivedNotifications {
+  deleteArchivedNotifications {
+    unread { info warning alert total }
+    archive { info warning alert total }
+  }
+}
+"""
+
+CREATE_NOTIFICATION = """
+mutation CreateNotification($input: NotificationData!) {
+  createNotification(input: $input) {
+    id title subject description importance link type timestamp
+  }
+}
+"""
+
 # ── Dangerous-tier mutations ─────────────────────────────────────────────────
 # High-blast-radius array-topology and container-removal ops. Registered only
 # when UNRAID_MCP_ALLOW_MUTATIONS *and* UNRAID_MCP_ALLOW_DANGEROUS are both set.
