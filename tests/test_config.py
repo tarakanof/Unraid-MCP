@@ -23,6 +23,7 @@ def clean_env(monkeypatch):
         "UNRAID_MCP_PORT",
         "UNRAID_MCP_BEARER_TOKEN",
         "UNRAID_MCP_ALLOW_MUTATIONS",
+        "UNRAID_MCP_ALLOW_DANGEROUS",
         "UNRAID_MCP_ALLOW_RAW_QUERY",
         "UNRAID_MCP_TIMEOUT",
         "UNRAID_MCP_LOG_LEVEL",
@@ -62,6 +63,7 @@ def test_defaults(clean_env):
     assert s.port == 6750
     assert s.verify_ssl is True
     assert s.allow_mutations is False
+    assert s.allow_dangerous is False
     assert s.allow_raw_query is False
     assert s.timeout == 30.0
     assert s.log_level == "INFO"
@@ -148,6 +150,17 @@ def test_bool_parsing(clean_env, raw, expected):
         clean_env.setenv(k, v)
     clean_env.setenv("UNRAID_MCP_ALLOW_MUTATIONS", raw)
     assert load_settings(_env_file=None).allow_mutations is expected
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [("true", True), ("1", True), ("yes", True), ("false", False), ("0", False)],
+)
+def test_allow_dangerous_parsing(clean_env, raw, expected):
+    for k, v in REQUIRED.items():
+        clean_env.setenv(k, v)
+    clean_env.setenv("UNRAID_MCP_ALLOW_DANGEROUS", raw)
+    assert load_settings(_env_file=None).allow_dangerous is expected
 
 
 def test_port_and_timeout_coerced_from_strings(clean_env):

@@ -341,3 +341,44 @@ mutation DeleteNotification($id: PrefixedID!, $type: NotificationType!) {
   }
 }
 """
+
+# ── Dangerous-tier mutations ─────────────────────────────────────────────────
+# High-blast-radius array-topology and container-removal ops. Registered only
+# when UNRAID_MCP_ALLOW_MUTATIONS *and* UNRAID_MCP_ALLOW_DANGEROUS are both set.
+# UnraidArray/ArrayDisk returns select a minimal, existing-shaped selection.
+
+MOUNT_ARRAY_DISK = """
+mutation MountArrayDisk($id: PrefixedID!) {
+  array { mountArrayDisk(id: $id) { id name status } }
+}
+"""
+
+UNMOUNT_ARRAY_DISK = """
+mutation UnmountArrayDisk($id: PrefixedID!) {
+  array { unmountArrayDisk(id: $id) { id name status } }
+}
+"""
+
+CLEAR_ARRAY_DISK_STATISTICS = """
+mutation ClearArrayDiskStatistics($id: PrefixedID!) {
+  array { clearArrayDiskStatistics(id: $id) }
+}
+"""
+
+ADD_DISK_TO_ARRAY = """
+mutation AddDiskToArray($input: ArrayDiskInput!) {
+  array { addDiskToArray(input: $input) { id state } }
+}
+"""
+
+REMOVE_DISK_FROM_ARRAY = """
+mutation RemoveDiskFromArray($input: ArrayDiskInput!) {
+  array { removeDiskFromArray(input: $input) { id state } }
+}
+"""
+
+REMOVE_DOCKER_CONTAINER = """
+mutation RemoveDockerContainer($id: PrefixedID!, $withImage: Boolean) {
+  docker { removeContainer(id: $id, withImage: $withImage) }
+}
+"""

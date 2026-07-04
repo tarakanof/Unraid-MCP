@@ -173,6 +173,31 @@ async def do_restart_container(
     return shape_mutation_result(result)
 
 
+# ── Dangerous-tier logic ────────────────────────────────────────────────────
+
+
+async def do_remove_container(
+    client: UnraidClient,
+    container_id: str,
+    with_image: bool = False,
+    confirm: bool = False,
+) -> dict[str, Any]:
+    consequence = f"remove container '{container_id}' (irreversible)"
+    if with_image:
+        consequence = (
+            f"remove container '{container_id}' AND delete its underlying image (irreversible)"
+        )
+    require_confirm(confirm, consequence)
+    if not container_id or not container_id.strip():
+        raise ToolError(
+            "container_id must be a non-empty container id (see list_docker_containers)."
+        )
+    result = await client.execute(
+        queries.REMOVE_DOCKER_CONTAINER, {"id": container_id, "withImage": with_image}
+    )
+    return shape_mutation_result(result)
+
+
 def register(mcp: FastMCP, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def list_docker_containers(ctx: Context) -> list[dict[str, Any]]:
@@ -244,3 +269,19 @@ def register_mutations(mcp: FastMCP, settings: Settings) -> None:
         """Restart a Docker container by id (stop then start). Not atomic — if the
         start fails the container is left stopped. Requires confirm=true."""
         return await guarded(ctx, do_restart_container, container_id, confirm)
+
+
+def register_dangerous(mcp: FastMCP, settings: Settings) -> None:
+    """Dangerous-tier Docker tools. Registered only when BOTH
+    UNRAID_MCP_ALLOW_MUTATIONS and UNRAID_MCP_ALLOW_DANGEROUS are true."""
+
+    @mcp.tool(annotations=DESTRUCTIVE)
+    async def remove_docker_container(
+        ctx: Context, container_id: str, with_image: bool = False, confirm: bool = False
+    ) -> dict[str, Any]:
+        """DANGEROUS. Permanently remove a Docker container by id (from
+        list_docker_containers). This deletes the container and is irreversible. Set
+        with_image=true to ALSO delete the container's underlying image (other
+        containers using that image would then need to re-pull it). Requires
+        confirm=true."""
+        return await guarded(ctx, do_remove_container, container_id, with_image, confirm)

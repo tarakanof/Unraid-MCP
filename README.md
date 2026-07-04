@@ -33,6 +33,13 @@ Opt-in mutating tools (start/stop the array, control Docker/VMs, run parity chec
 manage notifications) only show up when you set `UNRAID_MCP_ALLOW_MUTATIONS=true`, and
 every one of them needs `confirm=true`.
 
+A third **dangerous** tier (`UNRAID_MCP_ALLOW_DANGEROUS=true`) unlocks high-blast-radius
+operations — array topology (add/remove/mount/unmount a disk, clear disk statistics) and
+permanently removing a Docker container (optionally its image). It only takes effect when
+`UNRAID_MCP_ALLOW_MUTATIONS` is *also* true; enabling it alone unlocks nothing. These
+tools are flagged destructive and still require `confirm=true`. See
+[docs/security.md](docs/security.md) for the full tier breakdown.
+
 The full tool catalog and agent-side conventions live in
 [docs/llm-usage.md](docs/llm-usage.md).
 

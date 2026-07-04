@@ -9,6 +9,7 @@ import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
 from unraid_mcp import queries
+from unraid_mcp.errors import UnraidGraphQLError
 from unraid_mcp.server import build_server
 from unraid_mcp.tools import array, docker, notifications, vm
 
@@ -36,6 +37,15 @@ MUTATION_TOOLS = {
     "mark_notification_unread",
     "delete_notification",
 }
+# Dangerous-tier tools — registered only when allow_mutations AND allow_dangerous.
+DANGEROUS_TOOLS = {
+    "mount_array_disk",
+    "unmount_array_disk",
+    "clear_disk_statistics",
+    "add_disk_to_array",
+    "remove_disk_from_array",
+    "remove_docker_container",
+}
 
 
 async def _tool_names(settings) -> set[str]:
@@ -54,6 +64,40 @@ async def test_mutations_present_when_enabled(settings_factory):
     with_mutations = await _tool_names(settings_factory(allow_mutations=True))
     # Exactly the mutation set appears, nothing more, nothing fewer.
     assert with_mutations - read_only == MUTATION_TOOLS
+
+
+# ── Dangerous-tier registration matrix ──────────────────────────────────────
+
+
+async def test_dangerous_absent_with_neither_flag(settings_factory):
+    names = await _tool_names(settings_factory(allow_mutations=False, allow_dangerous=False))
+    assert names >= READ_TOOLS
+    assert names.isdisjoint(DANGEROUS_TOOLS)
+
+
+async def test_dangerous_absent_with_mutations_only(settings_factory):
+    names = await _tool_names(settings_factory(allow_mutations=True, allow_dangerous=False))
+    # Normal mutations present, dangerous tier still gated off.
+    assert names >= MUTATION_TOOLS
+    assert names.isdisjoint(DANGEROUS_TOOLS)
+
+
+async def test_dangerous_absent_with_dangerous_flag_alone(settings_factory):
+    # allow_dangerous without allow_mutations must unlock nothing.
+    names = await _tool_names(settings_factory(allow_mutations=False, allow_dangerous=True))
+    assert names >= READ_TOOLS
+    assert names.isdisjoint(MUTATION_TOOLS)
+    assert names.isdisjoint(DANGEROUS_TOOLS)
+
+
+async def test_dangerous_present_only_when_both_flags(settings_factory):
+    mutations_only = await _tool_names(
+        settings_factory(allow_mutations=True, allow_dangerous=False)
+    )
+    both = await _tool_names(settings_factory(allow_mutations=True, allow_dangerous=True))
+    # Enabling dangerous adds exactly the dangerous set on top of mutations.
+    assert both - mutations_only == DANGEROUS_TOOLS
+    assert both >= READ_TOOLS
 
 
 async def test_correcting_parity_check_requires_confirm(mocked_client):
@@ -169,3 +213,180 @@ async def test_delete_notification_with_confirm_sends_type(mocked_client):
         await notifications.do_delete_notification(client, "n1", "ARCHIVE", confirm=True)
         body = json.loads(route.calls.last.request.content)
         assert body["variables"] == {"id": "n1", "type": "ARCHIVE"}
+
+
+# ── Dangerous-tier: array disk ops ───────────────────────────────────────────
+
+
+async def test_mount_array_disk_requires_confirm_no_request(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await array.do_mount_array_disk(client, "1:sdb", confirm=False)
+        assert route.call_count == 0
+
+
+async def test_mount_array_disk_with_confirm_sends(mocked_client):
+    async with mocked_client(
+        httpx.Response(
+            200,
+            json={"data": {"array": {"mountArrayDisk": {"id": "1:sdb", "name": "disk1"}}}},
+        )
+    ) as (client, route):
+        result = await array.do_mount_array_disk(client, "1:sdb", confirm=True)
+        assert route.call_count == 1
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.MOUNT_ARRAY_DISK
+        assert body["variables"] == {"id": "1:sdb"}
+        assert result == {"id": "1:sdb", "name": "disk1"}
+
+
+async def test_mount_array_disk_rejects_blank_id_pre_network(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await array.do_mount_array_disk(client, "  ", confirm=True)
+        assert route.call_count == 0
+
+
+async def test_unmount_array_disk_requires_confirm_no_request(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await array.do_unmount_array_disk(client, "1:sdb", confirm=False)
+        assert route.call_count == 0
+
+
+async def test_unmount_array_disk_with_confirm_sends(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"array": {"unmountArrayDisk": {"id": "1:sdb"}}}})
+    ) as (client, route):
+        await array.do_unmount_array_disk(client, "1:sdb", confirm=True)
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.UNMOUNT_ARRAY_DISK
+        assert body["variables"] == {"id": "1:sdb"}
+
+
+async def test_clear_disk_statistics_requires_confirm_no_request(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await array.do_clear_disk_statistics(client, "1:sdb", confirm=False)
+        assert route.call_count == 0
+
+
+async def test_clear_disk_statistics_with_confirm_returns_ok(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"array": {"clearArrayDiskStatistics": True}}})
+    ) as (client, route):
+        result = await array.do_clear_disk_statistics(client, "1:sdb", confirm=True)
+        assert route.call_count == 1
+        assert json.loads(route.calls.last.request.content)["variables"] == {"id": "1:sdb"}
+        assert result == {"ok": True}
+
+
+async def test_add_disk_to_array_requires_confirm_no_request(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await array.do_add_disk_to_array(client, "1:sdb", confirm=False)
+        assert route.call_count == 0
+
+
+async def test_add_disk_to_array_with_slot_sends_input(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"array": {"addDiskToArray": {"id": "1:x"}}}})
+    ) as (client, route):
+        await array.do_add_disk_to_array(client, "1:sdb", slot=3, confirm=True)
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.ADD_DISK_TO_ARRAY
+        assert body["variables"] == {"input": {"id": "1:sdb", "slot": 3}}
+
+
+async def test_add_disk_to_array_omits_slot_when_none(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"array": {"addDiskToArray": {"id": "1:x"}}}})
+    ) as (client, route):
+        await array.do_add_disk_to_array(client, "1:sdb", confirm=True)
+        body = json.loads(route.calls.last.request.content)
+        assert body["variables"] == {"input": {"id": "1:sdb"}}
+
+
+async def test_add_disk_to_array_rejects_negative_slot_pre_network(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await array.do_add_disk_to_array(client, "1:sdb", slot=-1, confirm=True)
+        assert route.call_count == 0
+
+
+async def test_remove_disk_from_array_requires_confirm_no_request(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await array.do_remove_disk_from_array(client, "1:sdb", confirm=False)
+        assert route.call_count == 0
+
+
+async def test_remove_disk_from_array_with_confirm_sends_input(mocked_client):
+    async with mocked_client(
+        httpx.Response(
+            200,
+            json={"data": {"array": {"removeDiskFromArray": {"id": "1:x", "state": "STOPPED"}}}},
+        )
+    ) as (client, route):
+        result = await array.do_remove_disk_from_array(client, "1:sdb", confirm=True)
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.REMOVE_DISK_FROM_ARRAY
+        assert body["variables"] == {"input": {"id": "1:sdb"}}
+        assert result == {"id": "1:x", "state": "STOPPED"}
+
+
+async def test_array_disk_op_propagates_graphql_error(mocked_client):
+    # do_* propagates the domain error; _base.guarded (the @mcp.tool boundary)
+    # is what maps it to a friendly, secret-free ToolError for the client.
+    async with mocked_client(
+        httpx.Response(200, json={"errors": [{"message": "array is started"}], "data": None})
+    ) as (client, route):
+        with pytest.raises(UnraidGraphQLError):
+            await array.do_remove_disk_from_array(client, "1:sdb", confirm=True)
+
+
+# ── Dangerous-tier: docker container removal ─────────────────────────────────
+
+
+async def test_remove_container_requires_confirm_no_request(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_remove_container(client, "1:abc", confirm=False)
+        assert route.call_count == 0
+
+
+async def test_remove_container_with_confirm_sends_defaults(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"docker": {"removeContainer": True}}})
+    ) as (client, route):
+        result = await docker.do_remove_container(client, "1:abc", confirm=True)
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.REMOVE_DOCKER_CONTAINER
+        assert body["variables"] == {"id": "1:abc", "withImage": False}
+        assert result == {"ok": True}
+
+
+async def test_remove_container_with_image_sends_flag(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"docker": {"removeContainer": True}}})
+    ) as (client, route):
+        await docker.do_remove_container(client, "1:abc", with_image=True, confirm=True)
+        assert json.loads(route.calls.last.request.content)["variables"] == {
+            "id": "1:abc",
+            "withImage": True,
+        }
+
+
+async def test_remove_container_rejects_blank_id_pre_network(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_remove_container(client, "   ", confirm=True)
+        assert route.call_count == 0
+
+
+async def test_remove_container_propagates_graphql_error(mocked_client):
+    async with mocked_client(
+        httpx.Response(200, json={"errors": [{"message": "no such container"}], "data": None})
+    ) as (client, route):
+        with pytest.raises(UnraidGraphQLError):
+            await docker.do_remove_container(client, "1:abc", confirm=True)
