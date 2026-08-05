@@ -115,10 +115,39 @@ def http_app(mcp: MCPServer, settings: Settings) -> Starlette:
     returned Starlette app owns the session-manager lifespan, which uvicorn runs
     via the outermost app in ``cli._build_http_app`` (our ASGI middlewares pass
     ``lifespan`` scopes straight through).
+
+    ``stateless_http=True`` (MCP spec 2026-07-28) is always on, unconditionally
+    — there is no setting to disable it. This server never sends a
+    server-initiated request (no sampling/elicitation/roots), so the one
+    capability stateless mode gives up (``can_send_request=False`` on the
+    per-request channel, ``streamable_http_manager.py:222``) costs nothing here.
+    Evidence for "always on, no flag" (installed ``mcp`` 2.0.0 source):
+
+    - The session manager enters ``app.lifespan(app)`` exactly once for the
+      manager's lifetime regardless of ``stateless``, and every per-request
+      transport reuses that single ``lifespan_state``
+      (``streamable_http_manager.py:145-149,235``) — stateless mode cannot
+      trigger the ``build_server`` re-entry guard more than once per process.
+    - Pre-2026 ("legacy") clients still work transparently: each stateless
+      request builds its connection via ``Connection.from_envelope(...)``
+      (``streamable_http_manager.py:228-232``), which unconditionally calls
+      ``connection.initialized.set()`` (``connection.py:296``), so
+      ``initialize_accepted`` is already true
+      (``connection.py:333-337``) before the request's own method runs. A
+      legacy client's ``initialize`` is still served correctly (the
+      dispatcher special-cases it via ``inline_methods={"initialize"}``,
+      ``streamable_http_manager.py:216``, handled in
+      ``runner.py:201-202``); the request-gate check that would otherwise
+      reject a not-yet-initialized connection
+      (``runner.py:211``) never fires, because every stateless connection is
+      born pre-initialized. No session ID is ever handed out
+      (``mcp_session_id=None``, ``streamable_http_manager.py:202``), which
+      legacy clients tolerate as a sessionless server.
     """
     return mcp.streamable_http_app(
         host=settings.host,
         transport_security=_transport_security(settings),
+        stateless_http=True,
     )
 
 

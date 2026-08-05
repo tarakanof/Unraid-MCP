@@ -41,6 +41,14 @@ Standard proxy shape for every reverse-proxy recipe: **subdomain only**
 `UNRAID_MCP_ALLOWED_HOSTS`. Subpath hosting (`example.com/mcp/...`) is possible
 with a path rewrite but is not covered here.
 
+> **No session affinity needed.** The streamable-HTTP transport runs stateless
+> (MCP spec 2026-07-28): every request is a self-contained exchange with no
+> `initialize` handshake and no `Mcp-Session-Id` to keep pinned to one backend.
+> A reverse proxy or load balancer can round-robin across replicas freely, and
+> restarting the container between two client requests is safe — nothing
+> carries over between requests except the read-only Unraid API connection
+> each process opens for itself.
+
 > **Expected startup warning when TLS terminates upstream.** In the Tailscale,
 > SWAG, NPM, Caddy, and WireGuard recipes the MCP container binds `0.0.0.0` with
 > no cert of its own, so it logs `Serving PLAINTEXT HTTP on a non-localhost
