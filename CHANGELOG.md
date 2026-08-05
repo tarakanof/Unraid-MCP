@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.7.0 - 2026-08-06
+
+MCP spec 2026-07-28 adoption (epic #79): SDK v2, stateless HTTP, cache hints.
+Pre-2026 clients remain fully supported (the legacy `initialize` handshake is
+served and negotiates the client's requested protocol revision).
+
+### Changed
+
+- **Migrated to `mcp` SDK v2 (2.0.0)** — the MCP 2026-07-28 specification
+  baseline (#75). Mostly internal (`FastMCP` → `MCPServer`, transport wiring
+  moved out of the constructor); behavior, tools, configuration, and the
+  security model are unchanged. `serverInfo.version` now reports the
+  unraid-mcp release version instead of the SDK's.
+- **Streamable HTTP is stateless** (#76): every request is self-contained —
+  no `Mcp-Session-Id`, no session affinity needed behind a reverse proxy or
+  load balancer, and restarting the container between client requests is safe.
+  Pre-2026 clients still work: their `initialize` is answered (sessionless).
+  No new configuration.
+
+### Added
+
+- **Cache hints** (`ttlMs`/`cacheScope`, spec 2026-07-28) on cacheable
+  responses (#77): 5 min for `tools/list`, `prompts/list`, `resources/list`,
+  `resources/templates/list`, and `server/discover` (the registered set is
+  fixed per process); 10 s for `resources/read` (health/system-info are
+  point-in-time snapshots), scoped `private` so shared caches never serve one
+  client's snapshot to another. Additive: clients that ignore the hints see no
+  change.
+
+### Fixed
+
+- IPv6 binds (`UNRAID_MCP_HOST=::1`) no longer reject every request with
+  `421 Misdirected Request` — the DNS-rebinding Host allow-list now uses the
+  bracketed `[::1]:port` form (pre-existing bug surfaced by the migration
+  review, #80).
+- Resource read errors carry a machine-readable `data.uri` field, matching
+  SDK-generated resource errors (#80).
+
+### Dependencies
+
+- `mcp` 1.28.1 → 2.0.0 (pulls in `mcp-types` and `httpx2`; our own GraphQL
+  client stays on `httpx`).
+- `cryptography` pinned ≥ 50.0.0 (CVE-2026-69247 / PYSEC-2026-3552; was a
+  pre-existing transitive dependency resolved at a vulnerable version).
+
 ## 0.6.0 - 2026-07-04
 
 Resources, prompts, and live per-container stats (milestone v0.6.0). Completes
