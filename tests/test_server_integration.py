@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import httpx
 import respx
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.client import Client
 
 from unraid_mcp.server import build_server
 
@@ -22,17 +22,15 @@ async def test_list_and_call_through_protocol(settings_factory):
             return_value=httpx.Response(200, json={"data": {"info": {"os": {"hostname": "tower"}}}})
         )
         mcp = build_server(settings_factory(allow_mutations=False))
-        async with create_connected_server_and_client_session(
-            mcp, raise_exceptions=True
-        ) as session:
+        async with Client(mcp, raise_exceptions=True) as session:
             tools = {t.name for t in (await session.list_tools()).tools}
             assert "get_system_info" in tools
             assert "get_health_summary" in tools
             assert "stop_array" not in tools  # mutations disabled by default
 
             result = await session.call_tool("get_system_info", {})
-            assert result.isError is False
-            assert result.structuredContent["os"]["hostname"] == "tower"
+            assert result.is_error is False
+            assert result.structured_content["os"]["hostname"] == "tower"
 
 
 async def test_mutations_callable_when_enabled(settings_factory):
@@ -43,14 +41,12 @@ async def test_mutations_callable_when_enabled(settings_factory):
             )
         )
         mcp = build_server(settings_factory(allow_mutations=True))
-        async with create_connected_server_and_client_session(
-            mcp, raise_exceptions=True
-        ) as session:
+        async with Client(mcp, raise_exceptions=True) as session:
             tools = {t.name for t in (await session.list_tools()).tools}
             assert "start_array" in tools
             # Confirm-gated stop_array refuses without confirm and makes no change.
             refused = await session.call_tool("stop_array", {"confirm": False})
-            assert refused.isError is True
+            assert refused.is_error is True
 
 
 async def test_probe_failure_does_not_block_startup(settings_factory):
@@ -67,9 +63,7 @@ async def test_probe_failure_does_not_block_startup(settings_factory):
             )
         )
         mcp = build_server(settings_factory(allow_mutations=False))
-        async with create_connected_server_and_client_session(
-            mcp, raise_exceptions=True
-        ) as session:
+        async with Client(mcp, raise_exceptions=True) as session:
             tools = {t.name for t in (await session.list_tools()).tools}
             assert "get_system_info" in tools
 
@@ -91,13 +85,11 @@ async def test_system_info_exposes_probed_versions(settings_factory):
             )
         )
         mcp = build_server(settings_factory(allow_mutations=False))
-        async with create_connected_server_and_client_session(
-            mcp, raise_exceptions=True
-        ) as session:
+        async with Client(mcp, raise_exceptions=True) as session:
             result = await session.call_tool("get_system_info", {})
-            assert result.isError is False
-            assert result.structuredContent["api_version"] == "7.2.0"
-            assert result.structuredContent["unraid_version"] == "7.2.0"
+            assert result.is_error is False
+            assert result.structured_content["api_version"] == "7.2.0"
+            assert result.structured_content["unraid_version"] == "7.2.0"
 
 
 async def test_app_context_carries_probed_versions(settings_factory):
@@ -112,7 +104,7 @@ async def test_app_context_carries_probed_versions(settings_factory):
             )
         )
         mcp = build_server(settings_factory())
-        async with mcp._mcp_server.lifespan(mcp._mcp_server) as ctx:
+        async with mcp._lowlevel_server.lifespan(mcp._lowlevel_server) as ctx:
             assert ctx.api_version == "7.1.0"
             assert ctx.unraid_version == "7.1.5"
 
@@ -120,5 +112,5 @@ async def test_app_context_carries_probed_versions(settings_factory):
 async def test_unraid_http_client_ignores_proxy_environment(settings_factory, monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.local:8080")
     mcp = build_server(settings_factory())
-    async with mcp._mcp_server.lifespan(mcp._mcp_server) as ctx:
+    async with mcp._lowlevel_server.lifespan(mcp._lowlevel_server) as ctx:
         assert ctx.client._http.trust_env is False

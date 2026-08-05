@@ -13,7 +13,7 @@ import ssl
 from contextlib import asynccontextmanager
 
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError
 
 from unraid_mcp.config import Settings
 from unraid_mcp.subscriptions import WSClosed

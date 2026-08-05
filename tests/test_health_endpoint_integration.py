@@ -22,8 +22,9 @@ async def test_health_returns_200_without_auth_and_makes_no_upstream_call(settin
         route = respx.post(URL).mock(
             return_value=httpx.Response(200, json={"data": {"info": {"os": {"hostname": "t"}}}})
         )
-        mcp = build_server(settings_factory())
-        app = cli._build_http_app(mcp, TOKEN)
+        settings = settings_factory()
+        mcp = build_server(settings)
+        app = cli._build_http_app(mcp, settings, TOKEN)
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/health")
@@ -35,8 +36,9 @@ async def test_health_returns_200_without_auth_and_makes_no_upstream_call(settin
 async def test_other_paths_still_401_without_bearer_token(settings_factory):
     with respx.mock:
         respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
-        mcp = build_server(settings_factory())
-        app = cli._build_http_app(mcp, TOKEN)
+        settings = settings_factory()
+        mcp = build_server(settings)
+        app = cli._build_http_app(mcp, settings, TOKEN)
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post("/mcp")
@@ -46,8 +48,9 @@ async def test_other_paths_still_401_without_bearer_token(settings_factory):
 async def test_health_path_ignores_bearer_token_requirement_even_with_bad_header(settings_factory):
     with respx.mock:
         respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
-        mcp = build_server(settings_factory())
-        app = cli._build_http_app(mcp, TOKEN)
+        settings = settings_factory()
+        mcp = build_server(settings)
+        app = cli._build_http_app(mcp, settings, TOKEN)
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/health", headers={"Authorization": "Bearer wrong"})
