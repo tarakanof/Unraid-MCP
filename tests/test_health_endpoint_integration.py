@@ -205,7 +205,11 @@ async def test_stateless_serves_tools_list_and_tools_call_without_any_session(se
                 second = await client.post("/mcp", json=TOOLS_CALL, headers=headers)
                 assert second.status_code == 200
                 assert "mcp-session-id" not in second.headers
-                assert "error" not in _rpc_body(second)
+                # Tool failures come back as HTTP 200 with result.isError=true,
+                # not a JSON-RPC error member — assert the actual payload.
+                result = _rpc_body(second)["result"]
+                assert result.get("isError") is not True
+                assert result["structuredContent"]["os"]["hostname"] == "tower"
         finally:
             await stop()
 

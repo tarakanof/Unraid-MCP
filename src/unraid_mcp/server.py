@@ -117,10 +117,21 @@ def http_app(mcp: MCPServer, settings: Settings) -> Starlette:
     ``lifespan`` scopes straight through).
 
     ``stateless_http=True`` (MCP spec 2026-07-28) is always on, unconditionally
-    — there is no setting to disable it. This server never sends a
-    server-initiated request (no sampling/elicitation/roots), so the one
-    capability stateless mode gives up (``can_send_request=False`` on the
-    per-request channel, ``streamable_http_manager.py:222``) costs nothing here.
+    — there is no setting to disable it. Note the flag only changes the legacy
+    (pre-2026) request path: modern requests are routed to
+    ``handle_modern_request`` regardless and were already sessionless with
+    ``can_send_request=False``. What the flag buys is sessionless service for
+    pre-2026 clients too. This server never sends a server-initiated request
+    (no sampling/elicitation/roots), so the one capability the legacy path
+    gives up (``can_send_request=False`` on the per-request channel,
+    ``streamable_http_manager.py:222``) costs nothing here. A legacy client
+    that omits ``MCP-Protocol-Version`` on follow-ups is served at the SDK's
+    ``DEFAULT_NEGOTIATED_VERSION`` rather than what its ``initialize``
+    negotiated — no observable difference on this server's surface today, but
+    version-gated SDK behavior could change that. ``json_response`` is
+    deliberately left at its default (``False``, SSE-per-response): nothing
+    requires pairing it with stateless mode, and flipping it would be an
+    unrelated behavior change.
     Evidence for "always on, no flag" (installed ``mcp`` 2.0.0 source):
 
     - The session manager enters ``app.lifespan(app)`` exactly once for the
