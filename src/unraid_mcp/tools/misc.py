@@ -7,8 +7,8 @@ from typing import Any
 from graphql import parse as graphql_parse
 from graphql.error import GraphQLError
 from graphql.language import OperationDefinitionNode, OperationType
-from mcp.server.fastmcp import Context, FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from .. import queries
 from ..client import UnraidClient
@@ -175,7 +175,7 @@ async def do_raw_query(
     return await client.execute(query, variables)
 
 
-def register(mcp: FastMCP, settings: Settings) -> None:
+def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def get_ups_status(ctx: Context) -> list[dict[str, Any]]:
         """Get UPS devices: status, battery charge/runtime/health, and load/voltage."""
@@ -240,7 +240,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         return await guarded(ctx, fetch_log_file, path, lines, start_line, api_version=api_version)
 
 
-def register_raw_query(mcp: FastMCP, settings: Settings) -> None:
+def register_raw_query(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def run_graphql_query(
         ctx: Context, query: str, variables: dict[str, Any] | None = None

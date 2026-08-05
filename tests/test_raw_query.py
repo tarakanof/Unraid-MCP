@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError
 
 from unraid_mcp.tools import misc
 

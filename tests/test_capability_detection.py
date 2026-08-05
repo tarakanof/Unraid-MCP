@@ -8,7 +8,7 @@ degrading-fetch pattern they compose into.
 from __future__ import annotations
 
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError
 
 from unraid_mcp.errors import UnraidConnectionError, UnraidGraphQLError
 from unraid_mcp.tools._base import (

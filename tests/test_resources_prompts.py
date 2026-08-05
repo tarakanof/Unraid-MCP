@@ -13,9 +13,8 @@ import json
 import httpx
 import pytest
 import respx
-from mcp.shared.exceptions import McpError
-from mcp.shared.memory import create_connected_server_and_client_session
-from pydantic import AnyUrl
+from mcp.client import Client
+from mcp.shared.exceptions import MCPError
 
 from unraid_mcp import resources
 from unraid_mcp.client import UnraidClient
@@ -51,7 +50,7 @@ async def _session(responses):
         else:
             route.mock(return_value=responses)
         server = build_server(make_settings())
-        async with create_connected_server_and_client_session(server) as session:
+        async with Client(server) as session:
             yield session, route
 
 
@@ -73,10 +72,10 @@ async def test_resource_matches_tool_shape(uri, fetch):
     """Reading a resource returns exactly the corresponding tool's fetch output."""
     expected = await _direct_fetch(fetch)
     async with _session(httpx.Response(200, json=_CANNED)) as (session, _route):
-        result = await session.read_resource(AnyUrl(uri))
+        result = await session.read_resource(uri)
     assert len(result.contents) == 1
     content = result.contents[0]
-    assert content.mimeType == "application/json"
+    assert content.mime_type == "application/json"
     assert json.loads(content.text) == expected
 
 
@@ -93,8 +92,8 @@ async def test_resource_error_when_box_unreachable():
     """Box down -> a clean resource error reaches the client, not a raw crash."""
     down = httpx.ConnectError("connection refused")
     async with _session(down) as (session, _route):
-        with pytest.raises(McpError) as excinfo:
-            await session.read_resource(AnyUrl(resources.HEALTH_URI))
+        with pytest.raises(MCPError) as excinfo:
+            await session.read_resource(resources.HEALTH_URI)
     msg = str(excinfo.value)
     assert "unraid://health" in msg
     # The secret-free connection hint from UnraidConnectionError is surfaced.

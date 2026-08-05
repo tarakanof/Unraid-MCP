@@ -1,8 +1,8 @@
 # AGENTS.md — conventions for coding agents
 
 MCP server exposing the Unraid GraphQL API as typed tools. Python 3.11+,
-FastMCP (`mcp`), httpx, pydantic-settings. Source in `src/unraid_mcp/`,
-tests in `tests/`.
+`mcp` SDK v2 (`MCPServer`, ex-`FastMCP`), httpx, pydantic-settings. Source in
+`src/unraid_mcp/`, tests in `tests/`.
 
 ## Commands
 
@@ -38,8 +38,18 @@ uv run python scripts/check_schema_drift.py         # PASS/FAIL per op, non-zero
   Size conventions: `ArrayDisk`/`Share` sizes arrive in **KiB**, physical
   `Disk.size` arrives in **bytes**; every size is emitted as
   `{"bytes": int|None, "human": str|None}`.
-- **Errors**: raise `ToolError` with an actionable, secret-free message.
-  Client/domain errors are translated at the tool boundary by `_base.guarded`.
+- **Errors**: raise `ToolError` (from `mcp.server.mcpserver.exceptions`) with an
+  actionable, secret-free message. Client/domain errors are translated at the
+  tool boundary by `_base.guarded`. **Resources** raise `MCPError` instead: the
+  SDK replaces the text of any other exception escaping a resource read with a
+  generic message, and only `MCPError` reaches the client verbatim.
+- **Transport wiring**: `build_server()` returns a transport-agnostic
+  `MCPServer` (SDK v2 keeps host/port/DNS-rebinding out of the constructor).
+  `server.http_app()` applies them for streamable-HTTP; `cli` wraps that app in
+  the health + bearer ASGI middlewares and runs stdio via `mcp.run("stdio")`.
+- **Static resources get no `Context`** in SDK v2 (only URI templates do), so
+  `build_server` hands `register_resources` an accessor for the lifespan
+  `AppContext`.
 
 ## Safety invariants (do not weaken)
 
@@ -55,7 +65,9 @@ uv run python scripts/check_schema_drift.py         # PASS/FAIL per op, non-zero
 respx-based (`tests/test_tools_read.py`, `tests/test_tools_mutations.py`).
 Every tool needs: happy path, empty/None-field response, error mapping.
 Mutations additionally: refused without `confirm=true` **with no HTTP
-request made**.
+request made**. End-to-end protocol tests drive the server through the SDK's
+in-memory client (`from mcp.client import Client`; `async with Client(mcp) as
+session`) — v1's `create_connected_server_and_client_session` is gone.
 
 ### Live smoke suite (opt-in)
 

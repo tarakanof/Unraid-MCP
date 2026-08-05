@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 if TYPE_CHECKING:
     from .config import Settings
@@ -49,7 +49,7 @@ def _triage_instructions(focus: str) -> str:
     )
 
 
-def register_prompts(mcp: FastMCP, settings: Settings) -> None:
+def register_prompts(mcp: MCPServer, settings: Settings) -> None:
     @mcp.prompt(
         name="triage",
         title="Triage this Unraid server",

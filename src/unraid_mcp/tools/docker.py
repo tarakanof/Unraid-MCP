@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from mcp.server.fastmcp import Context, FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from .. import queries, subscriptions
 from ..client import UnraidClient
@@ -395,7 +395,7 @@ async def do_remove_container(
     return shape_mutation_result(result)
 
 
-def register(mcp: FastMCP, settings: Settings) -> None:
+def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def list_docker_containers(ctx: Context) -> list[dict[str, Any]]:
         """List Docker containers with id, name, image, state, status, autostart and ports."""
@@ -465,7 +465,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         return await guarded(ctx, fetch_docker_updates, api_version=api_version)
 
 
-def register_mutations(mcp: FastMCP, settings: Settings) -> None:
+def register_mutations(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=MUTATING)
     async def start_docker_container(
         ctx: Context, container_id: str, confirm: bool = False
@@ -543,7 +543,7 @@ def register_mutations(mcp: FastMCP, settings: Settings) -> None:
         )
 
 
-def register_dangerous(mcp: FastMCP, settings: Settings) -> None:
+def register_dangerous(mcp: MCPServer, settings: Settings) -> None:
     """Dangerous-tier Docker tools. Registered only when BOTH
     UNRAID_MCP_ALLOW_MUTATIONS and UNRAID_MCP_ALLOW_DANGEROUS are true."""
 

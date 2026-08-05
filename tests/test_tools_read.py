@@ -6,7 +6,7 @@ import json
 
 import httpx
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError
 
 from unraid_mcp import queries
 from unraid_mcp.errors import UnraidGraphQLError
