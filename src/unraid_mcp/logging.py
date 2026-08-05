@@ -79,6 +79,11 @@ def configure_logging(
     root = logging.getLogger()
     root.setLevel(level.upper())
 
+    # Stateless streamable-HTTP tears down its per-request transport after
+    # every call, and the SDK logs that at INFO ("Terminating session: None") —
+    # one meaningless line per request. Keep that logger at WARNING.
+    logging.getLogger("mcp.server.streamable_http").setLevel(logging.WARNING)
+
     # Remove handlers we control to keep this idempotent across reconfigures.
     for handler in list(root.handlers):
         if getattr(handler, "_unraid_mcp", False):
