@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from mcp.server.fastmcp import Context
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver import Context
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from ..client import UnraidClient
@@ -17,9 +17,9 @@ if TYPE_CHECKING:  # avoid a runtime import cycle (server imports tools imports 
 
 # Hints for MCP clients. Read tools touch an external system (open world) but
 # never change it; destructive mutations are flagged so hosts can warn/gate.
-READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=True)
-MUTATING = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True)
-DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True)
+READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=True)
+MUTATING = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=True)
+DESTRUCTIVE = ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=True)
 
 
 def get_app_context(ctx: Context) -> AppContext:
