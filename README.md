@@ -22,6 +22,13 @@ logged. The details are in [docs/security.md](docs/security.md).
 
 > Needs Unraid 7.2+ (the API is built in) or the Unraid Connect plugin on older versions.
 
+Built on the `mcp` SDK v2 line, implementing the MCP **2026-07-28** spec
+revision. Pre-2026 clients are fully supported: a legacy `initialize`-first
+handshake is served and negotiates the client's requested protocol revision
+(`2024-11-05` through `2025-11-25`; `2025-11-25` when the offer is
+unrecognized). No session affinity is required either way — see
+[docs/connectivity.md](docs/connectivity.md).
+
 ## What you get
 
 Read-only tools for the stuff you'd actually want to check: system info, live CPU/

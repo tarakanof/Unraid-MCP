@@ -53,6 +53,11 @@ with a path rewrite but is not covered here.
 > no notifications), so such clients simply reconnect it when the proxy's read
 > timeout closes it — harmless, but expect the occasional long-lived idle SSE
 > connection in proxy logs.
+>
+> **Note:** this is unrelated to the older, separate **HTTP+SSE transport**
+> (distinct `/sse` + `/messages` endpoints, deprecated upstream in favor of
+> streamable-HTTP) — this server never implemented that transport, so there's
+> nothing to migrate off of here.
 
 > **Expected startup warning when TLS terminates upstream.** In the Tailscale,
 > SWAG, NPM, Caddy, and WireGuard recipes the MCP container binds `0.0.0.0` with
