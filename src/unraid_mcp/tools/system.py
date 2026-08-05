@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.mcpserver import Context, MCPServer
 
 from .. import queries
 from ..client import UnraidClient
@@ -73,7 +73,7 @@ async def fetch_services(
         raise
 
 
-def register(mcp: FastMCP, settings: Settings) -> None:
+def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def get_system_info(ctx: Context) -> dict[str, Any]:
         """Get Unraid host system information: OS/kernel, CPU, memory layout,

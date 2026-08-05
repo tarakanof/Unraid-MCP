@@ -1,13 +1,15 @@
-"""Build the FastMCP server: lifespan-managed GraphQL client + tool registration."""
+"""Build the MCP server: lifespan-managed GraphQL client + tool registration."""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from importlib import metadata
+from typing import TYPE_CHECKING
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
 from . import queries
@@ -19,6 +21,9 @@ from .prompts import register_prompts
 from .resources import register_resources
 from .tools import register_all
 
+if TYPE_CHECKING:  # pragma: no cover - typing only (starlette arrives with the SDK)
+    from starlette.applications import Starlette
+
 log = get_logger(__name__)
 
 INSTRUCTIONS = (
@@ -28,6 +33,21 @@ INSTRUCTIONS = (
     "the server; destructive ones require confirm=true. Sizes are reported in bytes with "
     "a human-readable form. Start with get_health_summary for a quick triage."
 )
+
+
+def _server_version() -> str:
+    """Our own version for ``serverInfo.version``.
+
+    SDK v1 filled the field with the SDK's version when the server left it
+    unset; v2 leaves it empty. Report the distribution version instead so clients
+    still see a meaningful build identifier.
+    """
+    try:
+        return metadata.version("unraid-mcp")
+    except metadata.PackageNotFoundError:  # pragma: no cover - source checkout only
+        from . import __version__
+
+        return __version__
 
 
 @dataclass
@@ -69,6 +89,12 @@ def _transport_security(settings: Settings) -> TransportSecuritySettings | None:
     provided an explicit host allow-list. For a non-localhost bind without an
     allow-list we leave it off — otherwise legitimate requests to the real
     hostname would be rejected — and rely on the bearer token (cli warns).
+
+    The SDK auto-enables its own localhost allow-list when the app is built with
+    ``transport_security=None`` and a localhost ``host``; we always answer for
+    the localhost case ourselves so the allow-list also covers the configured
+    port, and :func:`http_app` passes the real bind host so the SDK's default
+    never fires behind our back on the "leave it off" branch.
     """
     if settings.transport != "streamable-http":
         return None
@@ -81,11 +107,33 @@ def _transport_security(settings: Settings) -> TransportSecuritySettings | None:
     return None
 
 
-def build_server(settings: Settings) -> FastMCP:
-    """Construct a configured FastMCP server. Does not start any transport."""
+def http_app(mcp: MCPServer, settings: Settings) -> Starlette:
+    """Build the streamable-HTTP ASGI app for ``mcp``.
+
+    v2 moved the transport knobs out of the constructor, so host and DNS-rebinding
+    settings are applied here (and by :meth:`MCPServer.run` for stdio). The
+    returned Starlette app owns the session-manager lifespan, which uvicorn runs
+    via the outermost app in ``cli._build_http_app`` (our ASGI middlewares pass
+    ``lifespan`` scopes straight through).
+    """
+    return mcp.streamable_http_app(
+        host=settings.host,
+        transport_security=_transport_security(settings),
+    )
+
+
+def build_server(settings: Settings) -> MCPServer:
+    """Construct a configured :class:`MCPServer`. Does not start any transport."""
+
+    # Static resources cannot receive an injected ``Context`` in SDK v2 (only
+    # URI templates can), and ``get_context()`` is gone, so the lifespan hands
+    # the AppContext to this per-server holder for resource reads to pick up.
+    # It is a closure cell, not module state (two servers never share it), and
+    # it holds exactly one context: the lifespan refuses concurrent re-entry.
+    running: dict[str, AppContext] = {}
 
     @asynccontextmanager
-    async def lifespan(_server: FastMCP) -> AsyncIterator[AppContext]:
+    async def lifespan(_server: MCPServer) -> AsyncIterator[AppContext]:
         async with httpx.AsyncClient(
             verify=settings.tls_verify(),
             timeout=settings.timeout,
@@ -107,25 +155,36 @@ def build_server(settings: Settings) -> FastMCP:
                 api_version,
                 unraid_version,
             )
-            yield AppContext(
+            app_context = AppContext(
                 client=client,
                 settings=settings,
                 api_version=api_version,
                 unraid_version=unraid_version,
             )
+            if "context" in running:
+                # One holder per server: a second concurrent lifespan would make
+                # resource reads silently use the wrong httpx client, then fail
+                # outright when the first lifespan exits. Fail loud instead.
+                raise RuntimeError(
+                    "unraid-mcp server lifespan entered twice concurrently; "
+                    "build a separate server per transport instead"
+                )
+            running["context"] = app_context
+            try:
+                yield app_context
+            finally:
+                running.pop("context", None)
 
-    mcp = FastMCP(
+    mcp = MCPServer(
         "unraid",
         instructions=INSTRUCTIONS,
+        version=_server_version(),
         lifespan=lifespan,
-        host=settings.host,
-        port=settings.port,
         log_level=settings.log_level.upper(),
-        transport_security=_transport_security(settings),
     )
     register_all(mcp, settings)
     # Resources and prompts are always on: both are read-only and reuse the
     # same fetch_* functions the read tools do (no new GraphQL surface).
-    register_resources(mcp, settings)
+    register_resources(mcp, settings, lambda: running.get("context"))
     register_prompts(mcp, settings)
     return mcp

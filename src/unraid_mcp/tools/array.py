@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import Context, FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from .. import queries
 from ..client import UnraidClient
@@ -169,7 +169,7 @@ async def do_remove_disk_from_array(
     )
 
 
-def register(mcp: FastMCP, settings: Settings) -> None:
+def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def get_array_status(ctx: Context) -> dict[str, Any]:
         """Get the Unraid array: state, total/used/free capacity, every data/parity/cache
@@ -201,7 +201,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         return await guarded(ctx, fetch_disk, disk_id)
 
 
-def register_mutations(mcp: FastMCP, settings: Settings) -> None:
+def register_mutations(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=MUTATING)
     async def start_array(ctx: Context, confirm: bool = False) -> dict[str, Any]:
         """Start the Unraid array (brings storage online). Requires confirm=true."""
@@ -238,7 +238,7 @@ def register_mutations(mcp: FastMCP, settings: Settings) -> None:
         return await guarded(ctx, do_cancel_parity, confirm)
 
 
-def register_dangerous(mcp: FastMCP, settings: Settings) -> None:
+def register_dangerous(mcp: MCPServer, settings: Settings) -> None:
     """Dangerous-tier array-topology tools. Registered only when BOTH
     UNRAID_MCP_ALLOW_MUTATIONS and UNRAID_MCP_ALLOW_DANGEROUS are true."""
 

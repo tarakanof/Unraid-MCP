@@ -8,7 +8,7 @@ license = { text = "MIT" }
 authors = [{ name = "dtarakanov" }]
 keywords = ["unraid", "mcp", "model-context-protocol", "graphql", "homelab"]
 dependencies = [
-    "mcp>=1.28.1",
+    "mcp>=2.0.0,<3",
     "httpx>=0.27",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",

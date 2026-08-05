@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.mcpserver import Context, MCPServer
 
 from .. import queries
 from ..client import UnraidClient
@@ -68,7 +68,7 @@ async def do_reset_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[s
     return shape_mutation_result(await client.execute(queries.VM_RESET, {"id": vm_id}))
 
 
-def register(mcp: FastMCP, settings: Settings) -> None:
+def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def list_vms(ctx: Context) -> list[dict[str, Any]]:
         """List virtual machines with id, name, and state (state values come
@@ -76,7 +76,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         return await guarded(ctx, fetch_vms)
 
 
-def register_mutations(mcp: FastMCP, settings: Settings) -> None:
+def register_mutations(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=MUTATING)
     async def start_vm(ctx: Context, vm_id: str, confirm: bool = False) -> dict[str, Any]:
         """Start a VM by its id (from list_vms). Requires confirm=true."""

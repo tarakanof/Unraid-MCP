@@ -33,7 +33,7 @@ from typing import Any
 import httpx
 import pytest
 import pytest_asyncio
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError
 
 from unraid_mcp.client import UnraidClient
 from unraid_mcp.config import load_settings

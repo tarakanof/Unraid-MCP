@@ -15,14 +15,14 @@ from typing import TYPE_CHECKING
 from . import array, docker, misc, notifications, shares, system, vm
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
     from ..config import Settings
 
 _MODULES = (system, array, docker, vm, shares, notifications, misc)
 
 
-def register_all(mcp: FastMCP, settings: Settings) -> None:
+def register_all(mcp: MCPServer, settings: Settings) -> None:
     for module in _MODULES:
         module.register(mcp, settings)
         if settings.allow_mutations and hasattr(module, "register_mutations"):

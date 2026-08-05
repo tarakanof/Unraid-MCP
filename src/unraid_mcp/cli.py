@@ -10,14 +10,20 @@ from .config import Settings, load_settings
 from .errors import UnraidConfigError
 from .health import HealthCheckMiddleware
 from .logging import configure_logging, get_logger
-from .server import build_server
+from .server import build_server, http_app
 
 log = get_logger(__name__)
 
 
-def _build_http_app(mcp, token: str):
-    """Compose the ASGI app: an unauthenticated ``/health`` in front of the bearer gate."""
-    return HealthCheckMiddleware(StaticBearerAuthMiddleware(mcp.streamable_http_app(), token))
+def _build_http_app(mcp, settings: Settings, token: str):
+    """Compose the ASGI app: an unauthenticated ``/health`` in front of the bearer gate.
+
+    Both wrappers are pure-ASGI and forward ``lifespan`` scopes untouched, so
+    uvicorn's lifespan run reaches the Starlette app returned by
+    :func:`~unraid_mcp.server.http_app` and starts its session manager.
+    """
+    inner = http_app(mcp, settings)
+    return HealthCheckMiddleware(StaticBearerAuthMiddleware(inner, token))
 
 
 def _serve_http(mcp, settings: Settings) -> None:
@@ -58,7 +64,7 @@ def _serve_http(mcp, settings: Settings) -> None:
         )
 
     scheme = "https" if settings.tls_enabled else "http"
-    app = _build_http_app(mcp, token)
+    app = _build_http_app(mcp, settings, token)
     log.info("Serving streamable-HTTP on %s://%s:%s/mcp", scheme, settings.host, settings.port)
     # log_config=None lets uvicorn's loggers propagate to our root handler, so
     # they pass through the same stderr sink + secret-redaction filter.
