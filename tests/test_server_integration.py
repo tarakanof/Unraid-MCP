@@ -12,7 +12,11 @@ import pytest
 import respx
 from mcp.client import Client
 
-from unraid_mcp.server import build_server
+from unraid_mcp.server import (
+    _LIST_CACHE_TTL_MS,
+    _RESOURCE_READ_CACHE_TTL_MS,
+    build_server,
+)
 
 URL = "https://tower.local/graphql"
 
@@ -136,3 +140,54 @@ async def test_unraid_http_client_ignores_proxy_environment(settings_factory, mo
     mcp = build_server(settings_factory())
     async with mcp._lowlevel_server.lifespan(mcp._lowlevel_server) as ctx:
         assert ctx.client._http.trust_env is False
+
+
+async def test_list_responses_carry_long_cache_hints(settings_factory):
+    """tools/list, prompts/list, resources/list are static per process; the
+    2026-07-28 cache hints (SEP-2549) should advertise the long TTL so
+    clients/gateways skip redundant round-trips."""
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
+        mcp = build_server(settings_factory())
+        async with Client(mcp, raise_exceptions=True) as session:
+            tools = await session.list_tools()
+            prompts = await session.list_prompts()
+            resources_result = await session.list_resources()
+
+    for result in (tools, prompts, resources_result):
+        assert result.ttl_ms == _LIST_CACHE_TTL_MS
+        assert result.cache_scope == "public"
+
+
+async def test_resource_read_carries_short_cache_hint(settings_factory):
+    """resources/read serves point-in-time health/system-info snapshots, so
+    its cache hint TTL must stay short (seconds, not the list TTL)."""
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(200, json={"data": {"info": {"os": {"hostname": "tower"}}}})
+        )
+        mcp = build_server(settings_factory())
+        async with Client(mcp, raise_exceptions=True) as session:
+            listed = await session.list_resources()
+            uri = str(listed.resources[0].uri)
+            result = await session.read_resource(uri)
+
+    assert result.ttl_ms == _RESOURCE_READ_CACHE_TTL_MS
+    assert result.ttl_ms < _LIST_CACHE_TTL_MS  # snapshots must stay fresher than lists
+    assert result.cache_scope == "private"
+
+
+async def test_legacy_sessions_silently_drop_cache_hints(settings_factory):
+    """Pre-2026 result models carry no ttlMs/cacheScope; the per-version sieve
+    must drop the hint silently (client sees the uncached defaults), never
+    error — this is the acceptance criterion 'no behavior change for clients
+    that ignore the hints', pinned rather than argued."""
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
+        mcp = build_server(settings_factory())
+        async with Client(mcp, raise_exceptions=True, mode="legacy") as session:
+            tools = await session.list_tools()
+
+    assert tools.ttl_ms == 0
+    assert tools.cache_scope == "private"
+    assert "ttl_ms" not in tools.model_fields_set

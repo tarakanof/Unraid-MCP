@@ -9,8 +9,10 @@ from importlib import metadata
 from typing import TYPE_CHECKING
 
 import httpx
+from mcp.server import CacheHint
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp_types.methods import CacheableMethod
 
 from . import queries
 from .client import UnraidClient
@@ -33,6 +35,31 @@ INSTRUCTIONS = (
     "the server; destructive ones require confirm=true. Sizes are reported in bytes with "
     "a human-readable form. Start with get_health_summary for a quick triage."
 )
+
+# Cache hints (2026-07-28, SEP-2549): ``MCPServer(cache_hints=...)`` fills
+# ttlMs/cacheScope on any cacheable-method result the handler leaves unset.
+# 5 min: the registered set is fixed per process, but the client cache arm is
+# keyed on the server URL — not the session — so it survives a restart. A
+# config flip (e.g. UNRAID_MCP_ALLOW_MUTATIONS) + restart leaves clients on the
+# stale list for a full TTL with no invalidation signal; keep that window short.
+_LIST_CACHE_TTL_MS = 5 * 60 * 1000
+# 10s: health/system-info resources are point-in-time snapshots, so keep
+# freshness tight.
+_RESOURCE_READ_CACHE_TTL_MS = 10_000
+
+# Covers every CACHEABLE_METHODS entry: the four we serve meaningfully, plus
+# server/discover (pure registered state — same rationale as the lists) and
+# resources/templates/list (we register none; permanently empty).
+CACHE_HINTS: dict[CacheableMethod, CacheHint] = {
+    "tools/list": CacheHint(ttl_ms=_LIST_CACHE_TTL_MS, scope="public"),
+    "prompts/list": CacheHint(ttl_ms=_LIST_CACHE_TTL_MS, scope="public"),
+    "resources/list": CacheHint(ttl_ms=_LIST_CACHE_TTL_MS, scope="public"),
+    "resources/templates/list": CacheHint(ttl_ms=_LIST_CACHE_TTL_MS, scope="public"),
+    "server/discover": CacheHint(ttl_ms=_LIST_CACHE_TTL_MS, scope="public"),
+    # private is deliberate (not just the CacheHint default): shared gateway
+    # caches must never serve one client's health snapshot to another.
+    "resources/read": CacheHint(ttl_ms=_RESOURCE_READ_CACHE_TTL_MS, scope="private"),
+}
 
 
 def _server_version() -> str:
@@ -221,6 +248,7 @@ def build_server(settings: Settings) -> MCPServer:
         version=_server_version(),
         lifespan=lifespan,
         log_level=settings.log_level.upper(),
+        cache_hints=CACHE_HINTS,
     )
     register_all(mcp, settings)
     # Resources and prompts are always on: both are read-only and reuse the
