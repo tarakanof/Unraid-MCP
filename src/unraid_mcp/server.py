@@ -45,7 +45,9 @@ def _server_version() -> str:
     try:
         return metadata.version("unraid-mcp")
     except metadata.PackageNotFoundError:  # pragma: no cover - source checkout only
-        return "0.0.0"
+        from . import __version__
+
+        return __version__
 
 
 @dataclass
@@ -126,7 +128,8 @@ def build_server(settings: Settings) -> MCPServer:
     # Static resources cannot receive an injected ``Context`` in SDK v2 (only
     # URI templates can), and ``get_context()`` is gone, so the lifespan hands
     # the AppContext to this per-server holder for resource reads to pick up.
-    # It is a closure cell, not module state: two servers never share it.
+    # It is a closure cell, not module state (two servers never share it), and
+    # it holds exactly one context: the lifespan refuses concurrent re-entry.
     running: dict[str, AppContext] = {}
 
     @asynccontextmanager
@@ -158,6 +161,14 @@ def build_server(settings: Settings) -> MCPServer:
                 api_version=api_version,
                 unraid_version=unraid_version,
             )
+            if "context" in running:
+                # One holder per server: a second concurrent lifespan would make
+                # resource reads silently use the wrong httpx client, then fail
+                # outright when the first lifespan exits. Fail loud instead.
+                raise RuntimeError(
+                    "unraid-mcp server lifespan entered twice concurrently; "
+                    "build a separate server per transport instead"
+                )
             running["context"] = app_context
             try:
                 yield app_context

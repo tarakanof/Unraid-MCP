@@ -171,6 +171,8 @@ class Settings(BaseSettings):
         if self.allowed_hosts:
             hosts += [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
         for host in (self.host, "127.0.0.1", "localhost"):
+            if ":" in host:  # bare IPv6 literal — Host headers carry it bracketed
+                host = f"[{host}]"
             hosts.append(f"{host}:{self.port}")
         return sorted(set(hosts))
 

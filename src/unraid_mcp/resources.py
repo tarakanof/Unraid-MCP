@@ -55,11 +55,13 @@ async def _read(
     error to a secret-free :class:`MCPError` so the read never crashes."""
     context = app_context()
     if context is None:  # pragma: no cover - a read can only arrive while running
-        raise MCPError(INTERNAL_ERROR, f"Could not read {uri}: server is not running")
+        raise MCPError(INTERNAL_ERROR, f"Could not read {uri}: server is not running", {"uri": uri})
     try:
         return await fetch(context.client)
     except UnraidError as exc:
-        raise MCPError(INTERNAL_ERROR, f"Could not read {uri}: {exc}") from None
+        # data.uri mirrors the SDK's own resource-error payloads so clients can
+        # extract the failing URI without parsing the message.
+        raise MCPError(INTERNAL_ERROR, f"Could not read {uri}: {exc}", {"uri": uri}) from None
 
 
 def register_resources(mcp: MCPServer, settings: Settings, app_context: AppContextAccessor) -> None:

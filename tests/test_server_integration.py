@@ -8,6 +8,7 @@ session → tool → client → (mocked) GraphQL → shaped result.
 from __future__ import annotations
 
 import httpx
+import pytest
 import respx
 from mcp.client import Client
 
@@ -16,13 +17,18 @@ from unraid_mcp.server import build_server
 URL = "https://tower.local/graphql"
 
 
-async def test_list_and_call_through_protocol(settings_factory):
+# "auto" takes the SDK's direct-dispatch fast path (no JSON-RPC framing);
+# "legacy" runs real memory streams and a real initialize handshake, like
+# v1's create_connected_server_and_client_session did. Cover both so result
+# (de)serialization and the handshake stay exercised.
+@pytest.mark.parametrize("mode", ["auto", "legacy"])
+async def test_list_and_call_through_protocol(settings_factory, mode):
     with respx.mock:
         respx.post(URL).mock(
             return_value=httpx.Response(200, json={"data": {"info": {"os": {"hostname": "tower"}}}})
         )
         mcp = build_server(settings_factory(allow_mutations=False))
-        async with Client(mcp, raise_exceptions=True) as session:
+        async with Client(mcp, raise_exceptions=True, mode=mode) as session:
             tools = {t.name for t in (await session.list_tools()).tools}
             assert "get_system_info" in tools
             assert "get_health_summary" in tools
@@ -107,6 +113,22 @@ async def test_app_context_carries_probed_versions(settings_factory):
         async with mcp._lowlevel_server.lifespan(mcp._lowlevel_server) as ctx:
             assert ctx.api_version == "7.1.0"
             assert ctx.unraid_version == "7.1.5"
+
+
+async def test_second_concurrent_lifespan_fails_loud(settings_factory):
+    """The resource-context holder admits one lifespan at a time.
+
+    A second concurrent lifespan on the same server would make resource reads
+    silently use the wrong httpx client; the server must refuse it instead.
+    """
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
+        mcp = build_server(settings_factory())
+        server = mcp._lowlevel_server
+        async with server.lifespan(server):
+            with pytest.raises(RuntimeError, match="lifespan entered twice"):
+                async with server.lifespan(server):
+                    pass  # pragma: no cover - must not be reached
 
 
 async def test_unraid_http_client_ignores_proxy_environment(settings_factory, monkeypatch):

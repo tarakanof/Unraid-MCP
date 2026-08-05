@@ -26,6 +26,16 @@ def test_localhost_bind_is_protected_including_the_configured_port():
     assert "http://127.0.0.1:6750" in security.allowed_origins
 
 
+def test_localhost_ipv6_bind_allow_list_uses_bracketed_host_form():
+    """Host headers carry IPv6 literals bracketed (``[::1]:port``); the bare
+    ``::1:port`` form would 421 every legitimate request on an IPv6 bind."""
+    settings = make_settings(**HTTP, host="::1", port=6750)
+    security = _transport_security(settings)
+    assert security is not None
+    assert "[::1]:6750" in security.allowed_hosts
+    assert "::1:6750" not in security.allowed_hosts
+
+
 def test_non_localhost_with_allow_list_is_protected_with_that_list():
     settings = make_settings(**HTTP, host="0.0.0.0", allowed_hosts="tower.example:6750")
     security = _transport_security(settings)
