@@ -24,8 +24,10 @@ logged. The details are in [docs/security.md](docs/security.md).
 
 Built on the `mcp` SDK v2 line, implementing the MCP **2026-07-28** spec
 revision. Pre-2026 clients are fully supported: a legacy `initialize`-first
-handshake is served and negotiates protocol revision `2025-11-25` (no session
-affinity required either way — see [docs/connectivity.md](docs/connectivity.md)).
+handshake is served and negotiates the client's requested protocol revision
+(`2024-11-05` through `2025-11-25`; `2025-11-25` when the offer is
+unrecognized). No session affinity is required either way — see
+[docs/connectivity.md](docs/connectivity.md).
 
 ## What you get
 
