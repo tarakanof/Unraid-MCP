@@ -9,6 +9,7 @@ from importlib import metadata
 from typing import TYPE_CHECKING
 
 import httpx
+from mcp.server import CacheHint
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -33,6 +34,22 @@ INSTRUCTIONS = (
     "the server; destructive ones require confirm=true. Sizes are reported in bytes with "
     "a human-readable form. Start with get_health_summary for a quick triage."
 )
+
+# Cache hints (2026-07-28, SEP-2549): ``MCPServer(cache_hints=...)`` fills
+# ttlMs/cacheScope on any cacheable-method result the handler leaves unset.
+# 1h: the registered tool/prompt/resource set is fixed per process (mutations
+# toggle only via env at startup).
+_LIST_CACHE_TTL_MS = 60 * 60 * 1000
+# 10s: health/system-info resources are point-in-time snapshots, so keep
+# freshness tight.
+_RESOURCE_READ_CACHE_TTL_MS = 10_000
+
+CACHE_HINTS: dict[str, CacheHint] = {
+    "tools/list": CacheHint(ttl_ms=_LIST_CACHE_TTL_MS, scope="public"),
+    "prompts/list": CacheHint(ttl_ms=_LIST_CACHE_TTL_MS, scope="public"),
+    "resources/list": CacheHint(ttl_ms=_LIST_CACHE_TTL_MS, scope="public"),
+    "resources/read": CacheHint(ttl_ms=_RESOURCE_READ_CACHE_TTL_MS),
+}
 
 
 def _server_version() -> str:
@@ -221,6 +238,7 @@ def build_server(settings: Settings) -> MCPServer:
         version=_server_version(),
         lifespan=lifespan,
         log_level=settings.log_level.upper(),
+        cache_hints=CACHE_HINTS,
     )
     register_all(mcp, settings)
     # Resources and prompts are always on: both are read-only and reuse the
