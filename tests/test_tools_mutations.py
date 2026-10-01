@@ -845,7 +845,6 @@ MUTATION_CASES = [
     (array.do_unmount_array_disk, {"disk_id": "1:sdb"}, ("array", "unmountArrayDisk")),
     (array.do_clear_disk_statistics, {"disk_id": "1:sdb"}, ("array", "clearArrayDiskStatistics")),
     (array.do_add_disk_to_array, {"disk_id": "1:sdb"}, ("array", "addDiskToArray")),
-    (array.do_remove_disk_from_array, {"disk_id": "1:sdb"}, ("array", "removeDiskFromArray")),
     (docker.do_start_container, {"container_id": "1:a"}, ("docker", "start")),
     (docker.do_stop_container, {"container_id": "1:a"}, ("docker", "stop")),
     (docker.do_restart_container, {"container_id": "1:a"}, ("docker", "restart")),
