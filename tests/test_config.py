@@ -9,7 +9,10 @@ import pytest
 from unraid_mcp.config import load_settings
 from unraid_mcp.errors import UnraidConfigError
 
-REQUIRED = {"UNRAID_API_URL": "https://tower.local/graphql", "UNRAID_API_KEY": "supersecretkey123"}
+REQUIRED = {
+    "UNRAID_API_URL": "https://tower.local/graphql",
+    "UNRAID_API_KEY": "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4",
+}
 TOKEN = "0123456789abcdef0123456789abcdef"
 
 
@@ -75,38 +78,49 @@ def test_defaults(clean_env):
 
 
 def test_url_normalization_appends_graphql(clean_env):
-    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv(
+        "UNRAID_API_KEY", "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    )
     clean_env.setenv("UNRAID_API_URL", "https://tower.local")
     assert load_settings(_env_file=None).api_url == "https://tower.local/graphql"
 
 
 def test_url_normalization_trailing_slash(clean_env):
-    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv(
+        "UNRAID_API_KEY", "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    )
     clean_env.setenv("UNRAID_API_URL", "https://tower.local/")
     assert load_settings(_env_file=None).api_url == "https://tower.local/graphql"
 
 
 def test_url_with_path_left_intact(clean_env):
-    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv(
+        "UNRAID_API_KEY", "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    )
     clean_env.setenv("UNRAID_API_URL", "http://10.0.0.5:8080/graphql")
     assert load_settings(_env_file=None).api_url == "http://10.0.0.5:8080/graphql"
 
 
 def test_invalid_scheme_rejected_without_leaking_secret(clean_env):
-    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv(
+        "UNRAID_API_KEY", "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    )
     clean_env.setenv("UNRAID_API_URL", "ftp://tower.local")
     with pytest.raises(UnraidConfigError) as exc:
         load_settings(_env_file=None)
-    assert "supersecretkey123" not in str(exc.value)
+    assert "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4" not in str(exc.value)
 
 
 def test_api_key_is_secret_and_not_in_repr(clean_env):
     for k, v in REQUIRED.items():
         clean_env.setenv(k, v)
     s = load_settings(_env_file=None)
-    assert s.api_key.get_secret_value() == "supersecretkey123"
-    assert "supersecretkey123" not in repr(s)
-    assert "supersecretkey123" not in str(s)
+    assert (
+        s.api_key.get_secret_value()
+        == "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    )
+    assert "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4" not in repr(s)
+    assert "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4" not in str(s)
 
 
 def test_blank_bearer_token_is_treated_as_unset(clean_env):
@@ -146,6 +160,26 @@ def test_insecure_bearer_token_rejected_without_leaking_value(clean_env, token):
 
 
 @pytest.mark.parametrize(
+    "key",
+    ["abcd", "short-key", "changeme", "Your-Key", " " + "a1b2c3d4" * 8, "a1b2c3d4" * 3 + "a1b2c3d"],
+)
+def test_insecure_api_key_rejected_without_leaking_value(clean_env, key):
+    clean_env.setenv("UNRAID_API_URL", "https://tower.local/graphql")
+    clean_env.setenv("UNRAID_API_KEY", key)
+    with pytest.raises(UnraidConfigError) as exc:
+        load_settings(_env_file=None)
+    msg = str(exc.value)
+    assert "UNRAID_API_KEY" in msg
+    assert key not in msg
+
+
+def test_api_key_at_minimum_length_accepted(clean_env):
+    clean_env.setenv("UNRAID_API_URL", "https://tower.local/graphql")
+    clean_env.setenv("UNRAID_API_KEY", "a" * 32)
+    assert load_settings(_env_file=None).api_key.get_secret_value() == "a" * 32
+
+
+@pytest.mark.parametrize(
     "raw,expected",
     [("true", True), ("1", True), ("yes", True), ("false", False), ("0", False)],
 )
@@ -176,7 +210,9 @@ def test_allow_dangerous_parsing(clean_env, raw, expected):
     ],
 )
 def test_ws_url_derives_scheme_from_api_url(clean_env, api_url, expected):
-    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv(
+        "UNRAID_API_KEY", "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    )
     clean_env.setenv("UNRAID_API_URL", api_url)
     assert load_settings(_env_file=None).ws_url() == expected
 
@@ -218,7 +254,9 @@ def test_ssl_context_ca_bundle_takes_precedence_and_verifies(clean_env):
 
 
 def test_ssl_context_is_none_for_plaintext_ws(clean_env):
-    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv(
+        "UNRAID_API_KEY", "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    )
     clean_env.setenv("UNRAID_API_URL", "http://10.0.0.5:8080/graphql")
     assert load_settings(_env_file=None).ssl_context() is None
 

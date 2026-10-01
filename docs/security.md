@@ -102,6 +102,10 @@ When you run `streamable-http`:
 - It requires a bearer token (mandatory on non-localhost binds: the server refuses to
   start without `UNRAID_MCP_BEARER_TOKEN` rather than log a generated one), compared in constant time. Requests with a missing or
   duplicated `Authorization` header are rejected.
+- `UNRAID_API_KEY` is validated at startup: at least 32 characters, no surrounding
+  whitespace, not a placeholder such as `changeme` / `your-key` (errors never echo the value).
+  As defence in depth, log/output redaction ignores any secret shorter than 8 characters
+  (it would match unrelated text) and logs a one-time, secret-free warning instead.
 - Operator-supplied bearer tokens must be at least 32 characters and cannot be
   common placeholders such as `change-me`.
 - **DNS-rebinding protection** (Host/Origin validation) is on automatically for

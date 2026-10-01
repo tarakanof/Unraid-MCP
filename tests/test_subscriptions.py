@@ -20,7 +20,7 @@ from unraid_mcp import subscriptions
 from unraid_mcp.errors import UnraidAuthError, UnraidConnectionError, UnraidGraphQLError
 from unraid_mcp.subscriptions import WSClosed, sample_subscription
 
-KEY = "supersecretkey123"
+KEY = "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
 
 
 # Simple, sanitization-free key/complete for exercising the state machine itself

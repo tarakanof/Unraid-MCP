@@ -49,7 +49,9 @@ def test_main_returns_1_on_missing_config(clean_env):
 
 def test_main_runs_stdio_transport(clean_env, monkeypatch):
     clean_env.setenv("UNRAID_API_URL", "https://tower.local/graphql")
-    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv(
+        "UNRAID_API_KEY", "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    )
     fake = MagicMock()
     monkeypatch.setattr(cli, "build_server", lambda settings: fake)
     assert cli.main() == 0
@@ -58,7 +60,9 @@ def test_main_runs_stdio_transport(clean_env, monkeypatch):
 
 def test_main_http_transport_serves_with_auth(clean_env, monkeypatch):
     clean_env.setenv("UNRAID_API_URL", "https://tower.local/graphql")
-    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv(
+        "UNRAID_API_KEY", "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    )
     clean_env.setenv("UNRAID_MCP_TRANSPORT", "streamable-http")
     clean_env.setenv("UNRAID_MCP_BEARER_TOKEN", TOKEN)
     monkeypatch.setattr(cli, "build_server", lambda settings: MagicMock())
@@ -87,7 +91,9 @@ def _capture_serve_http(monkeypatch):
 
 def test_main_generates_token_on_localhost_and_redacts_it(clean_env, monkeypatch, capsys, caplog):
     clean_env.setenv("UNRAID_API_URL", "https://tower.local/graphql")
-    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv(
+        "UNRAID_API_KEY", "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    )
     clean_env.setenv("UNRAID_MCP_TRANSPORT", "streamable-http")
     clean_env.setenv("UNRAID_MCP_HOST", "127.0.0.1")
     seen = {}
@@ -126,7 +132,9 @@ def test_serve_http_refuses_generated_token_on_non_localhost(settings_factory, m
 
 def test_main_exits_nonzero_on_non_localhost_without_token(clean_env, monkeypatch, capsys):
     clean_env.setenv("UNRAID_API_URL", "https://tower.local/graphql")
-    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv(
+        "UNRAID_API_KEY", "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    )
     clean_env.setenv("UNRAID_MCP_TRANSPORT", "streamable-http")
     clean_env.setenv("UNRAID_MCP_HOST", "0.0.0.0")
     monkeypatch.setattr(cli, "build_server", lambda settings: MagicMock())
@@ -179,7 +187,9 @@ def test_main_stdio_logging_redacts_bearer_token(clean_env, monkeypatch, capsys)
     import logging
 
     clean_env.setenv("UNRAID_API_URL", "https://tower.local/graphql")
-    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv(
+        "UNRAID_API_KEY", "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    )
     clean_env.setenv("UNRAID_MCP_BEARER_TOKEN", TOKEN)
     fake = MagicMock()
     fake.run.side_effect = lambda transport: logging.getLogger("httpcore.transport").debug(
@@ -196,7 +206,9 @@ def test_main_stdio_logging_redacts_bearer_token(clean_env, monkeypatch, capsys)
 
 def test_main_http_generated_token_reaches_server_settings(clean_env, monkeypatch, capsys):
     clean_env.setenv("UNRAID_API_URL", "https://tower.local/graphql")
-    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv(
+        "UNRAID_API_KEY", "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    )
     clean_env.setenv("UNRAID_MCP_TRANSPORT", "streamable-http")
     built = {}
     monkeypatch.setattr(

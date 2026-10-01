@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- UNRAID_API_KEY is validated at startup (>=32 chars, no placeholder); redaction ignores secrets shorter than 8 chars (#152).
+
 ## 0.8.1 - 2026-10-01
 
 ### Fixed

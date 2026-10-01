@@ -17,7 +17,7 @@ from unraid_mcp.errors import (
 )
 
 URL = "https://tower.local/graphql"
-KEY = "supersecretkey123"
+KEY = "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
 
 
 async def _client(http: httpx.AsyncClient) -> UnraidClient:
