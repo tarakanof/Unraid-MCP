@@ -237,3 +237,57 @@ async def test_read_log_file_schema_exposes_bounds_and_rejects_no_http(settings_
             bad = await session.call_tool("read_log_file", {"path": "/var/log/syslog", "lines": 0})
             assert bad.is_error is True
             assert route.call_count == before
+
+
+ALL_ON = {"allow_mutations": True, "allow_dangerous": True, "allow_raw_query": True}
+
+
+async def _list_all_tools(settings_factory):
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
+        mcp = build_server(settings_factory(**ALL_ON))
+        async with Client(mcp, raise_exceptions=True) as session:
+            return {t.name: t for t in (await session.list_tools()).tools}
+
+
+async def test_every_tool_has_title_and_explicit_annotations(settings_factory):
+    by_name = await _list_all_tools(settings_factory)
+    # gated tiers must actually be registered, or the guard is vacuous
+    assert {"remove_docker_container", "run_graphql_query", "stop_array"} <= by_name.keys()
+    for name, t in by_name.items():
+        assert t.title and t.title.strip(), f"{name}: missing title"
+        assert t.annotations is not None, f"{name}: missing annotations"
+        assert t.annotations.read_only_hint is not None, f"{name}: readOnlyHint unset"
+        if t.annotations.read_only_hint is False:
+            assert t.annotations.destructive_hint is not None, f"{name}: destructiveHint unset"
+
+
+async def test_idempotent_hint_advertised(settings_factory):
+    by_name = await _list_all_tools(settings_factory)
+    assert by_name["get_system_info"].annotations.idempotent_hint is True
+    assert by_name["start_docker_container"].annotations.idempotent_hint is True
+    assert by_name["stop_docker_container"].annotations.idempotent_hint is True
+    assert by_name["stop_docker_container"].annotations.destructive_hint is True
+    # repeating these has further effect, so they must not claim idempotence
+    for name in (
+        "restart_docker_container",
+        "create_notification",
+        "reboot_vm",
+        "archive_all_notifications",
+        "unarchive_all_notifications",
+        "delete_archived_notifications",
+        "clear_disk_statistics",
+    ):
+        assert not by_name[name].annotations.idempotent_hint, name
+    assert by_name["stop_docker_container"].title == "Stop Docker Container"
+
+
+async def test_server_info_has_title_and_website(settings_factory):
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
+        mcp = build_server(settings_factory(allow_mutations=False))
+        async with Client(mcp, raise_exceptions=True, mode="legacy") as session:
+            info = session.server_info
+    assert info is not None
+    assert info.title == "Unraid"
+    assert info.website_url == "https://github.com/tarakanof/Unraid-MCP"

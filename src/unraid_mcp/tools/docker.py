@@ -31,7 +31,9 @@ from ..logging import redact
 from ..types import Container
 from ._base import (
     DESTRUCTIVE,
+    DESTRUCTIVE_IDEMPOTENT,
     MUTATING,
+    MUTATING_IDEMPOTENT,
     READ_ONLY,
     Confirmation,
     ProgressCallback,
@@ -779,7 +781,7 @@ def _confirm_update_all_docker_containers(
 
 
 def register(mcp: MCPServer, settings: Settings) -> None:
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="List Docker Containers", annotations=READ_ONLY)
     async def list_docker_containers(ctx: Context) -> list[Container | None]:
         """List Docker containers with id, name, image, state, status, autostart,
         autostart order, update_available, orphaned, web_ui_url, network_mode and
@@ -787,7 +789,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         get_docker_container for sizes, mounts and labels."""
         return await guarded(ctx, fetch_containers)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Get Docker Container", annotations=READ_ONLY)
     async def get_docker_container(
         ctx: Context, identifier: str, include_sizes: bool = False
     ) -> Container:
@@ -807,7 +809,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
             ctx, fetch_container, identifier, include_sizes, api_version=api_version
         )
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Get Docker Port Conflicts", annotations=READ_ONLY)
     async def get_docker_port_conflicts(ctx: Context) -> dict[str, Any]:
         """Detect Docker port conflicts: container ports and LAN host:port
         values claimed by more than one container. Returns {container_ports:
@@ -817,12 +819,12 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, fetch_docker_port_conflicts, api_version=api_version)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="List Docker Networks", annotations=READ_ONLY)
     async def list_docker_networks(ctx: Context) -> list[dict[str, Any]]:
         """List Docker networks with driver, scope, and flags."""
         return await guarded(ctx, fetch_docker_networks)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Get Docker Container Logs", annotations=READ_ONLY)
     async def get_docker_container_logs(
         ctx: Context, container_id: str, tail: int = 100, since: str | None = None
     ) -> dict[str, Any]:
@@ -844,7 +846,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
             ctx, fetch_container_logs, container_id, tail, since, api_version=api_version
         )
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Get Docker Container Stats", annotations=READ_ONLY)
     async def get_docker_container_stats(ctx: Context) -> dict[str, Any]:
         """Live per-container resource usage (CPU%, memory%, mem/net/block I/O).
 
@@ -868,7 +870,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
                 progress=progress,
             )
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Check Docker Updates", annotations=READ_ONLY)
     async def check_docker_updates(ctx: Context) -> list[dict[str, Any]]:
         """Per-container Docker image update status (name, update_status).
         Reads cached image-update digests already computed by the Unraid API;
@@ -879,7 +881,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
 
 
 def register_mutations(mcp: MCPServer, settings: Settings) -> None:
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Start Docker Container", annotations=MUTATING_IDEMPOTENT)
     async def start_docker_container(
         ctx: Context, container_id: str, confirm: bool = False
     ) -> dict[str, Any]:
@@ -887,7 +889,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
         Requires confirm=true."""
         return await guarded(ctx, do_start_container, container_id, confirm)
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Stop Docker Container", annotations=DESTRUCTIVE_IDEMPOTENT)
     async def stop_docker_container(
         ctx: Context,
         container_id: str,
@@ -902,7 +904,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
             ctx, do_stop_container, container_id, confirm, confirmation=confirmation
         )
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Restart Docker Container", annotations=DESTRUCTIVE)
     async def restart_docker_container(
         ctx: Context,
         container_id: str,
@@ -920,7 +922,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
             ctx, do_restart_container, container_id, confirm, confirmation=confirmation
         )
 
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Pause Docker Container", annotations=MUTATING_IDEMPOTENT)
     async def pause_docker_container(
         ctx: Context, container_id: str, confirm: bool = False
     ) -> dict[str, Any]:
@@ -932,7 +934,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
             ctx, do_pause_container, container_id, confirm, api_version=api_version
         )
 
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Unpause Docker Container", annotations=MUTATING_IDEMPOTENT)
     async def unpause_docker_container(
         ctx: Context, container_id: str, confirm: bool = False
     ) -> dict[str, Any]:
@@ -944,7 +946,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
             ctx, do_unpause_container, container_id, confirm, api_version=api_version
         )
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Update Docker Container", annotations=DESTRUCTIVE)
     async def update_docker_container(
         ctx: Context,
         container_id: str,
@@ -968,7 +970,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
             confirmation=confirmation,
         )
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Update Docker Containers", annotations=DESTRUCTIVE)
     async def update_docker_containers(
         ctx: Context,
         container_ids: list[str],
@@ -995,7 +997,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
                 confirmation=confirmation,
             )
 
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Refresh Docker Digests", annotations=MUTATING_IDEMPOTENT)
     async def refresh_docker_digests(ctx: Context, confirm: bool = False) -> dict[str, Any]:
         """Force a fresh Docker image digest check against registries, so a following
         check_docker_updates reflects current availability. Idempotent; changes no
@@ -1004,7 +1006,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, do_refresh_docker_digests, confirm, api_version=api_version)
 
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Set Docker Autostart", annotations=MUTATING)
     async def set_docker_autostart(
         ctx: Context,
         entries: list[dict[str, Any]],
@@ -1041,7 +1043,7 @@ def register_dangerous(mcp: MCPServer, settings: Settings) -> None:
     """Dangerous-tier Docker tools. Registered only when BOTH
     UNRAID_MCP_ALLOW_MUTATIONS and UNRAID_MCP_ALLOW_DANGEROUS are true."""
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Remove Docker Container", annotations=DESTRUCTIVE_IDEMPOTENT)
     async def remove_docker_container(
         ctx: Context,
         container_id: str,
@@ -1061,7 +1063,7 @@ def register_dangerous(mcp: MCPServer, settings: Settings) -> None:
             ctx, do_remove_container, container_id, with_image, confirm, confirmation=confirmation
         )
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Update All Docker Containers", annotations=DESTRUCTIVE)
     async def update_all_docker_containers(
         ctx: Context,
         confirm: bool = False,

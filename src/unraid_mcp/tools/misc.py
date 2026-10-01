@@ -258,27 +258,27 @@ async def do_raw_query(
 
 
 def register(mcp: MCPServer, settings: Settings) -> None:
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Get UPS Status", annotations=READ_ONLY)
     async def get_ups_status(ctx: Context) -> list[dict[str, Any]]:
         """Get UPS devices: status, battery charge/runtime/health, and load/voltage."""
         return await guarded(ctx, fetch_ups)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="List Network Interfaces", annotations=READ_ONLY)
     async def list_network_interfaces(ctx: Context) -> list[dict[str, Any]]:
         """List network interfaces with MAC, speed, state, and IPv4/IPv6 addresses."""
         return await guarded(ctx, fetch_network_interfaces)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Whoami", annotations=READ_ONLY)
     async def whoami(ctx: Context) -> dict[str, Any]:
         """Show the authenticated API user and its roles — useful to confirm the key's scope."""
         return await guarded(ctx, fetch_me)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Get Connect Status", annotations=READ_ONLY)
     async def get_connect_status(ctx: Context) -> dict[str, Any]:
         """Get Unraid registration/license and remote-access (Connect) status."""
         return await guarded(ctx, fetch_connect_status)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="List Plugins", annotations=READ_ONLY)
     async def list_plugins(ctx: Context) -> list[dict[str, Any]]:
         """List installed Unraid plugins: name, version, and whether they have API/CLI
         modules (from the `plugins` query), unioned with installed `.plg` filenames not
@@ -287,7 +287,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, fetch_plugins, api_version=api_version)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Get Health Summary", annotations=READ_ONLY)
     async def get_health_summary(ctx: Context) -> HealthSummary:
         """Compact health roll-up for triage: array state, capacity, any unhealthy disks,
         parity-check status, UPS state, unread notification counts, and up to 5 top
@@ -307,14 +307,14 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         """
         return await guarded(ctx, fetch_health)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="List Log Files", annotations=READ_ONLY)
     async def list_log_files(ctx: Context) -> list[dict[str, Any]]:
         """List available system log files: name, path, size, and last-modified time.
         Use a path from this list with read_log_file — arbitrary paths are rejected."""
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, fetch_log_files, api_version=api_version)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Read Log File", annotations=READ_ONLY)
     async def read_log_file(
         ctx: Context,
         path: str,
@@ -339,7 +339,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
 
 
 def register_raw_query(mcp: MCPServer, settings: Settings) -> None:
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Run GraphQL Query", annotations=READ_ONLY)
     async def run_graphql_query(
         ctx: Context, query: str, variables: dict[str, Any] | None = None
     ) -> dict[str, Any]:
