@@ -8,10 +8,15 @@ COPY --from=ghcr.io/astral-sh/uv:latest@sha256:78bc42400d77b0678ba95765305c82665
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
-RUN uv export --quiet --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt \
+# Pick up Alpine security fixes newer than the pinned base digest, and drop
+# pip (plus ensurepip's bundled wheels): the runtime never installs packages,
+# and pip's vendored libraries otherwise show up in image vulnerability scans.
+RUN apk upgrade --no-cache \
+    && uv export --quiet --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt \
     && uv pip install --system --no-cache -r requirements.txt \
     && uv pip install --system --no-cache --no-deps . \
-    && rm -f requirements.txt /bin/uv /bin/uvx
+    && uv pip uninstall --system pip \
+    && rm -rf requirements.txt /bin/uv /bin/uvx /usr/local/bin/pip* /usr/local/lib/python3.*/ensurepip
 
 # Run as a non-root user.
 RUN adduser -D -u 10001 app
