@@ -148,10 +148,12 @@ def http_app(mcp: MCPServer, settings: Settings) -> Starlette:
     (pre-2026) request path: modern requests are routed to
     ``handle_modern_request`` regardless and were already sessionless with
     ``can_send_request=False``. What the flag buys is sessionless service for
-    pre-2026 clients too. This server never sends a server-initiated request
-    (no sampling/elicitation/roots), so the one capability the legacy path
-    gives up (``can_send_request=False`` on the per-request channel,
-    ``streamable_http_manager.py:222``) costs nothing here. A legacy client
+    pre-2026 clients too. The legacy stateless path has no back channel
+    (``can_send_request=False`` on the per-request channel,
+    ``streamable_http_manager.py:222``), so legacy clients over HTTP never get
+    elicitation: destructive tools fall back to confirm-only for them
+    (``_base.require_confirmation``). Only 2026-07-28+ clients (via
+    ``InputRequiredResult``) and legacy stdio clients are elicited. A legacy client
     that omits ``MCP-Protocol-Version`` on follow-ups is served at the SDK's
     ``DEFAULT_NEGOTIATED_VERSION`` rather than what its ``initialize``
     negotiated — no observable difference on this server's surface today, but

@@ -7,9 +7,11 @@ import contextlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from mcp.server.mcpserver import Context
+from mcp.server.mcpserver import Context, Elicit, ElicitationResult
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
+from mcp_types.version import is_version_at_least
+from pydantic import BaseModel, Field
 
 from ..client import UnraidClient
 from ..errors import UnraidAuthError, UnraidError, UnraidGraphQLError
@@ -107,10 +109,15 @@ async def guarded(
     ctx: Context,
     fn: Callable[..., Awaitable[Any]],
     *args: Any,
+    confirmation: ElicitationResult[Confirmation] | None = None,
     **kwargs: Any,
 ) -> Any:
     """Run a tool logic function with the shared client, translating domain
     errors into user-facing ``ToolError`` messages (which never contain secrets)."""
+    if confirmation is not None and (
+        confirmation.action != "accept" or not confirmation.data.proceed
+    ):
+        raise ToolError("cancelled by user")
     client = get_client(ctx)
     try:
         return await fn(client, *args, **kwargs)
@@ -304,3 +311,46 @@ async def with_heartbeat(
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+
+
+class Confirmation(BaseModel):
+    """Human approval of the consequence shown by the host."""
+
+    proceed: bool = Field(description="Accept this action and its consequences")
+
+
+_MRTR_VERSION = "2026-07-28"
+
+
+def _can_elicit(ctx: Context) -> bool:
+    """True iff an elicitation from this request can actually reach the client.
+
+    Needs (a) a declared form-elicitation capability and (b) a delivery path:
+    ``InputRequiredResult`` on protocol >= 2026-07-28, or a live
+    ``elicitation/create`` on a back channel (``session.can_send_request``,
+    i.e. stdio or stateful HTTP). Legacy clients over stateless HTTP have no
+    back channel, so they stay confirm-only instead of failing the call.
+    """
+    capabilities = ctx.client_capabilities
+    elicitation = capabilities.elicitation if capabilities is not None else None
+    if elicitation is None or (elicitation.form is None and elicitation.url is not None):
+        return False
+    version = ctx.protocol_version
+    if version is not None and is_version_at_least(version, _MRTR_VERSION):
+        return True
+    return bool(ctx.request_context.session.can_send_request)
+
+
+def require_confirmation(
+    ctx: Context, confirm: bool, consequence: str
+) -> Confirmation | Elicit[Confirmation]:
+    """Resolver gate for destructive tools, before their bodies can perform I/O.
+
+    Elicits where the request can deliver it (see :func:`_can_elicit`); every
+    other client keeps the confirm-only gate. A bare elicitation capability
+    means form support.
+    """
+    require_confirm(confirm, consequence)
+    if _can_elicit(ctx):
+        return Elicit(consequence, Confirmation)
+    return Confirmation(proceed=True)
