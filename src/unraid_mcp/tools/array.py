@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver import Context, Elicit, ElicitationResult, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import ToolError
 
 from .. import queries
@@ -22,9 +22,11 @@ from ._base import (
     DESTRUCTIVE,
     MUTATING,
     READ_ONLY,
+    Confirmation,
     execute_with_fallback,
     guarded,
     require_confirm,
+    require_confirmation,
 )
 
 # ── Read logic ───────────────────────────────────────────────────────────────
@@ -82,7 +84,7 @@ async def do_start_array(client: UnraidClient, confirm: bool) -> dict[str, Any]:
 
 
 async def do_stop_array(client: UnraidClient, confirm: bool) -> dict[str, Any]:
-    require_confirm(confirm, "stop the Unraid array (this unmounts all disks)")
+    require_confirm(confirm, _stop_array_consequence())
     return shape_mutation_result(
         await client.execute(queries.STOP_ARRAY, timeout=client.long_request_timeout),
         ("array", "setState"),
@@ -131,7 +133,7 @@ def _require_disk_id(disk_id: str) -> None:
 
 
 async def do_mount_array_disk(client: UnraidClient, disk_id: str, confirm: bool) -> dict[str, Any]:
-    require_confirm(confirm, f"mount disk '{disk_id}' in the array (brings the disk online)")
+    require_confirm(confirm, _mount_array_disk_consequence(disk_id))
     _require_disk_id(disk_id)
     return shape_mutation_result(
         await client.execute(queries.MOUNT_ARRAY_DISK, {"id": disk_id}), ("array", "mountArrayDisk")
@@ -141,11 +143,7 @@ async def do_mount_array_disk(client: UnraidClient, disk_id: str, confirm: bool)
 async def do_unmount_array_disk(
     client: UnraidClient, disk_id: str, confirm: bool
 ) -> dict[str, Any]:
-    require_confirm(
-        confirm,
-        f"unmount disk '{disk_id}' from the array "
-        "(data on it becomes inaccessible until remounted)",
-    )
+    require_confirm(confirm, _unmount_array_disk_consequence(disk_id))
     _require_disk_id(disk_id)
     return shape_mutation_result(
         await client.execute(queries.UNMOUNT_ARRAY_DISK, {"id": disk_id}),
@@ -156,11 +154,7 @@ async def do_unmount_array_disk(
 async def do_clear_disk_statistics(
     client: UnraidClient, disk_id: str, confirm: bool
 ) -> dict[str, Any]:
-    require_confirm(
-        confirm,
-        f"clear the read/write/error I/O statistics for disk '{disk_id}' "
-        "(the counters are reset and cannot be recovered)",
-    )
+    require_confirm(confirm, _clear_disk_statistics_consequence(disk_id))
     _require_disk_id(disk_id)
     return shape_mutation_result(
         await client.execute(queries.CLEAR_ARRAY_DISK_STATISTICS, {"id": disk_id}),
@@ -171,11 +165,7 @@ async def do_clear_disk_statistics(
 async def do_add_disk_to_array(
     client: UnraidClient, disk_id: str, slot: int | None = None, confirm: bool = False
 ) -> dict[str, Any]:
-    require_confirm(
-        confirm,
-        f"add disk '{disk_id}' to the array "
-        "(the array must be stopped; assigning a slot can overwrite the disk)",
-    )
+    require_confirm(confirm, _add_disk_to_array_consequence(disk_id))
     _require_disk_id(disk_id)
     if slot is not None and slot < 0:
         raise ToolError(f"slot must be a non-negative integer, got {slot}.")
@@ -186,6 +176,66 @@ async def do_add_disk_to_array(
         await client.execute(queries.ADD_DISK_TO_ARRAY, {"input": input_}),
         ("array", "addDiskToArray"),
     )
+
+
+# Consequence strings are shared by the do_* gate and the elicitation resolvers
+# so the human is shown exactly what the confirm-only refusal names.
+
+
+def _stop_array_consequence() -> str:
+    return "stop the Unraid array (this unmounts all disks)"
+
+
+def _mount_array_disk_consequence(disk_id: str) -> str:
+    return f"mount disk '{disk_id}' in the array (brings the disk online)"
+
+
+def _unmount_array_disk_consequence(disk_id: str) -> str:
+    return (
+        f"unmount disk '{disk_id}' from the array (data on it becomes inaccessible until remounted)"
+    )
+
+
+def _clear_disk_statistics_consequence(disk_id: str) -> str:
+    return (
+        f"clear the read/write/error I/O statistics for disk '{disk_id}' "
+        "(the counters are reset and cannot be recovered)"
+    )
+
+
+def _add_disk_to_array_consequence(disk_id: str) -> str:
+    return (
+        f"add disk '{disk_id}' to the array "
+        "(the array must be stopped; assigning a slot can overwrite the disk)"
+    )
+
+
+def _confirm_stop_array(ctx: Context, confirm: bool) -> Confirmation | Elicit[Confirmation]:
+    return require_confirmation(ctx, confirm, _stop_array_consequence())
+
+
+def _confirm_mount_array_disk(
+    ctx: Context, confirm: bool, disk_id: str
+) -> Confirmation | Elicit[Confirmation]:
+    return require_confirmation(ctx, confirm, _mount_array_disk_consequence(disk_id))
+
+
+def _confirm_unmount_array_disk(
+    ctx: Context, confirm: bool, disk_id: str
+) -> Confirmation | Elicit[Confirmation]:
+    return require_confirmation(ctx, confirm, _unmount_array_disk_consequence(disk_id))
+
+
+def _confirm_clear_disk_statistics(
+    ctx: Context, confirm: bool, disk_id: str
+) -> Confirmation | Elicit[Confirmation]:
+    return require_confirmation(ctx, confirm, _clear_disk_statistics_consequence(disk_id))
+
+
+def _confirm_add_disk_to_array(
+    ctx: Context, confirm: bool, disk_id: str
+) -> Confirmation | Elicit[Confirmation]:
+    return require_confirmation(ctx, confirm, _add_disk_to_array_consequence(disk_id))
 
 
 def register(mcp: MCPServer, settings: Settings) -> None:
@@ -227,10 +277,15 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
         return await guarded(ctx, do_start_array, confirm)
 
     @mcp.tool(annotations=DESTRUCTIVE)
-    async def stop_array(ctx: Context, confirm: bool = False) -> dict[str, Any]:
+    async def stop_array(
+        ctx: Context,
+        confirm: bool = False,
+        *,
+        confirmation: Annotated[ElicitationResult[Confirmation], Resolve(_confirm_stop_array)],
+    ) -> dict[str, Any]:
         """Stop the Unraid array. Disruptive: unmounts all disks and stops dependent
         services. Requires confirm=true."""
-        return await guarded(ctx, do_stop_array, confirm)
+        return await guarded(ctx, do_stop_array, confirm, confirmation=confirmation)
 
     @mcp.tool(annotations=MUTATING)
     async def start_parity_check(
@@ -262,35 +317,68 @@ def register_dangerous(mcp: MCPServer, settings: Settings) -> None:
     UNRAID_MCP_ALLOW_MUTATIONS and UNRAID_MCP_ALLOW_DANGEROUS are true."""
 
     @mcp.tool(annotations=DESTRUCTIVE)
-    async def mount_array_disk(ctx: Context, disk_id: str, confirm: bool = False) -> dict[str, Any]:
+    async def mount_array_disk(
+        ctx: Context,
+        disk_id: str,
+        confirm: bool = False,
+        *,
+        confirmation: Annotated[
+            ElicitationResult[Confirmation], Resolve(_confirm_mount_array_disk)
+        ],
+    ) -> dict[str, Any]:
         """DANGEROUS. Mount a single array disk by id (from list_disks), bringing it
         online. Operates on live storage — get the disk id right. Requires confirm=true."""
-        return await guarded(ctx, do_mount_array_disk, disk_id, confirm)
+        return await guarded(ctx, do_mount_array_disk, disk_id, confirm, confirmation=confirmation)
 
     @mcp.tool(annotations=DESTRUCTIVE)
     async def unmount_array_disk(
-        ctx: Context, disk_id: str, confirm: bool = False
+        ctx: Context,
+        disk_id: str,
+        confirm: bool = False,
+        *,
+        confirmation: Annotated[
+            ElicitationResult[Confirmation], Resolve(_confirm_unmount_array_disk)
+        ],
     ) -> dict[str, Any]:
         """DANGEROUS. Unmount a single array disk by id (from list_disks). Data on the
         disk becomes inaccessible to shares/services until it is remounted. Requires
         confirm=true."""
-        return await guarded(ctx, do_unmount_array_disk, disk_id, confirm)
+        return await guarded(
+            ctx, do_unmount_array_disk, disk_id, confirm, confirmation=confirmation
+        )
 
     @mcp.tool(annotations=DESTRUCTIVE)
     async def clear_disk_statistics(
-        ctx: Context, disk_id: str, confirm: bool = False
+        ctx: Context,
+        disk_id: str,
+        confirm: bool = False,
+        *,
+        confirmation: Annotated[
+            ElicitationResult[Confirmation], Resolve(_confirm_clear_disk_statistics)
+        ],
     ) -> dict[str, Any]:
         """DANGEROUS. Clear the read/write/error I/O counters for one array disk by id
         (from list_disks). The statistics are reset and cannot be recovered. Requires
         confirm=true."""
-        return await guarded(ctx, do_clear_disk_statistics, disk_id, confirm)
+        return await guarded(
+            ctx, do_clear_disk_statistics, disk_id, confirm, confirmation=confirmation
+        )
 
     @mcp.tool(annotations=DESTRUCTIVE)
     async def add_disk_to_array(
-        ctx: Context, disk_id: str, slot: int | None = None, confirm: bool = False
+        ctx: Context,
+        disk_id: str,
+        slot: int | None = None,
+        confirm: bool = False,
+        *,
+        confirmation: Annotated[
+            ElicitationResult[Confirmation], Resolve(_confirm_add_disk_to_array)
+        ],
     ) -> dict[str, Any]:
         """DANGEROUS. Assign a physical disk (id from list_disks) to the array, optionally
         at a specific slot. The array must be stopped first; assigning a disk to a data
         slot can overwrite it and, once started, will be formatted/rebuilt. Requires
         confirm=true."""
-        return await guarded(ctx, do_add_disk_to_array, disk_id, slot, confirm)
+        return await guarded(
+            ctx, do_add_disk_to_array, disk_id, slot, confirm, confirmation=confirmation
+        )

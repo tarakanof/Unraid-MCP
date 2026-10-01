@@ -9,10 +9,31 @@ the network transport is locked down.
 Monitoring tools are always available. State-changing tools are registered **only**
 when `UNRAID_MCP_ALLOW_MUTATIONS=true`. Even then, **every** mutating tool requires an
 explicit `confirm=true` and refuses *before* making any network call without it — so
-an agent can't change anything by accident, and a refusal never touches your server.
+a refusal never touches your server. The flag is supplied by the model and does
+not prove that a human approved the action.
 
 There is intentionally **no host reboot/shutdown** tool: the Unraid GraphQL API
 doesn't expose those mutations, so neither does this server.
+
+## Human confirmation for destructive tools
+
+Every tool annotated `destructive`, including every dangerous-tier tool, asks the
+human to approve the exact consequence when the client supports form elicitation.
+The call still requires `confirm=true`, but that flag alone cannot authorize the
+mutation. The human must accept the prompt and check its `proceed` field. Decline,
+cancel, or leaving that field unchecked returns `cancelled by user` before any
+Unraid API request.
+
+On MCP 2026-07-28 clients, the SDK returns `InputRequiredResult` and resumes after
+the client supplies the human's response. Legacy (<= 2025-11-25) clients receive a live
+`elicitation/create` request only over stdio. Legacy clients over streamable HTTP
+are served statelessly, with no server-to-client channel, so they stay
+**confirm-only**. Clients without form elicitation support, including URL-only
+clients, also retain the existing `confirm=true` behavior. A bare `elicitation: {}` declaration counts as form
+support. The host is responsible for presenting the prompt to a human.
+
+Non-destructive `MUTATING` tools require `confirm=true` only, to avoid prompting
+for everyday writes. These confirmation modes do not change the permission flags.
 
 ## Permission tiers
 
