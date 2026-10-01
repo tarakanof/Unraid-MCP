@@ -2176,7 +2176,7 @@ async def test_temperature_health_custom_lm_temp_input_counts(mocked_client, lab
     assert out["reasons"] == [f"Temperature critical: {label} 95°C"]
 
 
-@pytest.mark.parametrize("value", [127, -128, 255])
+@pytest.mark.parametrize("value", [127, 128, 115.5, 255, -128])
 async def test_temperature_health_sentinel_readings_ignored(mocked_client, value):
     sensor = _sensor("AUXTIN3", value, "CRITICAL", "CUSTOM", id_="nct:AUXTIN3:temp6_input")
     async with mocked_client(_health_responses([sensor])) as (c, _r):
@@ -2189,6 +2189,8 @@ async def test_temperature_health_sentinel_readings_ignored(mocked_client, value
     ("sensor", "expected"),
     [
         (_sensor("WD SN570", 65, "CRITICAL", "NVME", id_="disk:22392R"), "attention"),
+        (_sensor("WD SN570", 74.9, "CRITICAL", "NVME", id_="disk:22392R"), "attention"),
+        (_sensor("WD SN570", 95, "CRITICAL", "NVME", id_="disk:22392R"), "critical"),
         (
             _sensor("Composite", 65, "CRITICAL", "NVME", id_="nvme-pci-0100:Composite:temp1_input"),
             "attention",
@@ -2355,7 +2357,7 @@ def test_settings_health_ignored_sensors_parsing(settings_factory):
 
 @pytest.mark.parametrize(
     ("unit", "hot", "sentinel"),
-    [("FAHRENHEIT", 203, 260), ("KELVIN", 368.15, 400.15), ("RANKINE", 662.67, 720.0)],
+    [("FAHRENHEIT", 203, 260.6), ("KELVIN", 368.15, 400.15), ("RANKINE", 662.67, 720.27)],
 )
 async def test_temperature_health_non_celsius_units(mocked_client, unit, hot, sentinel):
     sensors = [
@@ -2381,3 +2383,12 @@ async def test_temperature_health_ignore_label_with_server_prefix(mocked_client)
     async with mocked_client(_health_responses([sensor])) as (c, _r):
         out = await misc.fetch_health(c, ignore_sensors=("auxtin1",))
     assert out["overall"] == "ok"
+
+
+@pytest.mark.parametrize("value", [126, 130])
+async def test_temperature_health_hot_readings_above_125_count(mocked_client, value):
+    sensor = _sensor("gpu", value, "CRITICAL", "GPU", id_="ipmi:VRM Temp")
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+    assert out["temperature"]["hottest"]["value"] == value

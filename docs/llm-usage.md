@@ -227,11 +227,12 @@ voltages, power and energy in CELSIUS (with spurious `CRITICAL` status), so
 sensors are selected by id instead: lm_sensors ids (`<chip>:<label>:<key>`) count
 only when the key is `temp<N>_input`; other ids (`disk:...`, `ipmi:...`) count.
 Without an id, non-`CUSTOM` types or names containing "temp" count. Readings
-at or below -40 or at or above 125 are ignored (unconnected pins read 127, -128,
-255). NVMe sensors at `critical` only raise `attention`: the upstream default
-NVMe critical is 60 C, which NVMe drives routinely reach under load, so
-treating it as `critical` would flap. CPU, HDD and other sensors at `critical`
-raise `critical`.
+(converted to C) at or below -40, or exactly one of the disconnected-pin sentinels
+115.5, 127, 128 or 255, are ignored; any other bogus pin belongs in the ignore
+list below. An NVMe sensor at upstream `critical` raises `attention` below 75 C and
+`critical` at or above it: the upstream default NVMe critical is 60 C, which NVMe
+drives routinely reach under load, so a lower reading would flap. CPU, HDD and
+other sensors at `critical` raise `critical`.
 Sensors listed in `UNRAID_MCP_HEALTH_IGNORE_SENSORS` (label, name or id) are left out
 of the verdict and counted in `temperature.ignored_count`. Each warning or
 critical sensor adds a reason such as `Temperature critical: disk1 65°C` (hottest

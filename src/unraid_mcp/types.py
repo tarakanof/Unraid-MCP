@@ -174,9 +174,10 @@ class HealthSummary(TypedDict):
     overall: Annotated[
         Literal["ok", "attention", "critical", "degraded"],
         Field(
-            description="Critical: failed disks, UPS low/depleting battery or a critical non-NVMe "
-            "temperature. Attention: other unhealthy disks, unread alerts/warnings, UPS on "
-            "battery, parity errors, a warning temperature or a critical NVMe temperature. "
+            description="Critical: failed disks, UPS low/depleting battery or a critical "
+            "temperature (NVMe only from 75 C). Attention: other unhealthy disks, unread "
+            "alerts/warnings, UPS on battery, parity errors, a warning temperature or an NVMe "
+            "critical below 75 C. "
             "Degraded: only failed sub-queries."
         ),
     ]

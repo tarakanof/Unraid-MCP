@@ -322,7 +322,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         yield degraded when no critical/attention signal exists; otherwise ok.
         Temperature sensors are picked by id (lm_sensors temp<N>_input, disk, IPMI;
         fans/voltages/power and sentinel readings are ignored). A sensor at critical
-        raises critical (an NVMe at critical only raises attention), at warning
+        raises critical (an NVMe at critical below 75 C only raises attention), at warning
         raises attention; `temperature` gives the hottest sensor and the
         warning/critical counts (omitted when that query failed).
         UNRAID_MCP_HEALTH_IGNORE_SENSORS excludes named sensors from the

@@ -16,7 +16,7 @@
 
 - **`get_health_summary` / `unraid://health` now include temperature.** A fifth
   concurrent check (`checks.temperature`) feeds sensor levels into the verdict:
-  a critical sensor gives `critical` (NVMe criticals give `attention`), a warning
+  a critical sensor gives `critical` (NVMe criticals below 75 C give `attention`), a warning
   sensor gives `attention`, plus a `temperature` section (hottest sensor and
   warning/critical counts). Only real temperature sensors count (lm_sensors
   fans/voltages/power and sentinel pin readings are ignored). On older APIs

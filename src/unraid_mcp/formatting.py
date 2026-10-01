@@ -816,8 +816,12 @@ _TEMP_REASONS_MAX = 5
 
 _LM_KEY = re.compile(r"^[a-z]+\d*_input$")
 _LM_TEMP_KEY = re.compile(r"^temp\d+_input$")
-# Unconnected nct/it87 pins read 127 / -128 / 255; not real temperatures.
-_TEMP_SENTINEL_MIN, _TEMP_SENTINEL_MAX = -40, 125
+# Unconnected nct/it87 pins read 115.5 / 127 / 128 / 255 (or <= -40): not real
+# temperatures. Anything else counts; other bogus pins go in the ignore list.
+_TEMP_FLOOR = -40
+_TEMP_SENTINELS = (115.5, 127.0, 128.0, 255.0)
+# NVMe at upstream critical below this stays attention (see _temperature_signals).
+_NVME_CRITICAL_C = 75
 
 
 def _to_celsius(value: float, unit: Any) -> float:
@@ -882,12 +886,14 @@ def shape_health_temperature(
             continue
         current = s.get("current") or {}
         value = current.get("value")
-        if value is not None and not (
-            _TEMP_SENTINEL_MIN < _to_celsius(value, current.get("unit")) < _TEMP_SENTINEL_MAX
+        celsius = _to_celsius(value, current.get("unit")) if value is not None else None
+        if celsius is not None and (
+            celsius <= _TEMP_FLOOR or any(abs(celsius - x) < 0.05 for x in _TEMP_SENTINELS)
         ):
             continue
         shaped = _shape_sensor(s)
         shaped["ignored"] = _sensor_ignored(s, ignore) if ignore else False
+        shaped["celsius"] = celsius
         shaped["nvme"] = s.get("type") == "NVME" or "nvme" in str(s.get("id") or "").lower()
         out.append(shaped)
     return out
@@ -933,9 +939,11 @@ def _temperature_signals(
         "critical_count": len(critical),
         "ignored_count": ignored_count,
     }
-    # NVMe drives routinely touch their 60 C default critical under load: that
-    # alone is attention, not critical.
-    hard_critical = any(not s.get("nvme") for s in critical)
+    # NVMe drives routinely touch their 60 C default critical under load: below
+    # 75 C that alone is attention, not critical.
+    hard_critical = any(
+        not s.get("nvme") or (s.get("celsius") or 0) >= _NVME_CRITICAL_C for s in critical
+    )
     return summary, reasons, hard_critical, bool(warning or critical)
 
 
