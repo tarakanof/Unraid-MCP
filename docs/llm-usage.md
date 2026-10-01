@@ -86,6 +86,7 @@ A typical stdio client config:
 | `get_ups_status` | – | UPS battery/load/runtime; `power.nominalPower`/`currentPower` in watts on newer APIs. |
 | `list_network_interfaces` | – | NICs with IPs, speed, state. |
 | `get_connect_status` | – | Registration/license + remote-access status. |
+| `list_plugins` | – | Installed Unraid plugins: name, version, whether they have API/CLI modules, and a `source` field saying which query returned each entry. |
 | `whoami` | – | The authenticated API user and its roles (use to confirm the key's scope). |
 | `list_log_files` | – | List system log files: name, path, size, last-modified time. |
 | `read_log_file` | `path`, `lines=100`, `start_line=None` | Read a slice of a log file for triage. `path` must come from `list_log_files` (`/var/log` only); `lines` capped at 500; use `total_lines`/`start_line` in the response to page. |
