@@ -114,3 +114,43 @@ def test_serve_http_enables_tls_when_cert_and_key_set(settings_factory, monkeypa
     )
     assert captured["uvicorn_kwargs"]["ssl_certfile"] == str(cert)
     assert captured["uvicorn_kwargs"]["ssl_keyfile"] == str(key)
+
+
+def test_main_stdio_logging_redacts_bearer_token(clean_env, monkeypatch, capsys):
+    import logging
+
+    clean_env.setenv("UNRAID_API_URL", "https://tower.local/graphql")
+    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv("UNRAID_MCP_BEARER_TOKEN", TOKEN)
+    fake = MagicMock()
+    fake.run.side_effect = lambda transport: logging.getLogger("websockets.client").debug(
+        "< TEXT %r", f'{{"type":"error","payload":"{TOKEN}"}}'
+    )
+    clean_env.setenv("UNRAID_MCP_LOG_LEVEL", "DEBUG")
+    monkeypatch.setattr(cli, "build_server", lambda settings: fake)
+    assert cli.main() == 0
+    err = capsys.readouterr().err
+    assert "websockets.client" in err
+    assert TOKEN not in err
+    assert "***REDACTED***" in err
+
+
+def test_main_http_generated_token_reaches_server_settings(clean_env, monkeypatch, capsys):
+    clean_env.setenv("UNRAID_API_URL", "https://tower.local/graphql")
+    clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
+    clean_env.setenv("UNRAID_MCP_TRANSPORT", "streamable-http")
+    built = {}
+    monkeypatch.setattr(
+        cli, "build_server", lambda settings: built.update(s=settings) or MagicMock()
+    )
+    served = {}
+    monkeypatch.setattr(cli, "_serve_http", lambda mcp, settings: served.update(s=settings))
+    assert cli.main() == 0
+    token = built["s"].bearer_token.get_secret_value()
+    assert len(token) >= 20
+    assert served["s"].bearer_token.get_secret_value() == token
+    # Shown once at startup, then redacted from later logs.
+    import logging
+
+    logging.getLogger("x").warning("leak %s", token)
+    assert capsys.readouterr().err.count(token) == 1

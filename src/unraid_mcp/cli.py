@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import secrets
 
+from pydantic import SecretStr
+
 from .auth import StaticBearerAuthMiddleware
 from .config import Settings, load_settings
 from .errors import UnraidConfigError
@@ -26,23 +28,33 @@ def _build_http_app(mcp, settings: Settings, token: str):
     return HealthCheckMiddleware(StaticBearerAuthMiddleware(inner, token))
 
 
+def _with_bearer_token(settings: Settings) -> Settings:
+    """Return settings carrying the effective HTTP bearer token.
+
+    A configured token is kept. Otherwise one is generated and shown exactly
+    once so the operator can configure their client. The effective token lives
+    on the settings so the client, stats sampler and logging all scrub it.
+    """
+    if settings.bearer_token and settings.bearer_token.get_secret_value():
+        return settings
+    token = secrets.token_urlsafe(32)
+    log.warning(
+        "No UNRAID_MCP_BEARER_TOKEN set; generated one for this run. "
+        "Clients must send 'Authorization: Bearer <token>':\n    %s",
+        token,
+    )
+    return settings.model_copy(update={"bearer_token": SecretStr(token)})
+
+
+def _log_secrets(settings: Settings) -> list[str]:
+    return [settings.bearer_token.get_secret_value()] if settings.bearer_token else []
+
+
 def _serve_http(mcp, settings: Settings) -> None:
     import uvicorn
 
-    api_key = settings.api_key.get_secret_value()
-    provided = settings.bearer_token.get_secret_value() if settings.bearer_token else None
-    if provided:
-        token = provided  # operator-supplied tokens are never logged
-    else:
-        token = secrets.token_urlsafe(32)
-        log.warning(
-            "No UNRAID_MCP_BEARER_TOKEN set; generated one for this run. "
-            "Clients must send 'Authorization: Bearer <token>':\n    %s",
-            token,
-        )
-    # Redact the bearer token from all subsequent logs (the generated one was
-    # shown exactly once above so the operator can configure their client).
-    configure_logging(settings.log_level, api_key, secrets=[token])
+    settings = _with_bearer_token(settings)
+    token = settings.bearer_token.get_secret_value()  # type: ignore[union-attr]
 
     ssl_kwargs: dict[str, str] = {}
     if settings.tls_enabled:
@@ -90,7 +102,13 @@ def main() -> int:
         return 1
 
     # Reconfigure with the real level and a redaction filter for the API key.
-    configure_logging(settings.log_level, settings.api_key.get_secret_value())
+    # Logging redaction covers the bearer token for every transport: libraries
+    # (e.g. websockets at DEBUG) may log raw frames before our own scrubbing.
+    if settings.transport == "streamable-http":
+        settings = _with_bearer_token(settings)
+    configure_logging(
+        settings.log_level, settings.api_key.get_secret_value(), secrets=_log_secrets(settings)
+    )
     if not settings.verify_ssl and not settings.ca_bundle:
         log.warning(
             "TLS verification is DISABLED (UNRAID_VERIFY_SSL=false). "
