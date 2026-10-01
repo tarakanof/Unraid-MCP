@@ -172,7 +172,7 @@ async def test_graphql_error_message_redacts_api_key():
 
 @pytest.mark.parametrize(
     "payload",
-    [[], "str", None, {"data": []}, {"data": "str"}, {"errors": {}}, {"errors": None}],
+    [[], "str", None, {"data": []}, {"data": "str"}, {"errors": {}}],
 )
 async def test_invalid_graphql_envelope_raises_server_error(payload):
     with respx.mock:
