@@ -10,7 +10,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from ..client import UnraidClient
-from ..errors import UnraidError, UnraidGraphQLError
+from ..errors import UnraidAuthError, UnraidError, UnraidGraphQLError
 from ..logging import redact
 
 if TYPE_CHECKING:  # avoid a runtime import cycle (server imports tools imports _base)
@@ -133,10 +133,13 @@ async def safe_query_with_status(
     default: Any,
     *,
     required_field: str | None = None,
+    tolerate_auth: bool = False,
 ) -> tuple[Any, bool]:
     """Keep usable data but flag GraphQL errors or a missing required root field.
 
-    Transport, configuration, authentication, and server errors propagate.
+    Transport, configuration, and server errors propagate. Authentication errors
+    (HTTP 401/403) propagate unless ``tolerate_auth`` is set, which is for
+    sub-checks run after another query already proved the credentials valid.
     """
     try:
         data, errors = await client.execute_with_errors(query)
@@ -144,6 +147,18 @@ async def safe_query_with_status(
         return shaper(data), ok
     except UnraidGraphQLError:
         return default, False
+    except UnraidAuthError:
+        if tolerate_auth:
+            return default, False
+        raise
+
+
+def is_permission_error(exc: UnraidGraphQLError) -> bool:
+    """True iff a GraphQL error carries a structured permission code."""
+    return any(
+        (e.get("extensions") or {}).get("code") in ("FORBIDDEN", "UNAUTHENTICATED")
+        for e in exc.errors
+    )
 
 
 def require_confirm(confirm: bool, action: str) -> None:

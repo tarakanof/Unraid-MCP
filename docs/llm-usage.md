@@ -180,10 +180,13 @@ opted in — do not try to work around it.
 `get_health_summary` and `unraid://health` return the same structure. Existing
 fields remain available, with two additions: `reasons` lists human-readable
 signals and failed checks, and `checks` reports `ok` or `failed` for each of
-`array`, `ups`, and `notifications`. UPS also reports `not_configured` when its
-query fails and `upsConfiguration.service` is not `enable` (null or `disable`). This adds no reason
-and does not cause a degraded verdict. If the service is enabled or its
-configuration query fails, the UPS check stays `failed`.
+`array`, `ups`, and `notifications`. UPS also reports `not_configured` only when its
+query fails with a plain GraphQL error (not a `FORBIDDEN`/`UNAUTHENTICATED` code, HTTP 403,
+or unsupported field) and `upsConfiguration.service` is not `enable` (null or
+`disable`). This adds no reason and does not cause a degraded verdict. Otherwise
+the UPS check stays `failed`. HTTP 403 on the UPS or notifications sub-check
+marks it `failed` (the array query already proved the key valid); connection
+errors on any query propagate, as do auth errors on the array query.
 
 An empty UPS or notification response is `ok`; a null or missing array is
 `failed`. GraphQL errors, including partial errors, per-field permission denial,

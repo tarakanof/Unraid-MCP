@@ -966,11 +966,12 @@ async def test_health_failed_checks(mocked_client, check, failure):
             "data": None,
         },
     )
-    if check == "ups":
+    config_queried = check == "ups" and failure == "forbidden"
+    if config_queried:
         responses.append(_resp({"upsConfiguration": {"service": "enable"}}))
     async with mocked_client(responses) as (client, route):
         out = await misc.fetch_health(client)
-    assert route.call_count == (4 if check == "ups" else 3)
+    assert route.call_count == (4 if config_queried else 3)
     assert out["overall"] == "degraded"
     assert out["checks"] == {
         name: "failed" if name == check else "ok" for name in ("array", "ups", "notifications")
@@ -984,6 +985,15 @@ async def test_health_actionable_errors_propagate(mocked_client, check, failure)
     index = ("array", "ups", "notifications").index(check)
     responses = [_resp({"array": {}}), _resp({"upsDevices": []}), _resp({})]
     responses[index] = httpx.Response(401) if failure == "auth" else httpx.ConnectError("refused")
+    if check != "array" and failure == "auth":
+        # Sub-checks run after the array query proved the key valid: auth -> failed.
+        if check == "ups":
+            responses.append(_resp({"upsConfiguration": {"service": None}}))
+        async with mocked_client(responses) as (client, _route):
+            out = await misc.fetch_health(client)
+        assert out["checks"][check] == "failed"
+        assert out["overall"] == "degraded"
+        return
     async with mocked_client(responses) as (client, route):
         with pytest.raises(UnraidAuthError if failure == "auth" else UnraidConnectionError):
             await misc.fetch_health(client)
@@ -1154,3 +1164,47 @@ async def test_array_space_thresholds_are_not_health_flags(mocked_client):
     assert status["caches"][0]["health"] == "healthy"
     assert health["overall"] == "ok"
     assert health["unhealthy_disks"] == []
+
+
+_NO_DATA = {"errors": [{"message": "No UPS data returned from apcaccess"}], "data": None}
+_FORBIDDEN = {
+    "errors": [{"message": "denied", "extensions": {"code": "FORBIDDEN"}}],
+    "data": None,
+}
+_UNSUPPORTED = {
+    "errors": [{"message": 'Cannot query field "upsDevices" on type "Query".'}],
+    "data": None,
+}
+
+
+@pytest.mark.parametrize(
+    ("ups", "service", "expected", "calls"),
+    [
+        (httpx.Response(200, json=_NO_DATA), None, "not_configured", 4),
+        (httpx.Response(200, json=_NO_DATA), "DISABLE", "not_configured", 4),
+        (httpx.Response(200, json=_FORBIDDEN), "DISABLE", "failed", 3),
+        (httpx.Response(403), "DISABLE", "failed", 3),
+        (httpx.Response(200, json=_UNSUPPORTED), None, "failed", 3),
+    ],
+)
+async def test_health_not_configured_branches(mocked_client, ups, service, expected, calls):
+    responses = [
+        _resp({"array": {"state": "STARTED"}}),
+        ups,
+        _resp({"notifications": None}),
+        _resp({"upsConfiguration": {"service": service}}),
+    ]
+    async with mocked_client(responses[:calls] if calls == 3 else responses) as (client, route):
+        out = await misc.fetch_health(client)
+    assert route.call_count == calls
+    assert out["checks"]["ups"] == expected
+    assert out["overall"] == ("degraded" if expected == "failed" else "ok")
+
+
+async def test_health_notifications_http_403_is_failed(mocked_client):
+    async with mocked_client(
+        [_resp({"array": {"state": "STARTED"}}), _resp({"upsDevices": []}), httpx.Response(403)]
+    ) as (client, _route):
+        out = await misc.fetch_health(client)
+    assert out["checks"] == {"array": "ok", "ups": "ok", "notifications": "failed"}
+    assert out["overall"] == "degraded"
