@@ -28,6 +28,7 @@ def clean_env(monkeypatch):
         "UNRAID_MCP_ALLOW_DANGEROUS",
         "UNRAID_MCP_ALLOW_RAW_QUERY",
         "UNRAID_MCP_TIMEOUT",
+        "UNRAID_MCP_LONG_TIMEOUT",
         "UNRAID_MCP_LOG_LEVEL",
         "UNRAID_MCP_ALLOWED_HOSTS",
         "UNRAID_MCP_ALLOWED_ORIGINS",
@@ -68,6 +69,7 @@ def test_defaults(clean_env):
     assert s.allow_dangerous is False
     assert s.allow_raw_query is False
     assert s.timeout == 30.0
+    assert s.long_timeout == 600.0
     assert s.log_level == "INFO"
     assert s.ca_bundle is None
 
@@ -229,3 +231,13 @@ def test_port_and_timeout_coerced_from_strings(clean_env):
     s = load_settings(_env_file=None)
     assert s.port == 7000
     assert s.timeout == 12.5
+
+
+@pytest.mark.parametrize("var", ["UNRAID_MCP_TIMEOUT", "UNRAID_MCP_LONG_TIMEOUT"])
+@pytest.mark.parametrize("bad", ["0", "-5"])
+def test_timeouts_must_be_positive(clean_env, var, bad):
+    for k, v in REQUIRED.items():
+        clean_env.setenv(k, v)
+    clean_env.setenv(var, bad)
+    with pytest.raises(UnraidConfigError):
+        load_settings(_env_file=None)
