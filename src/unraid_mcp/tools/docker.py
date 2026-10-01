@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import weakref
 from datetime import datetime
 from typing import Any
 
@@ -426,6 +427,208 @@ async def do_update_containers(
     return shape_mutation_result_list(result, ("docker", "updateContainers"))
 
 
+async def do_refresh_docker_digests(
+    client: UnraidClient, confirm: bool = False, *, api_version: str | None = None
+) -> dict[str, Any]:
+    """Force a fresh image-digest check so ``check_docker_updates`` is current."""
+    require_confirm(confirm, "force a Docker image digest re-check (registry network traffic)")
+    try:
+        result = await client.execute(queries.REFRESH_DOCKER_DIGESTS)
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported(
+                "refreshing Docker digests (upstream gates it behind the "
+                "ENABLE_NEXT_DOCKER_RELEASE feature flag)",
+                api_version=api_version,
+            ) from None
+        raise
+    if (result or {}).get("refreshDockerDigests") is not True:
+        raise ToolError(
+            "The Unraid API did not confirm the Docker digest refresh (no true result)."
+        )
+    return {"ok": True}
+
+
+MAX_AUTOSTART_WAIT = 2147483647  # GraphQL Int max
+
+
+def _validate_autostart_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate and normalise requested changes ({id, auto_start, wait?})."""
+    if not isinstance(entries, list) or not entries:
+        raise ToolError(
+            "entries must be a non-empty list of {id, auto_start, wait?} objects "
+            "(ids from list_docker_containers)."
+        )
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise ToolError(f"entries[{i}] must be an object {{id, auto_start, wait?}}.")
+        unknown = set(entry) - {"id", "auto_start", "autoStart", "wait"}
+        if unknown:
+            raise ToolError(f"entries[{i}] has unknown keys {sorted(unknown)}.")
+        cid = entry.get("id")
+        if not isinstance(cid, str) or not cid.strip():
+            raise ToolError(f"entries[{i}].id must be a non-empty container id.")
+        if cid in seen:
+            raise ToolError(f"entries[{i}].id {cid!r} is listed more than once.")
+        seen.add(cid)
+        auto = entry["auto_start"] if "auto_start" in entry else entry.get("autoStart")
+        if not isinstance(auto, bool):
+            raise ToolError(f"entries[{i}].auto_start must be a boolean.")
+        item: dict[str, Any] = {"id": cid, "autoStart": auto}
+        wait = entry.get("wait")
+        if wait is not None:
+            if (
+                isinstance(wait, bool)
+                or not isinstance(wait, int)
+                or not 0 <= wait <= MAX_AUTOSTART_WAIT
+            ):
+                raise ToolError(
+                    f"entries[{i}].wait must be an integer 0..{MAX_AUTOSTART_WAIT} (seconds)."
+                )
+            item["wait"] = wait
+        out.append(item)
+    return out
+
+
+# One lock per client serialises the whole read-merge-write so concurrent calls
+# can't both read the same state and have the last write drop the other's change.
+_AUTOSTART_LOCKS: weakref.WeakKeyDictionary[Any, asyncio.Lock] = weakref.WeakKeyDictionary()
+
+
+def _autostart_lock(client: Any) -> asyncio.Lock:
+    lock = _AUTOSTART_LOCKS.get(client)
+    if lock is None:
+        lock = _AUTOSTART_LOCKS[client] = asyncio.Lock()
+    return lock
+
+
+async def _execute_strict(
+    client: UnraidClient, query: str, variables: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Run an operation, treating ANY GraphQL error (even with partial data) as failure."""
+    data, errors = await client.execute_with_errors(query, variables)
+    if errors:
+        messages = "; ".join(str(e.get("message", "unknown error")) for e in errors)
+        raise UnraidGraphQLError(f"GraphQL error: {messages}", errors=errors)
+    return data
+
+
+def _validate_order(order: list[str] | None) -> list[str] | None:
+    if order is None:
+        return None
+    if not isinstance(order, list) or not order:
+        raise ToolError("order must be a non-empty list of container ids, or omitted.")
+    for i, cid in enumerate(order):
+        if not isinstance(cid, str) or not cid.strip():
+            raise ToolError(f"order[{i}] must be a non-empty container id.")
+    dupes = sorted({c for c in order if order.count(c) > 1})
+    if dupes:
+        raise ToolError(f"order lists id(s) more than once: {dupes}.")
+    return order
+
+
+def _merge_autostart(
+    containers: list[dict[str, Any]],
+    changes: list[dict[str, Any]],
+    order: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Merge ``changes`` into the current autostart list, preserving boot order.
+
+    Upstream REPLACES the whole autostart file, so we send the full list: current
+    autostart containers in their existing order, requested disables removed,
+    requested enables updated in place or appended.
+    """
+    known = {c["id"] for c in containers if c.get("id")}
+    missing = [c["id"] for c in changes if c["id"] not in known]
+    if missing:
+        raise ToolError(
+            f"Unknown container id(s): {missing}. Use ids from list_docker_containers; "
+            "nothing was changed."
+        )
+    enabled = sorted(
+        (c for c in containers if c.get("autoStart")),
+        key=lambda c: (c.get("autoStartOrder") is None, c.get("autoStartOrder") or 0),
+    )
+    current: list[dict[str, Any]] = []
+    for c in enabled:
+        entry: dict[str, Any] = {"id": c["id"], "autoStart": True}
+        if c.get("autoStartWait") is not None:
+            entry["wait"] = c["autoStartWait"]
+        current.append(entry)
+    for change in changes:
+        idx = next((i for i, e in enumerate(current) if e["id"] == change["id"]), None)
+        if not change["autoStart"]:
+            if idx is not None:
+                current.pop(idx)
+        elif idx is not None:
+            if "wait" in change:
+                current[idx]["wait"] = change["wait"]
+        else:
+            current.append(dict(change))
+    if order:
+        have = {e["id"] for e in current}
+        not_enabled = [c for c in order if c not in have]
+        if not_enabled:
+            raise ToolError(
+                f"order lists id(s) that would not be autostart-enabled: {not_enabled}. "
+                "order may only contain containers enabled after this change; nothing was changed."
+            )
+        by_id = {e["id"]: e for e in current}
+        listed = set(order)
+        current = [by_id[c] for c in order] + [e for e in current if e["id"] not in listed]
+    return current
+
+
+async def do_set_docker_autostart(
+    client: UnraidClient,
+    entries: list[dict[str, Any]],
+    persist_user_preferences: bool = False,
+    confirm: bool = False,
+    *,
+    order: list[str] | None = None,
+    api_version: str | None = None,
+) -> dict[str, Any]:
+    """Change autostart for some containers via read-modify-write.
+
+    The upstream mutation replaces the ENTIRE autostart list (unlisted containers
+    lose autostart; list order is boot order), so the current list is fetched,
+    the changes merged in, and the full list sent. The whole read-merge-write is
+    serialised per client so concurrent calls can't lose each other's updates.
+    ``order`` (optional) lists ids to boot first, in that order; it must be a
+    subset of the containers autostart-enabled after the merge, and the remaining
+    enabled containers keep their relative order after them.
+    """
+    ids = [e.get("id") for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
+    require_confirm(
+        confirm,
+        f"update autostart for {ids} (merged into the existing autostart list, which is "
+        "then rewritten in full; boot order and, if persist_user_preferences, UI order change)",
+    )
+    changes = _validate_autostart_entries(entries)
+    order = _validate_order(order)
+    try:
+        async with _autostart_lock(client):
+            state = await _execute_strict(client, queries.DOCKER_AUTOSTART_STATE)
+            containers = ((state or {}).get("docker") or {}).get("containers") or []
+            full = _merge_autostart(containers, changes, order)
+            result = await _execute_strict(
+                client,
+                queries.UPDATE_DOCKER_AUTOSTART,
+                {"entries": full, "persist": persist_user_preferences},
+            )
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported(
+                "Docker autostart configuration", api_version=api_version
+            ) from None
+        raise
+    if ((result or {}).get("docker") or {}).get("updateAutostartConfiguration") is not True:
+        raise ToolError("The Unraid API did not confirm the autostart update (no true result).")
+    return {"ok": True, "autostart": full}
+
+
 # ── Dangerous-tier logic ────────────────────────────────────────────────────
 
 
@@ -562,8 +765,8 @@ def register(mcp: MCPServer, settings: Settings) -> None:
     async def check_docker_updates(ctx: Context) -> list[dict[str, Any]]:
         """Per-container Docker image update status (name, update_status).
         Reads cached image-update digests already computed by the Unraid API;
-        it does not trigger a fresh digest check (that's the
-        `refreshDockerDigests` mutation, out of scope for this tool)."""
+        it does not trigger a fresh digest check (call
+        `refresh_docker_digests` first when mutations are enabled)."""
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, fetch_docker_updates, api_version=api_version)
 
@@ -643,6 +846,47 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
         api_version = get_app_context(ctx).api_version
         return await guarded(
             ctx, do_update_containers, container_ids, confirm, api_version=api_version
+        )
+
+    @mcp.tool(annotations=MUTATING)
+    async def refresh_docker_digests(ctx: Context, confirm: bool = False) -> dict[str, Any]:
+        """Force a fresh Docker image digest check against registries, so a following
+        check_docker_updates reflects current availability. Idempotent; changes no
+        container. Upstream gates it behind the ENABLE_NEXT_DOCKER_RELEASE flag.
+        Requires confirm=true."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(ctx, do_refresh_docker_digests, confirm, api_version=api_version)
+
+    @mcp.tool(annotations=MUTATING)
+    async def set_docker_autostart(
+        ctx: Context,
+        entries: list[dict[str, Any]],
+        order: list[str] | None = None,
+        persist_user_preferences: bool = False,
+        confirm: bool = False,
+    ) -> dict[str, Any]:
+        """Set Docker container autostart config. entries: non-empty list of
+        {"id": <container id from list_docker_containers>, "auto_start": bool,
+        "wait": optional seconds to wait after starting it}. Entries are validated
+        locally before any request. Upstream replaces the whole autostart list, so
+        this reads the current list, merges your changes (existing order kept, new
+        enables appended, auto_start=false removes) and sends the full list; unknown
+        ids are rejected before the mutation. Calls are serialised so concurrent edits
+        don't clobber each other. order (optional): ids to boot first, in that order;
+        must be a subset of the containers autostart-enabled after the merge (else
+        rejected before the mutation); other enabled containers keep their relative
+        order after them. persist_user_preferences also replaces
+        the UI order. Returns the resulting {"ok", "autostart"} list.
+        Requires confirm=true."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(
+            ctx,
+            do_set_docker_autostart,
+            entries,
+            persist_user_preferences,
+            confirm,
+            order=order,
+            api_version=api_version,
         )
 
 

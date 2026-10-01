@@ -24,7 +24,7 @@ nothing.
 | Tier | Flag | Default | Unlocks |
 | --- | --- | --- | --- |
 | Read | *(always on)* | on | All monitoring/read tools. Never change anything. |
-| Mutate | `UNRAID_MCP_ALLOW_MUTATIONS` | off | Everyday writes: start/stop array, start/pause/resume/cancel parity, start/stop/restart/update Docker containers (single + batch), start/stop/pause/resume/reboot/force-stop/reset VMs, notification archive/unarchive/unread/delete (single and bulk, plus `create_notification` — see below). `delete_archived_notifications` is annotated `destructive` (irreversible bulk delete) but lives in this tier, not the dangerous one. |
+| Mutate | `UNRAID_MCP_ALLOW_MUTATIONS` | off | Everyday writes: start/stop array, start/pause/resume/cancel parity, start/stop/restart/update Docker containers (single + batch), `refresh_docker_digests`, `set_docker_autostart`, start/stop/pause/resume/reboot/force-stop/reset VMs, notification archive/unarchive/unread/delete (single and bulk, plus `create_notification` — see below). `delete_archived_notifications` is annotated `destructive` (irreversible bulk delete) but lives in this tier, not the dangerous one. |
 | Dangerous | `UNRAID_MCP_ALLOW_DANGEROUS` (requires mutations too) | off | High-blast-radius topology/removal ops (see below). |
 
 **Notification lifecycle tools** (mutate tier, all require `confirm=true`):
