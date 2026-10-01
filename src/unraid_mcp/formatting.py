@@ -101,6 +101,10 @@ def _shape_array_disk(d: dict | None) -> dict[str, Any] | None:
         "writes": d.get("numWrites"),
         "errors": d.get("numErrors"),
         "color": d.get("color"),
+        "spinning": d.get("isSpinning"),
+        "format": d.get("format"),
+        "transport": d.get("transport"),
+        "exportable": d.get("exportable"),
     }
 
 
@@ -121,6 +125,13 @@ def shape_array_status(data: dict | None) -> dict[str, Any]:
         "data_disks": [_shape_array_disk(d) for d in (array.get("disks") or [])],
         "caches": [_shape_array_disk(d) for d in (array.get("caches") or [])],
         "boot": _shape_array_disk(array.get("boot")),
+        # `None` (not []) when the API build predates `bootDevices`, so callers
+        # can tell "unsupported" apart from "no boot devices".
+        "boot_devices": (
+            [_shape_array_disk(d) for d in array["bootDevices"]]
+            if array.get("bootDevices") is not None
+            else None
+        ),
     }
 
 
@@ -154,6 +165,41 @@ def shape_physical_disks(data: dict | None) -> list[dict[str, Any]]:
 
 def shape_system_info(data: dict | None) -> dict[str, Any]:
     return (data or {}).get("info") or {}
+
+
+def _shape_reading(sensor: dict, *extra: str) -> dict[str, Any]:
+    current = sensor.get("current") or {}
+    return {
+        **{k: sensor.get(k) for k in extra},
+        "value": current.get("value"),
+        "unit": current.get("unit"),
+    }
+
+
+def _temp_level(value: Any, warning: Any, critical: Any) -> str | None:
+    """``critical``/``warning`` when the reading is at or above that threshold,
+    ``normal`` when thresholds exist but aren't reached, else ``None`` (no
+    threshold data, e.g. an older API build)."""
+    if value is None:
+        return None
+    if critical is not None and value >= critical:
+        return "critical"
+    if warning is not None and value >= warning:
+        return "warning"
+    return "normal" if (warning is not None or critical is not None) else None
+
+
+def _shape_sensor(s: dict) -> dict[str, Any]:
+    current = s.get("current") or {}
+    out = {"name": s.get("name"), "type": s.get("type"), "location": s.get("location")}
+    out["current"] = {"value": current.get("value"), "unit": current.get("unit")}
+    for key in ("min", "max"):
+        reading = s.get(key)
+        out[key] = {"value": reading.get("value"), "unit": reading.get("unit")} if reading else None
+    out["warning"] = s.get("warning")
+    out["critical"] = s.get("critical")
+    out["level"] = _temp_level(current.get("value"), s.get("warning"), s.get("critical"))
+    return out
 
 
 def shape_metrics(data: dict | None) -> dict[str, Any]:
@@ -196,22 +242,15 @@ def shape_metrics(data: dict | None) -> dict[str, Any]:
     temperature = metrics.get("temperature")
     if temperature is not None:
         summary = temperature.get("summary") or {}
+        hottest = summary.get("hottest")
         out["temperature"] = {
             "summary": {
                 "average": summary.get("average"),
                 "warning_count": summary.get("warningCount"),
                 "critical_count": summary.get("criticalCount"),
+                "hottest": _shape_reading(hottest, "name") if hottest else None,
             },
-            "sensors": [
-                {
-                    "name": s.get("name"),
-                    "current": {
-                        "value": (s.get("current") or {}).get("value"),
-                        "unit": (s.get("current") or {}).get("unit"),
-                    },
-                }
-                for s in (temperature.get("sensors") or [])
-            ],
+            "sensors": [_shape_sensor(s) for s in (temperature.get("sensors") or [])],
         }
 
     return out

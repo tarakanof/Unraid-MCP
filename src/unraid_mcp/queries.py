@@ -13,10 +13,14 @@ Unit notes baked into downstream formatting:
 from __future__ import annotations
 
 # Shared ArrayDisk selection (used for array data/parity/cache/boot members).
+# ``_ARRAY_DISK_FIELDS`` is the baseline every supported build has; the
+# ``_EXT`` set (isSpinning/format/transport/exportable) is newer and only
+# selected by ``ARRAY_STATUS`` — ``ARRAY_STATUS_LEGACY`` keeps the baseline.
 _ARRAY_DISK_FIELDS = (
     "id idx name device size status rotational temp numReads numWrites numErrors "
     "fsSize fsFree fsUsed type fsType color warning critical comment"
 )
+_ARRAY_DISK_FIELDS_EXT = _ARRAY_DISK_FIELDS + " isSpinning format transport exportable"
 
 # ── Queries ────────────────────────────────────────────────────────────────
 
@@ -45,12 +49,32 @@ query GetSystemInfo {
 }
 """
 
-# Live utilization snapshot. Selects conservatively — omits `hottest`/`coolest`
-# on TemperatureSummary (they force full nested TemperatureSensor selections)
-# and `percentUser`/`percentSystem`/etc. on CpuLoad (per-core total is enough
+# Live utilization snapshot. Omits `coolest` on TemperatureSummary and
+# `percentUser`/`percentSystem`/etc. on CpuLoad (per-core total is enough
 # signal for an agent). Every field verified against the upstream SDL.
+# Per-sensor thresholds + `hottest` are newer (unraid/api v4.30.0); on older
+# builds `fetch_metrics` falls back to ``SYSTEM_METRICS_LEGACY``.
 SYSTEM_METRICS = """
 query GetSystemMetrics {
+  metrics {
+    cpu { percentTotal cpus { percentTotal } }
+    memory { total used free available percentTotal swapTotal swapUsed swapFree percentSwapTotal }
+    temperature {
+      summary { average warningCount criticalCount hottest { name current { value unit } } }
+      sensors {
+        name type location
+        current { value unit }
+        min { value unit }
+        max { value unit }
+        warning critical
+      }
+    }
+  }
+}
+"""
+
+SYSTEM_METRICS_LEGACY = """
+query GetSystemMetricsLegacy {
   metrics {
     cpu { percentTotal cpus { percentTotal } }
     memory { total used free available percentTotal swapTotal swapUsed swapFree percentSwapTotal }
@@ -81,10 +105,27 @@ query GetServices {
 }
 """
 
-_ARRAY_DISK_SELECTION = "{ " + _ARRAY_DISK_FIELDS + " }"
-
+# ``bootDevices`` (every internal-boot member on Unraid 7.3+) and the extra
+# ArrayDisk fields are newer; ``fetch_array_status`` falls back to
+# ``ARRAY_STATUS_LEGACY`` when the API rejects them.
 ARRAY_STATUS = """
 query GetArrayStatus {
+  array {
+    id
+    state
+    capacity { kilobytes { free used total } disks { free used total } }
+    boot __DISK__
+    bootDevices __DISK__
+    parities __DISK__
+    disks __DISK__
+    caches __DISK__
+    parityCheckStatus { progress speed errors status paused running correcting }
+  }
+}
+""".replace("__DISK__", "{ " + _ARRAY_DISK_FIELDS_EXT + " }")
+
+ARRAY_STATUS_LEGACY = """
+query GetArrayStatusLegacy {
   array {
     id
     state
@@ -96,7 +137,7 @@ query GetArrayStatus {
     parityCheckStatus { progress speed errors status paused running correcting }
   }
 }
-""".replace("__DISK__", _ARRAY_DISK_SELECTION)
+""".replace("__DISK__", "{ " + _ARRAY_DISK_FIELDS + " }")
 
 LIST_DISKS = """
 query ListPhysicalDisks {
@@ -268,8 +309,20 @@ query GetWarningsAndAlerts {
 }
 """
 
+# ``nominalPower``/``currentPower`` (watts) are newer; ``fetch_ups`` falls back
+# to ``UPS_DEVICES_LEGACY`` on older builds.
 UPS_DEVICES = """
 query GetUpsDevices {
+  upsDevices {
+    id name model status
+    battery { chargeLevel estimatedRuntime health }
+    power { loadPercentage inputVoltage outputVoltage nominalPower currentPower }
+  }
+}
+"""
+
+UPS_DEVICES_LEGACY = """
+query GetUpsDevicesLegacy {
   upsDevices {
     id name model status
     battery { chargeLevel estimatedRuntime health }

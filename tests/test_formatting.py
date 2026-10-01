@@ -78,9 +78,53 @@ def test_shape_metrics_shapes_cpu_memory_temperature():
     assert out["memory"]["swap_free"] == {"bytes": 4294967296, "human": "4.0 GiB"}
     assert out["memory"]["percent_total"] == 50.0
     assert out["temperature"]["summary"]["average"] == 42.5
-    assert out["temperature"]["sensors"] == [
-        {"name": "CPU", "current": {"value": 45.0, "unit": "C"}}
-    ]
+    sensor = out["temperature"]["sensors"][0]
+    assert sensor["name"] == "CPU"
+    assert sensor["current"] == {"value": 45.0, "unit": "C"}
+    # legacy payload: no threshold data -> no level, no hottest
+    assert sensor["warning"] is None and sensor["level"] is None
+    assert out["temperature"]["summary"]["hottest"] is None
+
+
+def test_shape_metrics_temperature_thresholds_and_hottest():
+    def sensor(name, value, warning, critical):
+        return {
+            "name": name,
+            "type": "CPU_PACKAGE",
+            "location": "cpu",
+            "current": {"value": value, "unit": "CELSIUS"},
+            "min": {"value": 30.0, "unit": "CELSIUS"},
+            "max": None,
+            "warning": warning,
+            "critical": critical,
+        }
+
+    raw = {
+        "metrics": {
+            "temperature": {
+                "summary": {
+                    "average": 70.0,
+                    "warningCount": 1,
+                    "criticalCount": 1,
+                    "hottest": {"name": "B", "current": {"value": 95.0, "unit": "CELSIUS"}},
+                },
+                "sensors": [
+                    sensor("A", 50.0, 80.0, 90.0),
+                    sensor("W", 80.0, 80.0, 90.0),  # exactly at warning
+                    sensor("B", 95.0, 80.0, 90.0),
+                    sensor("N", 50.0, None, None),
+                ],
+            }
+        }
+    }
+    t = shape_metrics(raw)["temperature"]
+    assert t["summary"]["hottest"] == {"name": "B", "value": 95.0, "unit": "CELSIUS"}
+    assert [s["level"] for s in t["sensors"]] == ["normal", "warning", "critical", None]
+    first = t["sensors"][0]
+    assert first["type"] == "CPU_PACKAGE"
+    assert first["min"] == {"value": 30.0, "unit": "CELSIUS"}
+    assert first["max"] is None
+    assert (first["warning"], first["critical"]) == (80.0, 90.0)
 
 
 def test_shape_metrics_partial_response_omits_missing_temperature():
@@ -206,6 +250,45 @@ def test_shape_array_status_converts_capacity_and_disks():
 def test_shape_array_status_handles_empty():
     assert shape_array_status({})["state"] is None
     assert shape_array_status({"array": {}})["data_disks"] == []
+    assert shape_array_status({"array": {}})["boot_devices"] is None
+
+
+def test_shape_array_status_boot_devices_and_extra_disk_fields():
+    raw = {
+        "array": {
+            "boot": {"name": "flash", "type": "FLASH"},
+            "bootDevices": [
+                {"name": "boot1", "type": "BOOT", "size": "1048576", "transport": "nvme"},
+                {"name": "boot2", "type": "BOOT", "isSpinning": False},
+            ],
+            "disks": [
+                {
+                    "name": "disk1",
+                    "type": "DATA",
+                    "isSpinning": True,
+                    "format": "MBR: 4KiB-aligned",
+                    "transport": "ata",
+                    "exportable": False,
+                }
+            ],
+        }
+    }
+    out = shape_array_status(raw)
+    assert [b["name"] for b in out["boot_devices"]] == ["boot1", "boot2"]
+    assert out["boot_devices"][0]["size"]["human"] == "1.0 GiB"
+    assert out["boot_devices"][0]["transport"] == "nvme"
+    assert out["boot"]["name"] == "flash"  # kept for compatibility
+    d = out["data_disks"][0]
+    assert d["spinning"] is True
+    assert d["format"] == "MBR: 4KiB-aligned"
+    assert d["transport"] == "ata"
+    assert d["exportable"] is False
+    # absent fields -> None, not KeyError
+    assert out["boot_devices"][1]["format"] is None
+
+
+def test_shape_array_status_empty_boot_devices_is_empty_list():
+    assert shape_array_status({"array": {"bootDevices": []}})["boot_devices"] == []
 
 
 def test_shape_physical_disk_size_is_bytes():

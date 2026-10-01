@@ -32,6 +32,7 @@ from ..formatting import (
 )
 from ._base import (
     READ_ONLY,
+    execute_with_fallback,
     feature_unsupported,
     gather_all,
     get_app_context,
@@ -93,7 +94,9 @@ def _ensure_read_only(query: str) -> None:
 
 
 async def fetch_ups(client: UnraidClient) -> list[dict[str, Any]]:
-    return shape_ups(await client.execute(queries.UPS_DEVICES))
+    return shape_ups(
+        await execute_with_fallback(client, queries.UPS_DEVICES, queries.UPS_DEVICES_LEGACY)
+    )
 
 
 async def fetch_network_interfaces(client: UnraidClient) -> list[dict[str, Any]]:
@@ -191,11 +194,13 @@ async def fetch_plugins(
 
 
 async def fetch_health(client: UnraidClient) -> dict[str, Any]:
+    # Health only needs the baseline selections. They are accepted by every
+    # API build, so a newer-field validation error can't mark a check failed.
     async def ups_check() -> tuple[list[dict[str, Any]], bool, bool]:
         # (devices, ok, eligible) — eligible: failed with a plain (non-permission,
         # supported) GraphQL error, so UPS may simply be unconfigured.
         try:
-            ups_data, ups_errors = await client.execute_with_errors(queries.UPS_DEVICES)
+            ups_data, ups_errors = await client.execute_with_errors(queries.UPS_DEVICES_LEGACY)
             return shape_ups(ups_data), not ups_errors, False
         except UnraidGraphQLError as exc:
             return [], False, not is_permission_error(exc) and not unsupported_field_error(exc)
@@ -209,7 +214,7 @@ async def fetch_health(client: UnraidClient) -> dict[str, Any]:
         (alerts, alerts_ok),
     ) = await gather_all(
         safe_query_with_status(
-            client, queries.ARRAY_STATUS, shape_array_status, {}, required_field="array"
+            client, queries.ARRAY_STATUS_LEGACY, shape_array_status, {}, required_field="array"
         ),
         ups_check(),
         safe_query_with_status(
