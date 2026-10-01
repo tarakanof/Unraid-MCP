@@ -84,22 +84,68 @@ def _is_read_only(tool) -> bool:
 
 _TOOLS = _discover()
 MUTATING_TOOLS = [t for t in _TOOLS if not _is_read_only(t)]
-# Read tools callable with no arguments (the rest need ids/paths). The stats
-# tool streams over a subscription (5s timeout against a plain HTTP mock) and
-# has its own error/empty coverage in test_tools_stats.py.
-_SKIP_READS = {"get_docker_container_stats"}
-READ_TOOLS_NO_ARGS = [
-    t
-    for t in _TOOLS
-    if _is_read_only(t) and not _dummy_args(t.input_schema) and t.name not in _SKIP_READS
-]
+# Hard-coded so a mutation mis-annotated READ_ONLY (and thus dropped from the
+# discovered set) fails the test instead of silently losing refusal coverage.
+EXPECTED_MUTATING = {
+    "start_array", "stop_array", "start_parity_check", "pause_parity_check",
+    "resume_parity_check", "cancel_parity_check", "start_docker_container",
+    "stop_docker_container", "restart_docker_container", "pause_docker_container",
+    "unpause_docker_container", "update_docker_container", "update_docker_containers",
+    "start_vm", "stop_vm", "pause_vm", "resume_vm", "reboot_vm", "force_stop_vm", "reset_vm",
+    "archive_notification", "archive_all_notifications", "mark_notification_unread",
+    "delete_notification", "archive_notifications", "unarchive_notifications",
+    "unarchive_all_notifications", "delete_archived_notifications", "create_notification",
+    "mount_array_disk", "unmount_array_disk", "clear_disk_statistics", "add_disk_to_array",
+    "remove_disk_from_array", "remove_docker_container", "update_all_docker_containers",
+}  # fmt: skip
+
+# Every read tool with valid args and its expected result on `data: {}`:
+#   "dict"  -> success, dict result       "list" -> success, `{"result": []}`
+#   other   -> intentional ToolError containing that friendly text
+# The stats tool streams over a subscription (5s timeout against a plain HTTP
+# mock) and has its own error/empty coverage in test_tools_stats.py.
+READ_CASES: dict[str, tuple[dict[str, Any], str]] = {
+    "get_system_info": ({}, "dict"),
+    "get_system_metrics": ({}, "dict"),
+    "get_services": ({}, "list"),
+    "get_system_time": ({}, "dict"),
+    "get_array_status": ({}, "dict"),
+    "get_parity_status": ({}, "dict"),
+    "get_parity_history": ({}, "list"),
+    "list_disks": ({}, "list"),
+    "get_disk": ({"disk_id": "x"}, "No disk matching 'x'"),
+    "list_docker_containers": ({}, "list"),
+    "get_docker_container": ({"identifier": "x"}, "No Docker container matching 'x'"),
+    "list_docker_networks": ({}, "list"),
+    "get_docker_container_logs": ({"container_id": "x"}, "dict"),
+    "check_docker_updates": ({}, "list"),
+    "list_vms": ({}, "list"),
+    "list_shares": ({}, "list"),
+    "get_notifications_overview": ({}, "dict"),
+    "list_notifications": ({}, "list"),
+    "get_ups_status": ({}, "list"),
+    "list_network_interfaces": ({}, "list"),
+    "whoami": ({}, "dict"),
+    "get_connect_status": ({}, "dict"),
+    "list_plugins": ({}, "list"),
+    "get_health_summary": ({}, "dict"),
+    "list_log_files": ({}, "list"),
+    "read_log_file": ({"path": "/var/log/syslog"}, "dict"),
+    "run_graphql_query": ({"query": "query { __typename }"}, "dict"),
+}
+_STATS_TOOL = "get_docker_container_stats"
 
 
 def test_discovery_is_not_vacuous():
-    # Every non-read-only tool must expose `confirm`, otherwise it can't be gated.
+    discovered = {t.name for t in MUTATING_TOOLS}
+    assert discovered == EXPECTED_MUTATING
     assert all("confirm" in t.input_schema["properties"] for t in MUTATING_TOOLS)
-    assert len(MUTATING_TOOLS) == len([t for t in _TOOLS if not _is_read_only(t)]) >= 36
-    assert len(READ_TOOLS_NO_ARGS) >= 15
+    read = {t.name for t in _TOOLS if _is_read_only(t)}
+    assert read == set(READ_CASES) | {_STATS_TOOL}
+    # Every required read arg is supplied by READ_CASES.
+    for t in _TOOLS:
+        if t.name in READ_CASES:
+            assert set(t.input_schema.get("required", [])) <= set(READ_CASES[t.name][0])
 
 
 @pytest.mark.parametrize("tool", MUTATING_TOOLS, ids=lambda t: t.name)
@@ -113,24 +159,31 @@ async def test_mutating_tool_refuses_without_confirm_no_http(settings_factory, t
         assert route.call_count == baseline, "refusal made an HTTP request"
 
 
-@pytest.mark.parametrize("tool", READ_TOOLS_NO_ARGS, ids=lambda t: t.name)
-async def test_read_tool_maps_graphql_error_to_tool_error(settings_factory, tool):
-    err = httpx.Response(200, json={"errors": [{"message": "Internal server error"}], "data": None})
+@pytest.mark.parametrize("name", sorted(READ_CASES))
+async def test_read_tool_maps_graphql_error_to_tool_error(settings_factory, name):
+    err = httpx.Response(200, json={"errors": [{"message": "boom-upstream"}], "data": None})
+    args, _ = READ_CASES[name]
     async with _session(settings_factory, err, **_ALL_FLAGS) as (session, _):
-        result = await session.call_tool(tool.name, {})
-        assert result.is_error is True
-        assert KEY not in result.content[0].text
+        result = await session.call_tool(name, args)
+    text = result.content[0].text
+    assert result.is_error is True
+    assert "boom-upstream" in text
+    assert "GraphQL error" in text
+    assert KEY not in text
 
 
-@pytest.mark.parametrize("tool", READ_TOOLS_NO_ARGS, ids=lambda t: t.name)
-async def test_read_tool_survives_empty_data(settings_factory, tool):
-    """`data: {}` (every field missing) must never surface an unhandled crash:
-    either a shaped result or a clean tool error, never a raw exception text."""
+@pytest.mark.parametrize("name", sorted(READ_CASES))
+async def test_read_tool_empty_data(settings_factory, name):
     empty = httpx.Response(200, json={"data": {}})
+    args, expected = READ_CASES[name]
     async with _session(settings_factory, empty, **_ALL_FLAGS) as (session, _):
-        result = await session.call_tool(tool.name, {})
-        if result.is_error:
-            text = result.content[0].text
-            assert "Traceback" not in text
-            assert "NoneType" not in text
-            assert "KeyError" not in text
+        result = await session.call_tool(name, args)
+    if expected in {"dict", "list"}:
+        assert result.is_error is False, result.content[0].text
+        sc = result.structured_content
+        assert isinstance(sc, dict)
+        if expected == "list":
+            assert sc == {"result": []}
+    else:
+        assert result.is_error is True
+        assert expected in result.content[0].text
