@@ -107,6 +107,7 @@ EXPECTED_MUTATING = {
 READ_CASES: dict[str, tuple[dict[str, Any], str]] = {
     "get_system_info": ({}, "dict"),
     "get_system_metrics": ({}, "dict"),
+    "get_hardware_inventory": ({}, "dict"),
     "get_services": ({}, "list"),
     "get_system_time": ({}, "dict"),
     "get_array_status": ({}, "dict"),
