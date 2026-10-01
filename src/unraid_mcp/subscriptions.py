@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import ssl
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any, Protocol
 
@@ -72,6 +72,7 @@ async def sample_subscription(
     deadline_ts: float | None = None,
     key: Callable[[dict[str, Any]], str | None],
     is_complete: Callable[[dict[str, dict[str, Any]], bool], bool],
+    on_new: Callable[[int], Awaitable[None]] | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
     """Drive one graphql-transport-ws sample and return ``(payloads, deadline_hit)``.
 
@@ -179,6 +180,13 @@ async def sample_subscription(
                         # Keep the first reading per key; a later repeat (the next
                         # cycle starting) signals completeness but must not overwrite it.
                         collected[k] = data
+                        if on_new is not None:
+                            # Must be non-blocking (the progress reporter only enqueues);
+                            # failures never break sampling.
+                            try:
+                                await on_new(len(collected))
+                            except Exception as exc:  # noqa: BLE001
+                                log.debug("on_new callback failed: %s", type(exc).__name__)
                     if is_complete(collected, was_new):
                         break
                 elif mtype == "error":

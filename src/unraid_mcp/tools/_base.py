@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+import contextlib
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.mcpserver import Context
@@ -12,10 +13,19 @@ from mcp.types import ToolAnnotations
 
 from ..client import UnraidClient
 from ..errors import UnraidAuthError, UnraidError, UnraidGraphQLError
-from ..logging import redact
+from ..logging import get_logger, redact
 
 if TYPE_CHECKING:  # avoid a runtime import cycle (server imports tools imports _base)
     from ..server import AppContext
+
+log = get_logger(__name__)
+
+# ``(message)`` — see :func:`progress_reporter`.
+ProgressCallback = Callable[[str], Awaitable[None]]
+
+# Upper bound on one progress notification send; a stalled client must not stall a tool.
+PROGRESS_TIMEOUT_S = 1.0
+PROGRESS_QUEUE_MAX = 16
 
 # Hints for MCP clients. Read tools touch an external system (open world) but
 # never change it; destructive mutations are flagged so hosts can warn/gate.
@@ -208,3 +218,89 @@ def require_confirm(confirm: bool, action: str) -> None:
             f"Refusing to {action} without explicit confirmation. "
             "Re-call this tool with confirm=true if you really intend to."
         )
+
+
+@contextlib.asynccontextmanager
+async def progress_reporter(ctx: Context) -> AsyncIterator[ProgressCallback]:
+    """Yield a best-effort, NON-BLOCKING progress callback bound to ``ctx`` for
+    the plain ``fetch_*``/``do_*`` functions (they stay MCP-free).
+
+    The callback only enqueues (bounded queue, oldest dropped when full) and never
+    awaits a send, so a stalled client cannot eat a tool's deadline. A background
+    worker performs the sends, each bounded by ``PROGRESS_TIMEOUT_S`` with errors
+    swallowed (debug-logged). The worker owns one monotonic counter so ``progress``
+    strictly increases (MCP spec); ``total`` is never sent (unknown) — counts and
+    elapsed go in the message. On exit, pending messages get one bounded flush
+    attempt and the worker is cancelled (no leaked tasks). A no-op on the wire
+    when the client sent no progress token."""
+    queue: asyncio.Queue[str] = asyncio.Queue(maxsize=PROGRESS_QUEUE_MAX)
+
+    async def _worker() -> None:
+        counter = 0
+        while True:
+            message = await queue.get()
+            counter += 1
+            try:
+                await asyncio.wait_for(
+                    ctx.report_progress(counter, None, message), timeout=PROGRESS_TIMEOUT_S
+                )
+            except TimeoutError:
+                log.debug("progress report timed out")
+            except Exception as exc:  # noqa: BLE001 - progress must never fail the tool
+                log.debug("progress report failed: %s", type(exc).__name__)
+            finally:
+                queue.task_done()
+
+    async def _report(message: str) -> None:
+        while True:
+            try:
+                queue.put_nowait(message)
+                return
+            except asyncio.QueueFull:
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    queue.get_nowait()
+                    queue.task_done()  # dropped oldest
+
+    task = asyncio.ensure_future(_worker())
+    try:
+        yield _report
+    finally:
+        try:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(queue.join(), timeout=PROGRESS_TIMEOUT_S)
+        finally:
+            # Unconditional, even if the flush was cancelled: never leak the worker.
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+async def with_heartbeat(
+    awaitable: Awaitable[Any],
+    progress: ProgressCallback | None,
+    *,
+    interval_s: float,
+    message: str = "Still working",
+) -> Any:
+    """Await ``awaitable``; if ``progress`` is given, emit a heartbeat every
+    ``interval_s`` seconds (progress = elapsed seconds, monotonically increasing)
+    while it runs. The heartbeat task is always cancelled; callback errors are
+    swallowed."""
+    if progress is None:
+        return await awaitable
+
+    async def _beat() -> None:
+        elapsed = 0.0
+        while True:
+            await asyncio.sleep(interval_s)
+            elapsed += interval_s
+            with contextlib.suppress(Exception):
+                await progress(f"{message} ({elapsed:.0f}s elapsed)")
+
+    task = asyncio.ensure_future(_beat())
+    try:
+        return await awaitable
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
