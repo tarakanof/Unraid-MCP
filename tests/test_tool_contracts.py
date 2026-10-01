@@ -96,7 +96,7 @@ EXPECTED_MUTATING = {
     "delete_notification", "archive_notifications", "unarchive_notifications",
     "unarchive_all_notifications", "delete_archived_notifications", "create_notification",
     "mount_array_disk", "unmount_array_disk", "clear_disk_statistics", "add_disk_to_array",
-    "remove_disk_from_array", "remove_docker_container", "update_all_docker_containers",
+    "remove_docker_container", "update_all_docker_containers",
 }  # fmt: skip
 
 # Every read tool with valid args and its expected result on `data: {}`:
@@ -165,6 +165,14 @@ async def test_read_tool_maps_graphql_error_to_tool_error(settings_factory, name
     args, _ = READ_CASES[name]
     async with _session(settings_factory, err, **_ALL_FLAGS) as (session, _):
         result = await session.call_tool(name, args)
+    if name == "get_health_summary":
+        # By design (#143) the health verdict degrades instead of erroring:
+        # a failed check must never read as "ok".
+        assert result.is_error is False
+        sc = result.structured_content
+        assert sc["overall"] != "ok"
+        assert set(sc["checks"].values()) == {"failed"}
+        return
     text = result.content[0].text
     assert result.is_error is True
     assert "boom-upstream" in text
