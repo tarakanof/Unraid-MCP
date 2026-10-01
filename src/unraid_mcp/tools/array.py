@@ -155,20 +155,6 @@ async def do_add_disk_to_array(
     return shape_mutation_result(await client.execute(queries.ADD_DISK_TO_ARRAY, {"input": input_}))
 
 
-async def do_remove_disk_from_array(
-    client: UnraidClient, disk_id: str, confirm: bool
-) -> dict[str, Any]:
-    require_confirm(
-        confirm,
-        f"remove disk '{disk_id}' from the array "
-        "(array must be stopped; data on it becomes inaccessible)",
-    )
-    _require_disk_id(disk_id)
-    return shape_mutation_result(
-        await client.execute(queries.REMOVE_DISK_FROM_ARRAY, {"input": {"id": disk_id}})
-    )
-
-
 def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def get_array_status(ctx: Context) -> dict[str, Any]:
@@ -275,12 +261,3 @@ def register_dangerous(mcp: MCPServer, settings: Settings) -> None:
         slot can overwrite it and, once started, will be formatted/rebuilt. Requires
         confirm=true."""
         return await guarded(ctx, do_add_disk_to_array, disk_id, slot, confirm)
-
-    @mcp.tool(annotations=DESTRUCTIVE)
-    async def remove_disk_from_array(
-        ctx: Context, disk_id: str, confirm: bool = False
-    ) -> dict[str, Any]:
-        """DANGEROUS. Remove a disk (id from list_disks) from the array configuration. The
-        array must be stopped first; data on the removed disk becomes inaccessible.
-        Requires confirm=true."""
-        return await guarded(ctx, do_remove_disk_from_array, disk_id, confirm)

@@ -478,12 +478,6 @@ mutation AddDiskToArray($input: ArrayDiskInput!) {
 }
 """
 
-REMOVE_DISK_FROM_ARRAY = """
-mutation RemoveDiskFromArray($input: ArrayDiskInput!) {
-  array { removeDiskFromArray(input: $input) { id state } }
-}
-"""
-
 REMOVE_DOCKER_CONTAINER = """
 mutation RemoveDockerContainer($id: PrefixedID!, $withImage: Boolean) {
   docker { removeContainer(id: $id, withImage: $withImage) }

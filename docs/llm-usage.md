@@ -129,7 +129,6 @@ opted in — do not try to work around it.
 | `unmount_array_disk` | `disk_id`, `confirm` | **Data becomes inaccessible** until remounted. |
 | `clear_disk_statistics` | `disk_id`, `confirm` | **Unrecoverable** — resets that disk's read/write/error counters. |
 | `add_disk_to_array` | `disk_id`, `slot=None`, `confirm` | **Array must be stopped.** Assigning a data slot can overwrite/format the disk once started. |
-| `remove_disk_from_array` | `disk_id`, `confirm` | **Array must be stopped.** Data on the removed disk becomes inaccessible. |
 | `remove_docker_container` | `container_id`, `with_image=False`, `confirm` | **Permanent.** `with_image=true` also deletes the underlying image. |
 | `update_all_docker_containers` | `confirm` | **Fleet-wide.** Pull + recreate **every** container with an available update — restarts many services at once. Prefer `update_docker_container(s)` for a specific target. |
 

@@ -42,7 +42,6 @@ nothing.
 - `unmount_array_disk` — take one array disk offline; its data becomes inaccessible until remounted.
 - `clear_disk_statistics` — reset a disk's read/write/error I/O counters (unrecoverable).
 - `add_disk_to_array` — assign a physical disk to the array (array must be stopped; can overwrite/format the disk once started).
-- `remove_disk_from_array` — drop a disk from the array config (array must be stopped; data becomes inaccessible).
 - `remove_docker_container` — permanently delete a container, and optionally (`with_image=true`) its underlying image.
 - `update_all_docker_containers` — pull + recreate **every** container with an available update; fleet-wide, restarts many services at once (each with brief downtime). Updating one specific container stays in the everyday mutate tier (`update_docker_container` / `update_docker_containers`).
 

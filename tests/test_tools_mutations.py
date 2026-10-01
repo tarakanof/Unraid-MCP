@@ -53,7 +53,6 @@ DANGEROUS_TOOLS = {
     "unmount_array_disk",
     "clear_disk_statistics",
     "add_disk_to_array",
-    "remove_disk_from_array",
     "remove_docker_container",
     "update_all_docker_containers",
 }
@@ -775,27 +774,6 @@ async def test_add_disk_to_array_rejects_negative_slot_pre_network(mocked_client
         assert route.call_count == 0
 
 
-async def test_remove_disk_from_array_requires_confirm_no_request(mocked_client):
-    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
-        with pytest.raises(ToolError):
-            await array.do_remove_disk_from_array(client, "1:sdb", confirm=False)
-        assert route.call_count == 0
-
-
-async def test_remove_disk_from_array_with_confirm_sends_input(mocked_client):
-    async with mocked_client(
-        httpx.Response(
-            200,
-            json={"data": {"array": {"removeDiskFromArray": {"id": "1:x", "state": "STOPPED"}}}},
-        )
-    ) as (client, route):
-        result = await array.do_remove_disk_from_array(client, "1:sdb", confirm=True)
-        body = json.loads(route.calls.last.request.content)
-        assert body["query"] == queries.REMOVE_DISK_FROM_ARRAY
-        assert body["variables"] == {"input": {"id": "1:sdb"}}
-        assert result == {"id": "1:x", "state": "STOPPED"}
-
-
 async def test_array_disk_op_propagates_graphql_error(mocked_client):
     # do_* propagates the domain error; _base.guarded (the @mcp.tool boundary)
     # is what maps it to a friendly, secret-free ToolError for the client.
@@ -803,7 +781,7 @@ async def test_array_disk_op_propagates_graphql_error(mocked_client):
         httpx.Response(200, json={"errors": [{"message": "array is started"}], "data": None})
     ) as (client, route):
         with pytest.raises(UnraidGraphQLError):
-            await array.do_remove_disk_from_array(client, "1:sdb", confirm=True)
+            await array.do_add_disk_to_array(client, "1:sdb", confirm=True)
 
 
 # ── Dangerous-tier: docker container removal ─────────────────────────────────

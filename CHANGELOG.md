@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+
+- **BREAKING: `remove_disk_from_array` tool removed.** Upstream unraid/api
+  retired the `removeDiskFromArray` mutation (PR #2068, v4.37.4) because direct
+  disk removal is unsafe; removal now goes only through Core's storage workflow
+  (evacuation, parity-preserving shrink, checkpoints). Use the Unraid webGUI
+  storage workflow instead (#99).
+
 ## 0.7.0 - 2026-08-06
 
 MCP spec 2026-07-28 adoption (epic #79): SDK v2, stateless HTTP, cache hints.

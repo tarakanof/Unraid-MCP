@@ -44,7 +44,7 @@ WebGUI's notification bell, so an agent that spots a problem can leave a note wh
 you'll actually see it.
 
 A third **dangerous** tier (`UNRAID_MCP_ALLOW_DANGEROUS=true`) unlocks high-blast-radius
-operations — array topology (add/remove/mount/unmount a disk, clear disk statistics),
+operations — array topology (add/mount/unmount a disk, clear disk statistics),
 permanently removing a Docker container (optionally its image), and updating *every*
 container with an available image update in one shot. It only takes effect when
 `UNRAID_MCP_ALLOW_MUTATIONS` is *also* true; enabling it alone unlocks nothing. These
