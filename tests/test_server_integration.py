@@ -231,7 +231,7 @@ async def test_read_log_file_schema_exposes_bounds_and_rejects_no_http(settings_
             tools = {t.name: t for t in (await session.list_tools()).tools}
             props = tools["read_log_file"].input_schema["properties"]
             assert (props["lines"]["minimum"], props["lines"]["maximum"]) == (1, 500)
-            assert props["start_line"]["anyOf"][0]["minimum"] == 0
+            assert props["start_line"]["anyOf"][0]["minimum"] == 1
 
             before = route.call_count  # lifespan version probe
             bad = await session.call_tool("read_log_file", {"path": "/var/log/syslog", "lines": 0})

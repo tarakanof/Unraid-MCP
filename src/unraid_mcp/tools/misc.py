@@ -136,9 +136,9 @@ async def fetch_log_file(
         )
     if lines < 1:
         raise ToolError(f"lines={lines} must be at least 1.")
-    # startLine is 0-based upstream (an omitted start_line reports startLine 0).
-    if start_line is not None and start_line < 0:
-        raise ToolError(f"start_line={start_line} must be >= 0 (0-based line offset).")
+    # startLine is a 1-based line number upstream.
+    if start_line is not None and start_line < 1:
+        raise ToolError(f"start_line={start_line} must be >= 1 (1-based line number).")
     _validate_log_path(path)
 
     variables: dict[str, Any] = {"path": path, "lines": lines}
@@ -301,18 +301,20 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         ctx: Context,
         path: str,
         lines: Annotated[int, Field(ge=1, le=MAX_LOG_LINES)] = 100,
-        start_line: Annotated[int | None, Field(ge=0)] = None,
+        start_line: Annotated[int | None, Field(ge=1)] = None,
     ) -> dict[str, Any]:
         """Read a slice of a system log file for triage (e.g. "why did my server do
         X last night"). `path` must be one listed by list_log_files (must start with
         `/var/log`, no `..`) — call that tool first if you don't have a path. `lines`
-        is 1..500 per call; `start_line` is a 0-based offset.
+        is 1..500 per call; `start_line` is a 1-based line
+        number. Only the file's basename is used: upstream resolves it inside
+        `/var/log`, so nested paths read `/var/log/<basename>`.
 
         The response includes `total_lines` (the file's total line count) and
         `start_line` (where this slice began) so you can page through a large file.
         To page forward, call again with `start_line` advanced by `lines`. To read
         the tail of the file, first call with a small `lines` to learn `total_lines`,
-        then call again with `start_line = total_lines - lines`.
+        then call again with `start_line = total_lines - lines + 1`.
         """
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, fetch_log_file, path, lines, start_line, api_version=api_version)

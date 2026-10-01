@@ -132,8 +132,9 @@ siblings like `/var/logevil` are refused) — the prefix the Unraid API serves s
 logs from — and rejects anything else with a `ToolError` before making any network
 call, pointing the caller back to `list_log_files` for a valid path. This is defense-in-depth on top of server-side validation, not a substitute
 for it. `lines` is bounded 1..500 per call to bound response size, `start_line` is a
-0-based offset >= 0 (both bounds appear in the tool's input schema); page through
-larger files with `start_line`.
+1-based line number >= 1 (both bounds appear in the tool's input schema); page through
+larger files with `start_line`. Upstream reads only the basename of the path inside
+`/var/log`, so a nested path resolves to `/var/log/<basename>`.
 
 ## No arbitrary execution
 
