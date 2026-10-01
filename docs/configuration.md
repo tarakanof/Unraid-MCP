@@ -8,7 +8,7 @@ Everything is configured through environment variables (or a `.env` file — cop
 | Variable | Purpose |
 |----------|---------|
 | `UNRAID_API_URL` | GraphQL endpoint, e.g. `https://yourhash.myunraid.net/graphql`. If you leave off the path, `/graphql` is appended. |
-| `UNRAID_API_KEY` | API key, sent as the `x-api-key` header. A `guest`/read-scoped key is enough for the read-only tools. |
+| `UNRAID_API_KEY` | API key, sent as the `x-api-key` header. A `guest`/read-scoped key is enough for the read-only tools. Must be at least 32 characters (real keys are 64-char hex), with no surrounding whitespace, and not a placeholder such as `changeme` / `your-key`; startup fails otherwise. |
 
 Create a key in the Unraid WebGUI (**Settings → Management Access → API Keys**) or
 on the server:

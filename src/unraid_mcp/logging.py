@@ -18,14 +18,39 @@ from collections.abc import Iterable
 from typing import Any
 
 _REDACTION = "***REDACTED***"
+# Secrets shorter than this are never scrubbed: a 1-3 character "secret" would
+# match inside unrelated text and garble legitimate output. Config validation
+# rejects such values up front; this is the defence-in-depth floor.
+MIN_REDACTABLE_LENGTH = 8
+
+_log = logging.getLogger(__name__)
+_warned_short_secret = False
+
+
+def _redactable(secrets: Iterable[str | None], *, warn: bool = True) -> list[str]:
+    """Drop empty and sub-floor secrets, warning once (never echoing them)."""
+    global _warned_short_secret
+    present = [s for s in secrets if s]
+    kept = [s for s in present if len(s) >= MIN_REDACTABLE_LENGTH]
+    if warn and len(kept) != len(present) and not _warned_short_secret:
+        # Flag first: the warning itself passes through the redacting formatter.
+        _warned_short_secret = True
+        _log.warning(
+            "A configured secret is shorter than %d characters and will NOT be "
+            "redacted from output; use a longer, realistic key/token.",
+            MIN_REDACTABLE_LENGTH,
+        )
+    return kept
 
 
 def redact(value: Any, secrets: Iterable[str | None]) -> Any:
     """Scrub strings, containers and object representations using configured secrets.
 
-    Empty secrets are ignored. Clean strings and containers pass through unchanged.
+    Empty secrets and secrets shorter than ``MIN_REDACTABLE_LENGTH`` are ignored
+    (the latter with a one-time warning). Clean strings and containers pass
+    through unchanged.
     """
-    configured = sorted({secret for secret in secrets if secret}, key=len, reverse=True)
+    configured = sorted(set(_redactable(secrets)), key=len, reverse=True)
     if not configured:
         return value
 
@@ -76,7 +101,7 @@ class RedactionFilter(logging.Filter):
             secrets = [secrets] if secrets else []
         # Only redact non-trivial secrets; empty/very short values would match
         # everywhere and are not real keys.
-        self._secrets = [s for s in secrets if s and len(s) >= 6]
+        self._secrets = _redactable(secrets, warn=False)
 
     def filter(self, record: logging.LogRecord) -> bool:
         if self._secrets:
@@ -103,7 +128,7 @@ class RedactingFormatter(logging.Formatter):
 
     def __init__(self, fmt: str, secrets: list[str]) -> None:
         super().__init__(fmt)
-        self._secrets = [s for s in secrets if s and len(s) >= 6]
+        self._secrets = _redactable(secrets, warn=False)
 
     def format(self, record: logging.LogRecord) -> str:
         formatted = super().format(record)
@@ -149,6 +174,8 @@ def configure_logging(
     )
     handler.addFilter(RedactionFilter(all_secrets))
     root.addHandler(handler)
+    # Startup notice (once) if a configured secret is below the redaction floor.
+    _redactable(all_secrets)
 
 
 def get_logger(name: str) -> logging.Logger:

@@ -18,6 +18,20 @@ from .errors import UnraidConfigError
 
 Transport = Literal["stdio", "streamable-http"]
 MIN_BEARER_TOKEN_LENGTH = 32
+# Real Unraid API keys are long (64-char) hex strings.
+MIN_API_KEY_LENGTH = 32
+
+_INSECURE_API_KEYS = {
+    "change-me",
+    "changeme",
+    "replace-me",
+    "key",
+    "api-key",
+    "apikey",
+    "your-key",
+    "your-api-key",
+    "your-unraid-api-key",
+}
 
 _INSECURE_BEARER_TOKENS = {
     "change-me",
@@ -106,6 +120,21 @@ class Settings(BindSettings):
         # Append the GraphQL path if the user gave only a base URL.
         if parsed.path in ("", "/"):
             value = value.rstrip("/") + "/graphql"
+        return value
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def _validate_api_key(cls, value: object) -> object:
+        key = value.get_secret_value() if isinstance(value, SecretStr) else str(value)
+        if key.strip() != key:
+            raise ValueError("UNRAID_API_KEY must not have leading/trailing whitespace")
+        if key.lower() in _INSECURE_API_KEYS:
+            raise ValueError("UNRAID_API_KEY must be your real Unraid API key, not a placeholder")
+        if len(key) < MIN_API_KEY_LENGTH:
+            raise ValueError(
+                f"UNRAID_API_KEY must be at least {MIN_API_KEY_LENGTH} characters "
+                "(real Unraid API keys are long hex strings)"
+            )
         return value
 
     @field_validator("bearer_token", mode="before")

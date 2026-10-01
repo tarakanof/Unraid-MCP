@@ -28,7 +28,7 @@ from unraid_mcp.subscriptions import WSClosed
 from unraid_mcp.tools import docker
 from unraid_mcp.tools._base import feature_unsupported  # noqa: F401  (documents the path)
 
-KEY = "supersecretkey123"
+KEY = "a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
 _BLOCK = object()
 
 
