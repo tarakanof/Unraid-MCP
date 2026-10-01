@@ -21,7 +21,9 @@ from ..formatting import (
 from ..types import Disk
 from ._base import (
     DESTRUCTIVE,
+    DESTRUCTIVE_IDEMPOTENT,
     MUTATING,
+    MUTATING_IDEMPOTENT,
     READ_ONLY,
     Confirmation,
     execute_with_fallback,
@@ -240,29 +242,29 @@ def _confirm_add_disk_to_array(
 
 
 def register(mcp: MCPServer, settings: Settings) -> None:
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Get Array Status", annotations=READ_ONLY)
     async def get_array_status(ctx: Context) -> dict[str, Any]:
         """Get the Unraid array: state, total/used/free capacity, every data/parity/cache
         disk with health, temperature and I/O counters, and live parity-check status."""
         return await guarded(ctx, fetch_array_status)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Get Parity Status", annotations=READ_ONLY)
     async def get_parity_status(ctx: Context) -> dict[str, Any]:
         """Get the current parity-check status (progress, speed, errors, running/paused)."""
         return await guarded(ctx, fetch_parity_status)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Get Parity History", annotations=READ_ONLY)
     async def get_parity_history(ctx: Context) -> list[dict[str, Any]]:
         """Get the history of past parity checks (date, duration, speed, errors, status)."""
         return await guarded(ctx, fetch_parity_history)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="List Disks", annotations=READ_ONLY)
     async def list_disks(ctx: Context) -> list[Disk | None]:
         """List physical disks (id, name, device, type, SMART status, temp_c, spinning, size).
         Use a disk id with get_disk for full details."""
         return await guarded(ctx, fetch_disks)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Get Disk", annotations=READ_ONLY)
     async def get_disk(ctx: Context, disk_id: str) -> Disk:
         """Get a physical disk by its id from list_disks (adds firmware and partitions).
         Errors if the id is unknown."""
@@ -270,12 +272,12 @@ def register(mcp: MCPServer, settings: Settings) -> None:
 
 
 def register_mutations(mcp: MCPServer, settings: Settings) -> None:
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Start Array", annotations=MUTATING_IDEMPOTENT)
     async def start_array(ctx: Context, confirm: bool = False) -> dict[str, Any]:
         """Start the Unraid array (brings storage online). Requires confirm=true."""
         return await guarded(ctx, do_start_array, confirm)
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Stop Array", annotations=DESTRUCTIVE_IDEMPOTENT)
     async def stop_array(
         ctx: Context,
         confirm: bool = False,
@@ -286,7 +288,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
         services. Requires confirm=true."""
         return await guarded(ctx, do_stop_array, confirm, confirmation=confirmation)
 
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Start Parity Check", annotations=MUTATING)
     async def start_parity_check(
         ctx: Context, correct: bool = False, confirm: bool = False
     ) -> dict[str, Any]:
@@ -295,17 +297,17 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
         Requires confirm=true."""
         return await guarded(ctx, do_start_parity, correct, confirm)
 
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Pause Parity Check", annotations=MUTATING_IDEMPOTENT)
     async def pause_parity_check(ctx: Context, confirm: bool = False) -> dict[str, Any]:
         """Pause the running parity check. Requires confirm=true."""
         return await guarded(ctx, do_pause_parity, confirm)
 
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Resume Parity Check", annotations=MUTATING_IDEMPOTENT)
     async def resume_parity_check(ctx: Context, confirm: bool = False) -> dict[str, Any]:
         """Resume a paused parity check. Requires confirm=true."""
         return await guarded(ctx, do_resume_parity, confirm)
 
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Cancel Parity Check", annotations=MUTATING_IDEMPOTENT)
     async def cancel_parity_check(ctx: Context, confirm: bool = False) -> dict[str, Any]:
         """Cancel the running parity check. Requires confirm=true."""
         return await guarded(ctx, do_cancel_parity, confirm)
@@ -315,7 +317,7 @@ def register_dangerous(mcp: MCPServer, settings: Settings) -> None:
     """Dangerous-tier array-topology tools. Registered only when BOTH
     UNRAID_MCP_ALLOW_MUTATIONS and UNRAID_MCP_ALLOW_DANGEROUS are true."""
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Mount Array Disk", annotations=DESTRUCTIVE_IDEMPOTENT)
     async def mount_array_disk(
         ctx: Context,
         disk_id: str,
@@ -329,7 +331,7 @@ def register_dangerous(mcp: MCPServer, settings: Settings) -> None:
         online. Operates on live storage — get the disk id right. Requires confirm=true."""
         return await guarded(ctx, do_mount_array_disk, disk_id, confirm, confirmation=confirmation)
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Unmount Array Disk", annotations=DESTRUCTIVE_IDEMPOTENT)
     async def unmount_array_disk(
         ctx: Context,
         disk_id: str,
@@ -346,7 +348,7 @@ def register_dangerous(mcp: MCPServer, settings: Settings) -> None:
             ctx, do_unmount_array_disk, disk_id, confirm, confirmation=confirmation
         )
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Clear Disk Statistics", annotations=DESTRUCTIVE)
     async def clear_disk_statistics(
         ctx: Context,
         disk_id: str,
@@ -363,7 +365,7 @@ def register_dangerous(mcp: MCPServer, settings: Settings) -> None:
             ctx, do_clear_disk_statistics, disk_id, confirm, confirmation=confirmation
         )
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Add Disk To Array", annotations=DESTRUCTIVE)
     async def add_disk_to_array(
         ctx: Context,
         disk_id: str,

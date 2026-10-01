@@ -19,7 +19,9 @@ from ..formatting import (
 )
 from ._base import (
     DESTRUCTIVE,
+    DESTRUCTIVE_IDEMPOTENT,
     MUTATING,
+    MUTATING_IDEMPOTENT,
     READ_ONLY,
     Confirmation,
     feature_unsupported,
@@ -219,12 +221,12 @@ def _confirm_delete_archived_notifications(
 
 
 def register(mcp: MCPServer, settings: Settings) -> None:
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="Get Notifications Overview", annotations=READ_ONLY)
     async def get_notifications_overview(ctx: Context) -> dict[str, Any]:
         """Get unread and archived notification counts by severity (info/warning/alert/total)."""
         return await guarded(ctx, fetch_overview)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="List Notifications", annotations=READ_ONLY)
     async def list_notifications(
         ctx: Context,
         notification_type: str = "UNREAD",
@@ -236,7 +238,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         filters to INFO/WARNING/ALERT. Supports limit/offset paging."""
         return await guarded(ctx, fetch_notifications, notification_type, importance, limit, offset)
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="List Warnings And Alerts", annotations=READ_ONLY)
     async def list_warnings_and_alerts(ctx: Context, limit: int = 20) -> list[dict[str, Any]]:
         """List current unread WARNING/ALERT notifications (deduplicated, latest first) —
         the cheapest "is anything wrong?" check. Same item shape as list_notifications;
@@ -246,14 +248,14 @@ def register(mcp: MCPServer, settings: Settings) -> None:
 
 
 def register_mutations(mcp: MCPServer, settings: Settings) -> None:
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Archive Notification", annotations=MUTATING_IDEMPOTENT)
     async def archive_notification(
         ctx: Context, notification_id: str, confirm: bool = False
     ) -> dict[str, Any]:
         """Archive (clear) a single unread notification by id. Requires confirm=true."""
         return await guarded(ctx, do_archive_notification, notification_id, confirm)
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Archive All Notifications", annotations=DESTRUCTIVE)
     async def archive_all_notifications(
         ctx: Context,
         importance: str | None = None,
@@ -267,14 +269,14 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
         requires confirm=true."""
         return await guarded(ctx, do_archive_all, importance, confirm, confirmation=confirmation)
 
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Mark Notification Unread", annotations=MUTATING_IDEMPOTENT)
     async def mark_notification_unread(
         ctx: Context, notification_id: str, confirm: bool = False
     ) -> dict[str, Any]:
         """Mark an archived notification unread again by id. Requires confirm=true."""
         return await guarded(ctx, do_unread_notification, notification_id, confirm)
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Delete Notification", annotations=DESTRUCTIVE_IDEMPOTENT)
     async def delete_notification(
         ctx: Context,
         notification_id: str,
@@ -297,7 +299,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
             confirmation=confirmation,
         )
 
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Archive Notifications", annotations=MUTATING_IDEMPOTENT)
     async def archive_notifications(
         ctx: Context, ids: list[str], confirm: bool = False
     ) -> dict[str, Any]:
@@ -305,7 +307,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
         non-empty ids list and confirm=true."""
         return await guarded(ctx, do_archive_notifications, ids, confirm)
 
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Unarchive Notifications", annotations=MUTATING_IDEMPOTENT)
     async def unarchive_notifications(
         ctx: Context, ids: list[str], confirm: bool = False
     ) -> dict[str, Any]:
@@ -313,7 +315,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
         non-empty ids list and confirm=true."""
         return await guarded(ctx, do_unarchive_notifications, ids, confirm)
 
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Unarchive All Notifications", annotations=MUTATING)
     async def unarchive_all_notifications(
         ctx: Context, importance: str | None = None, confirm: bool = False
     ) -> dict[str, Any]:
@@ -321,7 +323,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
         INFO/WARNING/ALERT). Bulk action — requires confirm=true."""
         return await guarded(ctx, do_unarchive_all, importance, confirm)
 
-    @mcp.tool(annotations=DESTRUCTIVE)
+    @mcp.tool(title="Delete Archived Notifications", annotations=DESTRUCTIVE)
     async def delete_archived_notifications(
         ctx: Context,
         confirm: bool = False,
@@ -336,7 +338,7 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
             ctx, do_delete_archived_notifications, confirm, confirmation=confirmation
         )
 
-    @mcp.tool(annotations=MUTATING)
+    @mcp.tool(title="Create Notification", annotations=MUTATING)
     async def create_notification(
         ctx: Context,
         title: str,

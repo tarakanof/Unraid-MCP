@@ -12,6 +12,7 @@ import httpx
 from mcp.server import CacheHint
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import Icon
 from mcp_types.methods import CacheableMethod
 
 from . import queries
@@ -35,6 +36,8 @@ INSTRUCTIONS = (
     "the server; destructive ones require confirm=true. Sizes are reported in bytes with "
     "a human-readable form. Start with get_health_summary for a quick triage."
 )
+
+_ICON_BASE = "https://raw.githubusercontent.com/tarakanof/Unraid-MCP/main/docs/icons"
 
 # Cache hints (2026-07-28, SEP-2549): ``MCPServer(cache_hints=...)`` fills
 # ttlMs/cacheScope on any cacheable-method result the handler leaves unset.
@@ -249,6 +252,12 @@ def build_server(settings: Settings) -> MCPServer:
 
     mcp = MCPServer(
         "unraid",
+        title="Unraid",
+        website_url="https://github.com/tarakanof/Unraid-MCP",
+        icons=[
+            Icon(src=f"{_ICON_BASE}/unraid-mcp-256.png", mime_type="image/png", sizes=["256x256"]),
+            Icon(src=f"{_ICON_BASE}/unraid-mcp.svg", mime_type="image/svg+xml", sizes=["any"]),
+        ],
         instructions=INSTRUCTIONS,
         version=_server_version(),
         lifespan=lifespan,

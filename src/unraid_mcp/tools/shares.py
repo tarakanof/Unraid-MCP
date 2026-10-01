@@ -18,7 +18,7 @@ async def fetch_shares(client: UnraidClient) -> list[dict[str, Any]]:
 
 
 def register(mcp: MCPServer, settings: Settings) -> None:
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(title="List Shares", annotations=READ_ONLY)
     async def list_shares(ctx: Context) -> list[dict[str, Any]]:
         """List Unraid user shares with free/used/total sizes, comment, allocator and cache mode."""
         return await guarded(ctx, fetch_shares)
