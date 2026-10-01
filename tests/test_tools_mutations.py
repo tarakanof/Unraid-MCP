@@ -128,9 +128,10 @@ async def test_parity_check_requires_confirm(mocked_client):
 
 async def test_parity_check_with_confirm_sends(mocked_client):
     async with mocked_client(
-        httpx.Response(200, json={"data": {"parityCheck": {"start": True}}})
+        httpx.Response(200, json={"data": {"parityCheck": {"start": []}}})
     ) as (client, route):
-        await array.do_start_parity(client, correct=False, confirm=True)
+        out = await array.do_start_parity(client, correct=False, confirm=True)
+        assert out == {"ok": True, "history_count": 0}
         assert route.call_count == 1
         assert json.loads(route.calls.last.request.content)["variables"] == {"correct": False}
 
@@ -951,3 +952,14 @@ async def test_all_mutations_refuse_without_confirm_before_network(mocked_client
         with pytest.raises(ToolError, match="confirm"):
             await fn(client, confirm=False, **kwargs)
         assert route.call_count == 0
+
+
+async def test_parity_tools_accept_list_result(mocked_client):
+    for fn, field in [
+        (array.do_pause_parity, "pause"),
+        (array.do_resume_parity, "resume"),
+        (array.do_cancel_parity, "cancel"),
+    ]:
+        resp = httpx.Response(200, json={"data": {"parityCheck": {field: [{"date": "d"}]}}})
+        async with mocked_client(resp) as (client, _route):
+            assert await fn(client, confirm=True) == {"ok": True, "history_count": 1}

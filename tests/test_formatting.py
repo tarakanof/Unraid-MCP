@@ -14,6 +14,7 @@ from unraid_mcp.formatting import (
     shape_container_stats,
     shape_flash,
     shape_metrics,
+    shape_mutation_json_result,
     shape_mutation_result,
     shape_mutation_result_list,
     shape_physical_disk,
@@ -234,8 +235,6 @@ def test_shape_physical_disk_size_is_bytes():
         # VM and parity mutations resolve to a bare Boolean payload.
         ({"vm": {"start": True}}, ("vm", "start"), {"ok": True}),
         ({"vm": {"forceStop": False}}, ("vm", "forceStop"), {"ok": False}),
-        ({"parityCheck": {"start": True}}, ("parityCheck", "start"), {"ok": True}),
-        ({"parityCheck": {"pause": True}}, ("parityCheck", "pause"), {"ok": True}),
     ],
 )
 def test_shape_mutation_result_flattens_to_ok(raw, path, expected):
@@ -426,3 +425,23 @@ def test_mutation_list_shaper_preserves_explicit_list(payload):
         )
         == payload
     )
+
+
+@pytest.mark.parametrize(
+    "payload,expected",
+    [
+        ([], {"ok": True, "history_count": 0}),
+        ([{"date": "2026-01-01"}], {"ok": True, "history_count": 1}),
+        ({}, {"ok": True}),
+        (True, {"ok": True}),
+    ],
+)
+def test_shape_mutation_json_result_accepts_any_non_null(payload, expected):
+    out = shape_mutation_json_result({"parityCheck": {"pause": payload}}, ("parityCheck", "pause"))
+    assert out == expected
+
+
+@pytest.mark.parametrize("raw", [None, {}, {"parityCheck": None}, {"parityCheck": {"pause": None}}])
+def test_shape_mutation_json_result_rejects_null(raw):
+    with pytest.raises(UnraidServerError):
+        shape_mutation_json_result(raw, ("parityCheck", "pause"))

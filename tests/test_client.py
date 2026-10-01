@@ -213,3 +213,13 @@ async def test_non_dict_graphql_errors_are_coerced_and_redacted():
             {"message": "None"},
         ]
         assert KEY not in str(exc.value)
+
+
+async def test_null_errors_treated_as_empty():
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(200, json={"data": {"a": 1}, "errors": None})
+        )
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            assert await client.execute("query { a }") == {"a": 1}

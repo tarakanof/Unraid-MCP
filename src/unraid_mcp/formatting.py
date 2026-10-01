@@ -514,7 +514,9 @@ def _normalize_capacity(obj: dict[str, Any]) -> dict[str, Any]:
     return obj
 
 
-def _mutation_payload(data: dict | None, result_path: tuple[str, ...]) -> Any:
+def _mutation_payload(
+    data: dict | None, result_path: tuple[str, ...], *, allow_empty: bool = False
+) -> Any:
     """Require the operation's result, without echoing upstream response values."""
     payload: Any = data
     for field in result_path:
@@ -524,7 +526,7 @@ def _mutation_payload(data: dict | None, result_path: tuple[str, ...]) -> Any:
                 "Check the Unraid server logs and current state before retrying."
             )
         payload = payload[field]
-    if payload is None or payload == {}:
+    if not allow_empty and payload == {}:
         raise UnraidServerError(
             "Mutation returned an empty result. "
             "Check the Unraid server logs and current state before retrying."
@@ -543,6 +545,20 @@ def shape_mutation_result(data: dict | None, result_path: tuple[str, ...]) -> di
         "Mutation returned an invalid result: expected an object or Boolean. "
         "Check the Unraid server logs and current state before retrying."
     )
+
+
+def shape_mutation_json_result(data: dict | None, result_path: tuple[str, ...]) -> dict[str, Any]:
+    """Shape a ``JSON!`` scalar result (e.g. ``parityCheck.*``).
+
+    The scalar's content is opaque (upstream returns the parity history list, which
+    may be ``[]``), so any non-null value, including ``[]`` and ``{}``, means the
+    action succeeded. A null/missing field is still an error.
+    """
+    payload = _mutation_payload(data, result_path, allow_empty=True)
+    out: dict[str, Any] = {"ok": True}
+    if isinstance(payload, list):
+        out["history_count"] = len(payload)
+    return out
 
 
 def shape_mutation_result_list(

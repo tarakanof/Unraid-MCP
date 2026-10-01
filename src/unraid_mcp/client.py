@@ -114,7 +114,9 @@ class UnraidClient:
             raise UnraidServerError(
                 f"Invalid GraphQL envelope: data must be an object or null. {envelope_hint}"
             )
-        raw_errors = payload.get("errors", [])
+        raw_errors = payload.get("errors")
+        if raw_errors is None:
+            raw_errors = []
         if not isinstance(raw_errors, list):
             raise UnraidServerError(
                 f"Invalid GraphQL envelope: errors must be a list. {envelope_hint}"

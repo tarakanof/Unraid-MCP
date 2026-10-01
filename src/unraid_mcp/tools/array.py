@@ -13,6 +13,7 @@ from ..config import Settings
 from ..errors import UnraidGraphQLError
 from ..formatting import (
     shape_array_status,
+    shape_mutation_json_result,
     shape_mutation_result,
     shape_physical_disk,
     shape_physical_disks,
@@ -80,28 +81,28 @@ async def do_start_parity(client: UnraidClient, correct: bool, confirm: bool) ->
         else "start a parity check"
     )
     require_confirm(confirm, label)
-    return shape_mutation_result(
+    return shape_mutation_json_result(
         await client.execute(queries.START_PARITY, {"correct": correct}), ("parityCheck", "start")
     )
 
 
 async def do_pause_parity(client: UnraidClient, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, "pause the parity check")
-    return shape_mutation_result(
+    return shape_mutation_json_result(
         await client.execute(queries.PAUSE_PARITY), ("parityCheck", "pause")
     )
 
 
 async def do_resume_parity(client: UnraidClient, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, "resume the parity check")
-    return shape_mutation_result(
+    return shape_mutation_json_result(
         await client.execute(queries.RESUME_PARITY), ("parityCheck", "resume")
     )
 
 
 async def do_cancel_parity(client: UnraidClient, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, "cancel the parity check")
-    return shape_mutation_result(
+    return shape_mutation_json_result(
         await client.execute(queries.CANCEL_PARITY), ("parityCheck", "cancel")
     )
 
