@@ -31,20 +31,27 @@ unrecognized). No session affinity is required either way — see
 
 ## What you get
 
-Read-only tools for the stuff you'd actually want to check: system info, live CPU/
-memory/temperature/network-throughput metrics, array and disk health, parity, Docker containers/networks,
-live per-container CPU%/memory stats, VMs, shares, notifications, UPS, network
-interfaces, and a one-shot `get_health_summary` for quick triage.
+Read-only tools for the stuff you'd actually want to check: system info, hardware
+inventory (GPU/PCI/USB/NICs), live CPU/memory/network-throughput metrics, temperatures
+with warning/critical thresholds, array and disk health, parity, Docker
+containers/networks (port conflicts, live per-container CPU%/memory stats, opt-in
+container sizes), VMs, shares, notifications and current warnings/alerts, UPS power,
+network interfaces, and a one-shot `get_health_summary` for quick triage. Its verdict
+is `ok`, `attention`, `critical` or `degraded`, with `reasons` and per-sub-check `checks`.
 
-Opt-in mutating tools (start/stop the array, control Docker/VMs, run parity checks,
-manage notifications) only show up when you set `UNRAID_MCP_ALLOW_MUTATIONS=true`, and
-every one of them needs `confirm=true`. That includes `create_notification` — an
+Opt-in mutating tools (start/stop the array, control Docker/VMs, refresh Docker image
+digests, set container autostart, run parity checks, manage notifications) only show up
+when you set `UNRAID_MCP_ALLOW_MUTATIONS=true`, and every one of them needs
+`confirm=true`. That includes `create_notification` — an
 agent→operator channel that posts a persistent message straight into the Unraid
 WebGUI's notification bell, so an agent that spots a problem can leave a note where
-you'll actually see it.
+you'll actually see it. Destructive tools also ask the human to approve the exact
+consequence through MCP elicitation when the client supports it (2026-07-28 clients, or legacy
+clients over stdio; legacy clients over HTTP stay confirm-only); `confirm=true` is
+still required.
 
 A third **dangerous** tier (`UNRAID_MCP_ALLOW_DANGEROUS=true`) unlocks high-blast-radius
-operations — array topology (add/mount/unmount a disk, clear disk statistics),
+operations — adding, mounting or unmounting an array disk, clearing disk statistics,
 permanently removing a Docker container (optionally its image), and updating *every*
 container with an available image update in one shot. It only takes effect when
 `UNRAID_MCP_ALLOW_MUTATIONS` is *also* true; enabling it alone unlocks nothing. These
@@ -132,6 +139,17 @@ Two variables are required:
 
 Copy `.env.example` to `.env` for a starting point. Everything else — transports, TLS,
 the safety switches — is in [docs/configuration.md](docs/configuration.md).
+
+## Upgrading
+
+From 0.7 to 0.8 (full list in [CHANGELOG.md](CHANGELOG.md)):
+
+- `UNRAID_MCP_BEARER_TOKEN` is now required on non-localhost binds, including the Docker
+  image. The server exits at startup without it instead of logging a generated one.
+  Generate one with `openssl rand -hex 32`.
+- `remove_disk_from_array` was removed (upstream retired the mutation). Use the Unraid
+  webGUI storage workflow.
+- `start_line` in `read_log_file` is 1-based.
 
 ## Connect a client
 
