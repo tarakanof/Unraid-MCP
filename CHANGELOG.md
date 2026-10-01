@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 - 2026-10-01
+
+Audit release (epic #121): fixes from a Codex code review, gaps against MCP spec
+2026-07-28 / SDK 2.2.0, and new features from upstream unraid/api v4.30–v4.37.
 
 ### Removed
 
@@ -17,6 +20,54 @@
   `0.0.0.0` (Docker) anyone able to read container logs could authenticate.
   It now exits non-zero with an actionable message instead. Localhost binds
   keep the generate-and-log-once dev convenience (#101).
+- **Health verdict** (`get_health_summary`, `unraid://health`): `overall` is now
+  `ok | attention | critical | degraded`, with `reasons` and per-sub-check
+  `checks` (`ok | failed | not_configured`). It reflects UPS on battery
+  (real apcupsd `ONBATT`/`LOWBATT` statuses), parity errors and failed or
+  forbidden sub-queries. Disk health is status-based: free-space thresholds no
+  longer raise false "critical" alarms. A box with no UPS configured reports
+  `ups: not_configured`, not a failure. Unread warnings/alerts surface as
+  `top_alerts` (#104, #119).
+- **Destructive tools ask the human** via MCP elicitation when the client
+  supports it (2026-07-28 clients, or legacy clients over stdio); `confirm=true`
+  is still required in every mode (#113).
+- Tools have human-readable `title`s and `idempotentHint` annotations; the
+  server advertises `title`, `website_url` and icons (#111).
+- Core tools (health, containers, disks) advertise typed `outputSchema`s (#112).
+- Independent health, plugin and system-info queries run concurrently (#110).
+- Long-running Docker updates and array start/stop use a longer read timeout
+  (`UNRAID_MCP_LONG_TIMEOUT`, default 600 s); a timeout says the operation may
+  still be running (#103). Batch updates and container stats emit progress
+  notifications (#114).
+
+### Added
+
+- `get_hardware_inventory`: GPU, PCI, USB and network devices (#118).
+- Network throughput in `get_system_metrics` (`metrics.network`) (#115).
+- Richer container fields, `get_docker_port_conflicts`, and opt-in container
+  sizes (`get_docker_container(include_sizes=true)`, slow) (#116).
+- Temperature thresholds/levels and hottest sensor, UPS power, array boot
+  devices, and extra ArrayDisk fields (#117).
+- `list_warnings_and_alerts` (#119).
+- Mutations: `refresh_docker_digests` and `set_docker_autostart`. Autostart is
+  read-merge-write and serialized, because upstream replaces the whole list (#120).
+
+### Fixed
+
+- **Security:** API key and bearer token are scrubbed from returned GraphQL
+  data, websocket frames, every exception message and log record. Raw websocket
+  frame debug logging is suppressed (#100).
+- Failed mutations no longer report success. The GraphQL envelope is validated,
+  and malformed responses map to actionable errors (#102).
+- Websocket sends and unsubscribe are bounded by the sampling deadline (#105).
+- The container HEALTHCHECK honors TLS and ignores proxy env vars (#106).
+- `read_log_file` validates path containment and numeric bounds before any
+  request; `start_line` is 1-based (#107).
+- Disk partition sizes use the `{bytes, human}` shape (#108).
+
+### Tests
+
+- Offline, auto-discovered mutation-refusal and read-tool contract tests (#109).
 
 ## 0.7.0 - 2026-08-06
 
