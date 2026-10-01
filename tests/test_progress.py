@@ -159,6 +159,55 @@ async def test_reporter_leaks_no_tasks():
     assert len(asyncio.all_tasks()) == before
 
 
+async def test_caller_cancel_coinciding_with_flush_completion_propagates():
+    # Cancel lands in the same iteration the flush (queue.join) completes. On 3.11
+    # wait_for swallowed it; the caller must still see CancelledError.
+    loop = asyncio.get_running_loop()
+    holder: list[asyncio.Task] = []
+
+    class Ctx:
+        async def report_progress(self, progress, total=None, message=None):
+            # Three callback hops later lands the cancel in the iteration where the flush
+            # (queue.join) has just completed, before its waiter resumes.
+            loop.call_soon(lambda: loop.call_soon(lambda: loop.call_soon(holder[0].cancel)))
+
+    async def body():
+        async with progress_reporter(Ctx()) as progress:
+            await progress("x")
+
+    holder.append(asyncio.ensure_future(body()))
+    with pytest.raises(asyncio.CancelledError):
+        await holder[0]
+
+
+async def test_caller_cancel_while_worker_unwinds_propagates(monkeypatch):
+    # The worker is slow to die; a caller cancel arriving meanwhile must not be eaten
+    # by the worker-join suppression.
+    monkeypatch.setattr(_base, "PROGRESS_TIMEOUT_S", 0.05)
+    unwinding = asyncio.Event()
+    release = asyncio.Event()
+
+    class Ctx:
+        async def report_progress(self, progress, total=None, message=None):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                unwinding.set()
+                await release.wait()
+                raise
+
+    async def body():
+        async with progress_reporter(Ctx()) as progress:
+            await progress("x")
+
+    task = asyncio.ensure_future(body())
+    await asyncio.wait_for(unwinding.wait(), timeout=3)
+    task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
 async def test_stalled_reporter_cannot_hang_updates(monkeypatch, mocked_client):
     monkeypatch.setattr(_base, "PROGRESS_TIMEOUT_S", 0.05)
     ctx = _StubCtx(stall=True)

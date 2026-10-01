@@ -257,9 +257,10 @@ async def progress_reporter(ctx: Context) -> AsyncIterator[ProgressCallback]:
             message = await queue.get()
             counter += 1
             try:
-                await asyncio.wait_for(
-                    ctx.report_progress(counter, None, message), timeout=PROGRESS_TIMEOUT_S
-                )
+                # asyncio.timeout, not wait_for: on 3.11 wait_for can swallow a cancel
+                # that lands as the awaitable completes, leaving the worker un-cancelled.
+                async with asyncio.timeout(PROGRESS_TIMEOUT_S):
+                    await ctx.report_progress(counter, None, message)
             except TimeoutError:
                 log.debug("progress report timed out")
             except Exception as exc:  # noqa: BLE001 - progress must never fail the tool
@@ -282,13 +283,18 @@ async def progress_reporter(ctx: Context) -> AsyncIterator[ProgressCallback]:
         yield _report
     finally:
         try:
+            # asyncio.timeout (not wait_for) so a caller cancel is never swallowed.
             with contextlib.suppress(Exception):
-                await asyncio.wait_for(queue.join(), timeout=PROGRESS_TIMEOUT_S)
+                async with asyncio.timeout(PROGRESS_TIMEOUT_S):
+                    await queue.join()
         finally:
             # Unconditional, even if the flush was cancelled: never leak the worker.
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            # wait() never raises the worker's CancelledError, so only a cancel aimed at
+            # the caller can interrupt it (and that must propagate, not be suppressed).
+            await asyncio.wait({task})
+            if not task.cancelled():
+                task.exception()  # mark retrieved
 
 
 async def with_heartbeat(
