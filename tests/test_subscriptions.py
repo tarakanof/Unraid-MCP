@@ -561,6 +561,69 @@ async def test_blocking_on_new_callback_is_bounded_by_deadline(monkeypatch):
     assert time.monotonic() - start < 0.05 + 0.05 + 1.0
 
 
+class _ReadyFrames:
+    """Transport whose recv/send never suspend (buffered frames)."""
+
+    def __init__(self):
+        self.n = 0
+
+    async def send(self, message):
+        pass
+
+    async def close(self):
+        pass
+
+    async def recv(self):
+        self.n += 1
+        if self.n == 1:
+            return _ack()
+        if self.n > 60:
+            return json.dumps({"type": "complete"})  # finite: a regression ends here
+        time.sleep(0.002)  # each ready frame costs real time, never yielding to the loop
+        return _next(f"c{self.n}")
+
+
+async def test_ready_frames_stop_at_deadline_without_yielding(monkeypatch):
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+    start = time.monotonic()
+    events, deadline_hit = await asyncio.wait_for(
+        subscriptions.sample_subscription(
+            _ReadyFrames(),
+            api_key=KEY,
+            query="subscription { dockerContainerStats { id } }",
+            deadline_s=0.05,
+            key=_key,
+            is_complete=lambda collected, was_new: False,
+        ),
+        timeout=3,
+    )
+    assert deadline_hit is True
+    assert time.monotonic() - start < 0.05 + 0.5
+    assert events
+
+
+async def test_timed_out_on_new_with_buffered_frames_returns_partial(monkeypatch):
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+
+    async def on_new(count):
+        await asyncio.Event().wait()
+
+    events, deadline_hit = await asyncio.wait_for(
+        subscriptions.sample_subscription(
+            FakeTransport([_ack(), _next("a"), _next("b"), _next("a")]),
+            api_key=KEY,
+            query="subscription { dockerContainerStats { id } }",
+            deadline_s=0.05,
+            key=_key,
+            is_complete=_complete,
+            on_new=on_new,
+        ),
+        timeout=3,
+    )
+    assert deadline_hit is True
+    assert len(events) == 1
+
+
 async def test_cleanup_exceptions_are_logged_without_secrets(caplog):
     class FailingCleanupTransport(FakeTransport):
         async def send(self, message):

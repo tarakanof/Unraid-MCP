@@ -152,6 +152,11 @@ async def sample_subscription(
         deadline_hit = False
         try:
             while True:
+                # asyncio.timeout only fires once the loop yields, so a transport with
+                # buffered frames could otherwise sample far past the deadline.
+                if loop.time() >= deadline_ts:
+                    deadline_hit = True
+                    break
                 try:
                     msg = await _recv()
                     if msg.get("type") == "ping":
@@ -187,6 +192,11 @@ async def sample_subscription(
                             # never break sampling.
                             try:
                                 await bounded(on_new(len(collected)), deadline_ts - loop.time())
+                            except TimeoutError:
+                                # The sampling deadline expired inside the callback.
+                                log.debug("on_new callback hit the sampling deadline")
+                                deadline_hit = True
+                                break
                             except Exception as exc:  # noqa: BLE001
                                 log.debug("on_new callback failed: %s", type(exc).__name__)
                     if is_complete(collected, was_new):
