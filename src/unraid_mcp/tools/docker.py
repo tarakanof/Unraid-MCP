@@ -28,6 +28,7 @@ from ..formatting import (
     shape_port_conflicts,
 )
 from ..logging import redact
+from ..types import Container
 from ._base import (
     DESTRUCTIVE,
     MUTATING,
@@ -59,7 +60,7 @@ STATS_TIMEOUT_S = 12.0
 UPDATE_HEARTBEAT_S = 10.0
 
 
-async def fetch_containers(client: UnraidClient) -> list[dict[str, Any]]:
+async def fetch_containers(client: UnraidClient) -> list[Container | None]:
     try:
         return shape_containers(await client.execute(queries.LIST_CONTAINERS))
     except UnraidGraphQLError as exc:
@@ -81,7 +82,7 @@ def _looks_like_id(identifier: str) -> bool:
     return ":" in identifier
 
 
-async def fetch_container_native(client: UnraidClient, container_id: str) -> dict[str, Any] | None:
+async def fetch_container_native(client: UnraidClient, container_id: str) -> Container | None:
     """Try the native ``docker.container(id)`` query.
 
     Returns the shaped container dict, or ``None`` if the API doesn't have
@@ -115,7 +116,7 @@ async def fetch_container(
     include_sizes: bool = False,
     *,
     api_version: str | None = None,
-) -> dict[str, Any]:
+) -> Container:
     container = await _resolve_container(client, identifier)
     if include_sizes:
         try:
@@ -779,7 +780,7 @@ def _confirm_update_all_docker_containers(
 
 def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
-    async def list_docker_containers(ctx: Context) -> list[dict[str, Any]]:
+    async def list_docker_containers(ctx: Context) -> list[Container | None]:
         """List Docker containers with id, name, image, state, status, autostart,
         autostart order, update_available, orphaned, web_ui_url, network_mode and
         ports. Newer fields are null on older Unraid API builds. Use
@@ -789,7 +790,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def get_docker_container(
         ctx: Context, identifier: str, include_sizes: bool = False
-    ) -> dict[str, Any]:
+    ) -> Container:
         """Get one Docker container by id or name.
 
         Adds to the list fields: rebuild_ready, lan_ip_ports, icon/project/support

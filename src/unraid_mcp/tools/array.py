@@ -18,6 +18,7 @@ from ..formatting import (
     shape_physical_disk,
     shape_physical_disks,
 )
+from ..types import Disk
 from ._base import (
     DESTRUCTIVE,
     MUTATING,
@@ -47,7 +48,7 @@ async def fetch_parity_history(client: UnraidClient) -> list[dict[str, Any]]:
     return (await client.execute(queries.PARITY_HISTORY)).get("parityHistory") or []
 
 
-async def fetch_disks(client: UnraidClient) -> list[dict[str, Any]]:
+async def fetch_disks(client: UnraidClient) -> list[Disk | None]:
     return shape_physical_disks(await client.execute(queries.LIST_DISKS))
 
 
@@ -55,7 +56,7 @@ def _disk_not_found(disk_id: str) -> ToolError:
     return ToolError(f"No disk matching '{disk_id}'. Use list_disks to see valid ids.")
 
 
-async def fetch_disk(client: UnraidClient, disk_id: str) -> dict[str, Any]:
+async def fetch_disk(client: UnraidClient, disk_id: str) -> Disk:
     try:
         data = await client.execute(queries.DISK_DETAILS, {"id": disk_id})
     except UnraidGraphQLError as exc:
@@ -256,17 +257,15 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         return await guarded(ctx, fetch_parity_history)
 
     @mcp.tool(annotations=READ_ONLY)
-    async def list_disks(ctx: Context) -> list[dict[str, Any]]:
-        """List physical disks with model, size, interface, SMART status, temperature,
-        and spin state. Use a disk id with get_disk for full details."""
+    async def list_disks(ctx: Context) -> list[Disk | None]:
+        """List physical disks (id, name, device, type, SMART status, temp_c, spinning, size).
+        Use a disk id with get_disk for full details."""
         return await guarded(ctx, fetch_disks)
 
     @mcp.tool(annotations=READ_ONLY)
-    async def get_disk(ctx: Context, disk_id: str) -> dict[str, Any]:
-        """Get full details for one physical disk by its id (from list_disks),
-        including partitions, firmware and SMART status. Errors (does not
-        return null) if disk_id doesn't match a known disk — use list_disks
-        to find a valid id."""
+    async def get_disk(ctx: Context, disk_id: str) -> Disk:
+        """Get a physical disk by its id from list_disks (adds firmware and partitions).
+        Errors if the id is unknown."""
         return await guarded(ctx, fetch_disk, disk_id)
 
 

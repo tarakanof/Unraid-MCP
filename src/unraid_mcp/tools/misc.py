@@ -30,6 +30,7 @@ from ..formatting import (
     shape_warnings_and_alerts,
     summarize_health,
 )
+from ..types import HealthSummary
 from ._base import (
     READ_ONLY,
     execute_with_fallback,
@@ -193,7 +194,7 @@ async def fetch_plugins(
     return plugins + installed
 
 
-async def fetch_health(client: UnraidClient) -> dict[str, Any]:
+async def fetch_health(client: UnraidClient) -> HealthSummary:
     # Health only needs the baseline selections. They are accepted by every
     # API build, so a newer-field validation error can't mark a check failed.
     async def ups_check() -> tuple[list[dict[str, Any]], bool, bool]:
@@ -287,7 +288,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         return await guarded(ctx, fetch_plugins, api_version=api_version)
 
     @mcp.tool(annotations=READ_ONLY)
-    async def get_health_summary(ctx: Context) -> dict[str, Any]:
+    async def get_health_summary(ctx: Context) -> HealthSummary:
         """Compact health roll-up for triage: array state, capacity, any unhealthy disks,
         parity-check status, UPS state, unread notification counts, and up to 5 top
         unread warnings/alerts (`top_alerts`, when the API supports it).
