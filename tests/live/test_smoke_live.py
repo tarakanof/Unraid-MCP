@@ -138,6 +138,7 @@ DICT_READS: list[Callable[..., Awaitable[Any]]] = [
     system.fetch_metrics,
     system.fetch_system_time,
     system.fetch_hardware_inventory,
+    docker.fetch_docker_port_conflicts,
 ]
 
 # READ_ONLY fetches whose logic returns a list of dicts.

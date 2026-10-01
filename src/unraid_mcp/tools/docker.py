@@ -15,14 +15,16 @@ from ..config import Settings
 from ..errors import UnraidConnectionError, UnraidGraphQLError
 from ..formatting import (
     sanitize_control,
-    shape_container,
+    shape_container_detail,
     shape_container_logs,
+    shape_container_sizes,
     shape_container_stats,
     shape_containers,
     shape_docker_networks,
     shape_docker_update_statuses,
     shape_mutation_result,
     shape_mutation_result_list,
+    shape_port_conflicts,
 )
 from ..logging import redact
 from ._base import (
@@ -48,7 +50,13 @@ STATS_TIMEOUT_S = 12.0
 
 
 async def fetch_containers(client: UnraidClient) -> list[dict[str, Any]]:
-    return shape_containers(await client.execute(queries.LIST_CONTAINERS))
+    try:
+        return shape_containers(await client.execute(queries.LIST_CONTAINERS))
+    except UnraidGraphQLError as exc:
+        if not unsupported_field_error(exc):
+            raise
+    # Older API lacks the newer cheap fields: retry with the original selection.
+    return shape_containers(await client.execute(queries.LIST_CONTAINERS_BASIC))
 
 
 def _matches(container: dict[str, Any], identifier: str) -> bool:
@@ -70,8 +78,16 @@ async def fetch_container_native(client: UnraidClient, container_id: str) -> dic
     this field (old build) or the id doesn't resolve — both cases mean the
     caller should fall back to the client-side list+filter path.
     """
+    variables = {"id": container_id}
     try:
-        data = await client.execute(queries.DOCKER_CONTAINER, {"id": container_id})
+        try:
+            data = await client.execute(queries.DOCKER_CONTAINER, variables)
+        except UnraidGraphQLError as exc:
+            if not unsupported_field_error(exc):
+                raise
+            # Either `docker.container` is missing (old build) or only the newer
+            # detail fields are: retry the original selection before giving up.
+            data = await client.execute(queries.DOCKER_CONTAINER_BASIC, variables)
     except UnraidGraphQLError as exc:
         if unsupported_field_error(exc):
             return None
@@ -80,18 +96,58 @@ async def fetch_container_native(client: UnraidClient, container_id: str) -> dic
     container = docker.get("container")
     if container is None:
         return None
-    return shape_container(container)
+    return shape_container_detail(container)
 
 
-async def fetch_container(client: UnraidClient, identifier: str) -> dict[str, Any]:
+async def fetch_container(
+    client: UnraidClient,
+    identifier: str,
+    include_sizes: bool = False,
+    *,
+    api_version: str | None = None,
+) -> dict[str, Any]:
+    container = await _resolve_container(client, identifier)
+    if include_sizes:
+        try:
+            data = await client.execute(queries.DOCKER_CONTAINER_SIZES)
+        except UnraidGraphQLError as exc:
+            if unsupported_field_error(exc):
+                raise feature_unsupported(
+                    "Docker container sizes", api_version=api_version
+                ) from None
+            raise
+        container = {**container, **shape_container_sizes(data, container.get("id"))}
+    return container
+
+
+async def _resolve_container(client: UnraidClient, identifier: str) -> dict[str, Any]:
     if _looks_like_id(identifier):
         native = await fetch_container_native(client, identifier)
         if native is not None:
             return native
     for container in await fetch_containers(client):
         if _matches(container, identifier):
+            # Resolved via the list: upgrade to the detail view by id (same
+            # output as an id lookup), keeping the list row if that yields nothing.
+            if container.get("id") and not _looks_like_id(identifier):
+                native = await fetch_container_native(client, container["id"])
+                if native is not None:
+                    return native
             return container
     raise ToolError(f"No Docker container matching '{identifier}'.")
+
+
+async def fetch_docker_port_conflicts(
+    client: UnraidClient, *, api_version: str | None = None
+) -> dict[str, Any]:
+    try:
+        return shape_port_conflicts(await client.execute(queries.DOCKER_PORT_CONFLICTS))
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported(
+                "Docker port-conflict detection", api_version=api_version
+            ) from None
+        raise
 
 
 async def fetch_docker_networks(client: UnraidClient) -> list[dict[str, Any]]:
@@ -417,13 +473,41 @@ async def do_remove_container(
 def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def list_docker_containers(ctx: Context) -> list[dict[str, Any]]:
-        """List Docker containers with id, name, image, state, status, autostart and ports."""
+        """List Docker containers with id, name, image, state, status, autostart,
+        autostart order, update_available, orphaned, web_ui_url, network_mode and
+        ports. Newer fields are null on older Unraid API builds. Use
+        get_docker_container for sizes, mounts and labels."""
         return await guarded(ctx, fetch_containers)
 
     @mcp.tool(annotations=READ_ONLY)
-    async def get_docker_container(ctx: Context, identifier: str) -> dict[str, Any]:
-        """Get one Docker container by id or name."""
-        return await guarded(ctx, fetch_container, identifier)
+    async def get_docker_container(
+        ctx: Context, identifier: str, include_sizes: bool = False
+    ) -> dict[str, Any]:
+        """Get one Docker container by id or name.
+
+        Adds to the list fields: rebuild_ready, lan_ip_ports, icon/project/support
+        URLs, template_path, auto_start_wait, mounts, labels and Tailscale
+        status. Size keys are omitted unless include_sizes=true, which adds
+        size_root_fs/size_rw/size_log as {bytes, human} (null if the container
+        is missing from the scan). include_sizes is SLOW (~10-20s): the API only
+        computes sizes by scanning ALL containers. `labels` is omitted
+        (null, labels_truncated=true) when it serializes past 4096 chars.
+        Name lookups resolve to the id and return the same detail view. On older
+        Unraid API builds only the basic fields are returned."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(
+            ctx, fetch_container, identifier, include_sizes, api_version=api_version
+        )
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_docker_port_conflicts(ctx: Context) -> dict[str, Any]:
+        """Detect Docker port conflicts: container ports and LAN host:port
+        values claimed by more than one container. Returns {container_ports:
+        [{private_port, type, containers}], lan_ports: [{lan_ip_port,
+        public_port, type, containers}], has_conflicts}. Requires an Unraid API
+        build that supports `docker.portConflicts`."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(ctx, fetch_docker_port_conflicts, api_version=api_version)
 
     @mcp.tool(annotations=READ_ONLY)
     async def list_docker_networks(ctx: Context) -> list[dict[str, Any]]:

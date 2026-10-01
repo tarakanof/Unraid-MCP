@@ -127,6 +127,11 @@ keys, tokens, connection strings). That's inherent to reading logs and not somet
 this server can filter — treat `get_docker_container_logs` output with the same care
 as any other secret-bearing log stream.
 
+`get_docker_container` also returns container `labels` and `mounts` (and template
+URLs). These are workload/template-controlled, so they are untrusted data like logs,
+and may contain sensitive values (tokens in labels, host paths). Treat them with the
+same care; `labels` over 4096 serialized characters is dropped (`labels_truncated`).
+
 ## Log file access is restricted
 
 `read_log_file` only accepts absolute paths that are `/var/log` or a descendant

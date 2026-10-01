@@ -12,6 +12,7 @@ Every size field is emitted as ``{"bytes": int|None, "human": str|None}``.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -321,7 +322,23 @@ def shape_services(data: dict | None) -> list[dict[str, Any]]:
     return out
 
 
+# Cap for the serialized ``labels`` JSON on the single-container view. Compose /
+# template-heavy containers can carry dozens of labels; past this the map is
+# dropped (``labels_truncated: true``) to protect the agent's context window.
+MAX_LABELS_CHARS = 4096
+
+
+def _shape_labels(labels: Any) -> tuple[Any, bool]:
+    if labels is None:
+        return None, False
+    if len(json.dumps(labels, default=str)) > MAX_LABELS_CHARS:
+        return None, True
+    return labels, False
+
+
 def shape_container(c: dict | None) -> dict[str, Any] | None:
+    """Compact list-view shape (cheap fields only). Newer-API fields are ``None``
+    when the connected build predates them."""
     if not c:
         return None
     names = c.get("names") or []
@@ -333,6 +350,11 @@ def shape_container(c: dict | None) -> dict[str, Any] | None:
         "state": c.get("state"),
         "status": c.get("status"),
         "auto_start": c.get("autoStart"),
+        "auto_start_order": c.get("autoStartOrder"),
+        "update_available": c.get("isUpdateAvailable"),
+        "orphaned": c.get("isOrphaned"),
+        "web_ui_url": c.get("webUiUrl"),
+        "network_mode": (c.get("hostConfig") or {}).get("networkMode"),
         "ports": [
             {
                 "private": p.get("privatePort"),
@@ -345,9 +367,84 @@ def shape_container(c: dict | None) -> dict[str, Any] | None:
     }
 
 
+def shape_container_detail(c: dict | None) -> dict[str, Any] | None:
+    """Single-container shape: the list view plus mounts, labels, links
+    and Tailscale. Sizes are NOT included (see :func:`shape_container_sizes`)."""
+    out = shape_container(c)
+    if out is None or c is None:
+        return out
+    labels, labels_truncated = _shape_labels(c.get("labels"))
+    ts = c.get("tailscaleStatus")
+    out.update(
+        {
+            "rebuild_ready": c.get("isRebuildReady"),
+            "lan_ip_ports": c.get("lanIpPorts") or [],
+            "icon_url": c.get("iconUrl"),
+            "project_url": c.get("projectUrl"),
+            "support_url": c.get("supportUrl"),
+            "template_path": c.get("templatePath"),
+            "auto_start_wait": c.get("autoStartWait"),
+            "mounts": c.get("mounts") or [],
+            "labels": labels,
+            "labels_truncated": labels_truncated,
+            "tailscale_enabled": c.get("tailscaleEnabled"),
+            "tailscale": (
+                {
+                    "online": ts.get("online"),
+                    "version": ts.get("version"),
+                    "update_available": ts.get("updateAvailable"),
+                    "hostname": ts.get("hostname"),
+                    "dns_name": ts.get("dnsName"),
+                }
+                if ts
+                else None
+            ),
+        }
+    )
+    return out
+
+
+def shape_container_sizes(data: dict | None, container_id: str | None) -> dict[str, Any]:
+    """Pick one container's sizes out of the ``containers { id size* }`` list.
+    All three are null-sized when the container is absent from the list."""
+    docker = (data or {}).get("docker") or {}
+    row = next((c for c in (docker.get("containers") or []) if c.get("id") == container_id), {})
+    return {
+        "size_root_fs": _size_from_bytes(row.get("sizeRootFs")),
+        "size_rw": _size_from_bytes(row.get("sizeRw")),
+        "size_log": _size_from_bytes(row.get("sizeLog")),
+    }
+
+
 def shape_containers(data: dict | None) -> list[dict[str, Any]]:
     docker = (data or {}).get("docker") or {}
     return [shape_container(c) for c in (docker.get("containers") or [])]
+
+
+def shape_port_conflicts(data: dict | None) -> dict[str, Any]:
+    pc = ((data or {}).get("docker") or {}).get("portConflicts") or {}
+
+    def _containers(item: dict) -> list[dict[str, Any]]:
+        return [{"id": x.get("id"), "name": x.get("name")} for x in (item.get("containers") or [])]
+
+    container_ports = [
+        {"private_port": i.get("privatePort"), "type": i.get("type"), "containers": _containers(i)}
+        for i in (pc.get("containerPorts") or [])
+    ]
+    lan_ports = [
+        {
+            "lan_ip_port": i.get("lanIpPort"),
+            "public_port": i.get("publicPort"),
+            "type": i.get("type"),
+            "containers": _containers(i),
+        }
+        for i in (pc.get("lanPorts") or [])
+    ]
+    return {
+        "container_ports": container_ports,
+        "lan_ports": lan_ports,
+        "has_conflicts": bool(container_ports or lan_ports),
+    }
 
 
 def shape_docker_networks(data: dict | None) -> list[dict[str, Any]]:
