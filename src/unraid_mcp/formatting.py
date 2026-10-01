@@ -198,7 +198,13 @@ def _shape_sensor(s: dict) -> dict[str, Any]:
         out[key] = {"value": reading.get("value"), "unit": reading.get("unit")} if reading else None
     out["warning"] = s.get("warning")
     out["critical"] = s.get("critical")
-    out["level"] = _temp_level(current.get("value"), s.get("warning"), s.get("critical"))
+    # Upstream's own status is authoritative; derive from thresholds only when
+    # it is absent or UNKNOWN (older API builds).
+    status = current.get("status")
+    if status in ("NORMAL", "WARNING", "CRITICAL"):
+        out["level"] = status.lower()
+    else:
+        out["level"] = _temp_level(current.get("value"), s.get("warning"), s.get("critical"))
     return out
 
 

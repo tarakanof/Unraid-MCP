@@ -355,9 +355,10 @@ async def test_system_metrics_extended_fields(mocked_client):
             }
         }
     }
-    async with mocked_client(_resp(data)) as (client, route):
+    net = _resp({"metrics": {"network": []}})
+    async with mocked_client([_resp(data), net]) as (client, route):
         out = await system.fetch_metrics(client)
-    assert route.call_count == 1
+    assert route.call_count == 2  # metrics + independent network section
     assert out["temperature"]["summary"]["hottest"]["name"] == "CPU"
     assert out["temperature"]["sensors"][0]["level"] == "critical"
 
@@ -373,10 +374,15 @@ async def test_system_metrics_older_api_falls_back_to_legacy(mocked_client):
             }
         }
     )
-    async with mocked_client([_UNKNOWN_FIELD, legacy]) as (client, route):
+    async with mocked_client([_UNKNOWN_FIELD, legacy, _resp({"metrics": {"network": []}})]) as (
+        client,
+        route,
+    ):
         out = await system.fetch_metrics(client)
-    assert route.call_count == 2
-    assert _sent_query(route) == queries.SYSTEM_METRICS_LEGACY
+    assert route.call_count == 3  # extended, legacy retry, network
+    assert [json.loads(c.request.content)["query"] for c in route.calls][1] == (
+        queries.SYSTEM_METRICS_LEGACY
+    )
     assert out["temperature"]["sensors"][0]["level"] is None
     assert out["temperature"]["summary"]["hottest"] is None
 
@@ -976,19 +982,18 @@ async def test_ups_older_api_falls_back_to_legacy(mocked_client):
     assert out[0]["name"] == "ups0"
 
 
-async def test_health_summary_keeps_ups_on_older_api(mocked_client):
+async def test_health_summary_uses_baseline_selections(mocked_client):
+    """Health only needs baseline fields, so newer-field errors can't fail a check."""
     array_resp = _resp({"array": {"state": "STARTED", "disks": []}})
-    err = httpx.Response(
-        200,
-        json={
-            "errors": [{"message": 'Cannot query field "nominalPower" on type "UPSPower".'}],
-            "data": None,
-        },
-    )
-    ups_legacy = _resp({"upsDevices": [{"name": "ups0", "battery": {"chargeLevel": 90}}]})
+    ups_resp = _resp({"upsDevices": [{"name": "ups0", "battery": {"chargeLevel": 90}}]})
     notif_resp = _resp({"notifications": {"overview": {"unread": {"alert": 0, "warning": 0}}}})
-    async with mocked_client([array_resp, err, ups_legacy, notif_resp]) as (c, r):
+    alerts_resp = _resp({"notifications": {"warningsAndAlerts": []}})
+    async with mocked_client([array_resp, ups_resp, notif_resp, alerts_resp]) as (c, r):
         out = await misc.fetch_health(c)
+    sent = {json.loads(call.request.content)["query"] for call in r.calls}
+    assert queries.ARRAY_STATUS_LEGACY in sent
+    assert queries.UPS_DEVICES_LEGACY in sent
+    assert queries.ARRAY_STATUS not in sent
     assert out["ups"][0]["battery_pct"] == 90
 
 

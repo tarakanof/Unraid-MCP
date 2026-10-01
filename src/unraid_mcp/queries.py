@@ -63,7 +63,7 @@ query GetSystemMetrics {
       summary { average warningCount criticalCount hottest { name current { value unit } } }
       sensors {
         name type location
-        current { value unit }
+        current { value unit status }
         min { value unit }
         max { value unit }
         warning critical

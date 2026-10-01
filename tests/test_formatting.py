@@ -562,3 +562,16 @@ def test_shape_mutation_json_result_accepts_any_non_null(payload, expected):
 def test_shape_mutation_json_result_rejects_null(raw):
     with pytest.raises(UnraidServerError):
         shape_mutation_json_result(raw, ("parityCheck", "pause"))
+
+
+def test_shape_metrics_prefers_upstream_status_over_derived_level():
+    sensor = {
+        "name": "X",
+        "current": {"value": 50.0, "unit": "CELSIUS", "status": "CRITICAL"},
+        "warning": 80.0,
+        "critical": 90.0,
+    }
+    unknown = {**sensor, "current": {"value": 95.0, "unit": "CELSIUS", "status": "UNKNOWN"}}
+    raw = {"metrics": {"temperature": {"summary": {}, "sensors": [sensor, unknown]}}}
+    levels = [s["level"] for s in shape_metrics(raw)["temperature"]["sensors"]]
+    assert levels == ["critical", "critical"]
