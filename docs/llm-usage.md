@@ -62,7 +62,7 @@ A typical stdio client config:
 |------|------|-----------|
 | `get_health_summary` | – | One-call triage: array state, capacity, unhealthy disks, parity status, UPS, unread alert counts. **Start here.** |
 | `get_system_info` | – | OS/kernel, CPU, memory, motherboard, Unraid + API versions, uptime, and (when supported) flash boot-device identity. |
-| `get_system_metrics` | – | Live utilization: total/per-core CPU %, memory/swap usage, temperatures. Requires API 7.2+; older builds get a friendly error. |
+| `get_system_metrics` | – | Live utilization: total/per-core CPU %, memory/swap usage, temperatures, per-interface network throughput (`network`, omitted on API < 4.35). Requires API 7.2+; older builds get a friendly error. |
 | `get_services` | – | Health of the Unraid services stack (API, dynamix, etc.): name, online, uptime, version. |
 | `get_system_time` | – | Server time, timezone, and NTP config — correlate log timestamps and spot NTP misconfig. Requires API 7.1+. |
 | `get_hardware_inventory` | `kind?` (`gpu`\|`pci`\|`usb`\|`network`) | Detected GPUs, PCI devices (with blacklisted/passthrough flag), USB devices, network adapters. `machineId` is intentionally omitted. |

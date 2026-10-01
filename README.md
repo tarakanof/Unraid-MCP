@@ -32,7 +32,7 @@ unrecognized). No session affinity is required either way — see
 ## What you get
 
 Read-only tools for the stuff you'd actually want to check: system info, live CPU/
-memory/temperature metrics, array and disk health, parity, Docker containers/networks,
+memory/temperature/network-throughput metrics, array and disk health, parity, Docker containers/networks,
 live per-container CPU%/memory stats, VMs, shares, notifications, UPS, network
 interfaces, and a one-shot `get_health_summary` for quick triage.
 

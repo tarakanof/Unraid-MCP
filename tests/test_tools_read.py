@@ -186,13 +186,14 @@ async def test_system_metrics(mocked_client):
             },
         }
     }
-    async with mocked_client(_resp(data)) as (client, route):
+    async with mocked_client([_resp(data), _resp({"metrics": {"network": []}})]) as (client, route):
         out = await system.fetch_metrics(client)
     assert out["cpu"] == {"percent_total": 12.3, "per_core": [5.0, 20.0]}
     assert out["memory"]["total"] == {"bytes": 17179869184, "human": "16.0 GiB"}
     assert out["memory"]["percent_total"] == 50.0
     assert out["temperature"]["summary"]["warning_count"] == 0
-    assert _sent_query(route) == queries.SYSTEM_METRICS
+    assert json.loads(route.calls[0].request.content)["query"] == queries.SYSTEM_METRICS
+    assert out["network"] == []
 
 
 async def test_system_metrics_partial_response_still_returns_cpu_memory(mocked_client):
@@ -221,6 +222,81 @@ async def test_system_metrics_unsupported_api_raises_friendly_error(mocked_clien
     async with mocked_client(resp) as (client, route):
         with pytest.raises(ToolError, match="does not support"):
             await system.fetch_metrics(client, api_version="7.1.0")
+
+
+_NET_ROW = {
+    "name": "eth0",
+    "operstate": "up",
+    "rxSec": 12902400.0,
+    "txSec": 512.0,
+    "utilizationPercent": 10.3,
+    "bytesReceived": "1073741824",
+    "bytesSent": 2048,
+    "receiveErrors": "1",
+    "transmitErrors": "0",
+    "receiveDropped": 2,
+    "transmitDropped": "bogus",
+    "lastUpdated": "2026-01-01T00:00:00Z",
+}
+_METRICS_OK = {"metrics": {"cpu": {"percentTotal": 1.0, "cpus": []}}}
+
+
+async def test_system_metrics_includes_network(mocked_client):
+    async with mocked_client([_resp(_METRICS_OK), _resp({"metrics": {"network": [_NET_ROW]}})]) as (
+        client,
+        route,
+    ):
+        out = await system.fetch_metrics(client)
+    assert _sent_query(route) == queries.SYSTEM_METRICS_NETWORK
+    (nic,) = out["network"]
+    assert nic["name"] == "eth0"
+    assert nic["rx"] == {"bytes_per_sec": 12902400.0, "human": "12.3 MiB/s"}
+    assert nic["tx"] == {"bytes_per_sec": 512.0, "human": "512 B/s"}
+    assert nic["bytes_received"] == {"bytes": 1073741824, "human": "1.0 GiB"}
+    assert nic["bytes_sent"] == {"bytes": 2048, "human": "2.0 KiB"}
+    assert nic["receive_errors"] == 1
+    assert nic["receive_dropped"] == 2
+    assert nic["transmit_errors"] == 0
+    assert nic["transmit_dropped"] is None
+    assert nic["utilization_percent"] == 10.3
+    assert "cpu" in out
+
+
+async def test_system_metrics_network_empty_list(mocked_client):
+    async with mocked_client([_resp(_METRICS_OK), _resp({"metrics": {"network": []}})]) as (
+        client,
+        _route,
+    ):
+        out = await system.fetch_metrics(client)
+    assert out["network"] == []
+
+
+async def test_system_metrics_network_null_fields(mocked_client):
+    row = {"name": "eth0", "rxSec": None, "txSec": None, "bytesReceived": None}
+    async with mocked_client([_resp(_METRICS_OK), _resp({"metrics": {"network": [row]}})]) as (
+        client,
+        _route,
+    ):
+        out = await system.fetch_metrics(client)
+    (nic,) = out["network"]
+    assert nic["rx"] == {"bytes_per_sec": None, "human": None}
+    assert nic["bytes_received"] == {"bytes": None, "human": None}
+    assert nic["receive_errors"] is None
+    assert nic["operstate"] is None
+
+
+async def test_system_metrics_network_unsupported_omits_section(mocked_client):
+    err = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "network" on type "Metrics".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client([_resp(_METRICS_OK), err]) as (client, _route):
+        out = await system.fetch_metrics(client)
+    assert "network" not in out
+    assert "cpu" in out
 
 
 async def test_services_happy_and_empty(mocked_client):

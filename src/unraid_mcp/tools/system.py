@@ -16,6 +16,7 @@ from ..formatting import (
     shape_flash,
     shape_hardware_inventory,
     shape_metrics,
+    shape_metrics_network,
     shape_services,
     shape_system_info,
     shape_system_time,
@@ -60,13 +61,19 @@ async def fetch_system_time(
 
 async def fetch_metrics(client: UnraidClient, *, api_version: str | None = None) -> dict[str, Any]:
     try:
-        return shape_metrics(await client.execute(queries.SYSTEM_METRICS))
+        out = shape_metrics(await client.execute(queries.SYSTEM_METRICS))
     except UnraidGraphQLError as exc:
         if unsupported_field_error(exc):
             raise feature_unsupported(
                 "live system metrics", requires="7.2+", api_version=api_version
             ) from None
         raise
+    # `metrics.network` is a separate, independently-degrading call (added in
+    # unraid/api 4.35.0): older builds keep cpu/memory/temperature, minus `network`.
+    network = await safe_query(client, queries.SYSTEM_METRICS_NETWORK, shape_metrics_network, None)
+    if network is not None:
+        out = {**out, "network": network}
+    return out
 
 
 async def fetch_services(
@@ -114,7 +121,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def get_system_metrics(ctx: Context) -> dict[str, Any]:
         """Get live utilization: total/per-core CPU %, memory/swap usage,
-        temperatures."""
+        temperatures, per-interface network throughput."""
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, fetch_metrics, api_version=api_version)
 
