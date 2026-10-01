@@ -276,21 +276,23 @@ async def fetch_container_stats(
     bearer_token = settings.bearer_token.get_secret_value() if settings.bearer_token else None
     deadline_ts = asyncio.get_running_loop().time() + timeout_s
     try:
-        async with asyncio.timeout_at(deadline_ts + subscriptions.CLEANUP_GRACE_S):
-            async with open_conn(
-                settings.ws_url(), settings.ssl_context(), open_timeout=timeout_s
-            ) as transport:
-                events, deadline_hit = await subscriptions.sample_subscription(
-                    transport,
-                    api_key=api_key,
-                    bearer_token=bearer_token,
-                    query=queries.DOCKER_CONTAINER_STATS,
-                    deadline_s=timeout_s,
-                    deadline_ts=deadline_ts,
-                    key=_stats_key,
-                    is_complete=_stats_complete,
-                    on_new=_on_new,
-                )
+        # Each phase (setup, sampling, cleanup, connection exit) has its own sequential
+        # timer; a timeout_at around all of it would stack a second cancel on the same task.
+        async with subscriptions.bounded_connection(
+            open_conn(settings.ws_url(), settings.ssl_context(), open_timeout=timeout_s),
+            deadline_ts=deadline_ts,
+        ) as transport:
+            events, deadline_hit = await subscriptions.sample_subscription(
+                transport,
+                api_key=api_key,
+                bearer_token=bearer_token,
+                query=queries.DOCKER_CONTAINER_STATS,
+                deadline_s=timeout_s,
+                deadline_ts=deadline_ts,
+                key=_stats_key,
+                is_complete=_stats_complete,
+                on_new=_on_new,
+            )
     except TimeoutError:
         raise UnraidConnectionError(
             "The Unraid stats subscription exceeded its operation deadline. Retry the request."

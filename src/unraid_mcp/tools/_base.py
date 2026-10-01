@@ -236,6 +236,33 @@ def require_confirm(confirm: bool, action: str) -> None:
         )
 
 
+REAP_TIMEOUT_S = 1.0
+_abandoned: set[asyncio.Future[Any]] = set()
+
+
+def _retrieve(task: asyncio.Future[Any]) -> None:
+    _abandoned.discard(task)
+    if not task.cancelled():
+        task.exception()  # mark retrieved (no "never retrieved" warning)
+
+
+async def _reap(task: asyncio.Future[Any]) -> None:
+    """Cancel a helper task and wait up to ``REAP_TIMEOUT_S`` for it to finish.
+
+    ``asyncio.wait`` never raises the task's own CancelledError, so only a cancel aimed
+    at the caller can interrupt it and that propagates. A task whose cancellation
+    cleanup stalls past the budget is abandoned (strong ref kept until it ends) so it
+    can never hang the tool."""
+    task.cancel()
+    done, _ = await asyncio.wait({task}, timeout=REAP_TIMEOUT_S)
+    if done:
+        _retrieve(task)
+    else:
+        log.debug("helper task cleanup exceeded %ss; abandoning it", REAP_TIMEOUT_S)
+        _abandoned.add(task)
+        task.add_done_callback(_retrieve)
+
+
 @contextlib.asynccontextmanager
 async def progress_reporter(ctx: Context) -> AsyncIterator[ProgressCallback]:
     """Yield a best-effort, NON-BLOCKING progress callback bound to ``ctx`` for
@@ -257,9 +284,10 @@ async def progress_reporter(ctx: Context) -> AsyncIterator[ProgressCallback]:
             message = await queue.get()
             counter += 1
             try:
-                await asyncio.wait_for(
-                    ctx.report_progress(counter, None, message), timeout=PROGRESS_TIMEOUT_S
-                )
+                # asyncio.timeout, not wait_for: on 3.11 wait_for can swallow a cancel
+                # that lands as the awaitable completes, leaving the worker un-cancelled.
+                async with asyncio.timeout(PROGRESS_TIMEOUT_S):
+                    await ctx.report_progress(counter, None, message)
             except TimeoutError:
                 log.debug("progress report timed out")
             except Exception as exc:  # noqa: BLE001 - progress must never fail the tool
@@ -282,13 +310,13 @@ async def progress_reporter(ctx: Context) -> AsyncIterator[ProgressCallback]:
         yield _report
     finally:
         try:
+            # asyncio.timeout (not wait_for) so a caller cancel is never swallowed.
             with contextlib.suppress(Exception):
-                await asyncio.wait_for(queue.join(), timeout=PROGRESS_TIMEOUT_S)
+                async with asyncio.timeout(PROGRESS_TIMEOUT_S):
+                    await queue.join()
         finally:
             # Unconditional, even if the flush was cancelled: never leak the worker.
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            await _reap(task)
 
 
 async def with_heartbeat(
@@ -317,9 +345,7 @@ async def with_heartbeat(
     try:
         return await awaitable
     finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        await _reap(task)
 
 
 class Confirmation(BaseModel):

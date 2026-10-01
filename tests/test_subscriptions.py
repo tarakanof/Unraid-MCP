@@ -161,7 +161,7 @@ async def test_ping_is_answered_with_pong():
 
 async def test_no_ack_times_out_as_connection_error():
     with pytest.raises(UnraidConnectionError):
-        await _sample([_BLOCK], deadline_s=0.1)
+        await _sample([_BLOCK], deadline_s=0.05)
 
 
 async def test_close_before_ack_is_connection_error():
@@ -209,7 +209,7 @@ async def test_premature_close_without_data_is_connection_error():
 
 async def test_deadline_hit_mid_cycle_returns_partial():
     _, (events, deadline_hit) = await _sample(
-        [_ack(), _next("a"), _next("b"), _BLOCK], deadline_s=0.1
+        [_ack(), _next("a"), _next("b"), _BLOCK], deadline_s=0.05
     )
     assert [e["dockerContainerStats"]["id"] for e in events] == ["a", "b"]
     assert deadline_hit is True
@@ -231,7 +231,7 @@ async def test_deadline_hit_mid_cycle_returns_partial():
 )
 async def test_api_key_never_in_raised_error(script):
     with pytest.raises((UnraidConnectionError, UnraidAuthError, UnraidGraphQLError)) as exc:
-        await _sample(script, deadline_s=0.1)
+        await _sample(script, deadline_s=0.05)
     assert KEY not in str(exc.value)
 
 
@@ -424,14 +424,204 @@ async def test_blocked_cleanup_preserves_primary_outcome(
     with caplog.at_level(logging.DEBUG, logger="unraid_mcp.subscriptions"):
         if outcome == "error":
             with pytest.raises(UnraidGraphQLError, match="primary error"):
-                await asyncio.wait_for(_sample_transport(transport), timeout=0.3)
+                await asyncio.wait_for(_sample_transport(transport, deadline_s=0.05), timeout=3)
         else:
-            events, deadline_hit = await asyncio.wait_for(_sample_transport(transport), timeout=0.3)
+            events, deadline_hit = await asyncio.wait_for(
+                _sample_transport(transport, deadline_s=0.05), timeout=3
+            )
             assert len(events) == 1
             assert deadline_hit is (outcome == "partial")
-    assert time.monotonic() - start < 0.25
+    # Bounded relative to the budget (deadline + grace) so ignoring the grace is caught,
+    # with 1s of slack for scheduler jitter.
+    assert time.monotonic() - start < 0.05 + 0.05 + 1.0
     assert "cleanup" in caplog.text
     assert KEY not in caplog.text
+
+
+async def test_loop_stall_past_operation_deadline_keeps_partial_result(monkeypatch):
+    # A loop stall beyond deadline + grace makes the recv timer and any outer timeout
+    # fire in one iteration (double cancel). The partial result must survive.
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+    blocked = asyncio.Event()
+
+    class SignalTransport(BlockingTransport):
+        async def recv(self):
+            if self._script and self._script[0] is _BLOCK:
+                blocked.set()
+            return await super().recv()
+
+    transport = SignalTransport([_ack(), _next("a"), _BLOCK], blocked_close=True)
+    task = asyncio.create_task(_sample_transport(transport, deadline_s=0.05))
+    await asyncio.wait_for(blocked.wait(), timeout=3)
+    time.sleep(0.2)  # blocks the loop well past deadline + grace
+    events, deadline_hit = await asyncio.wait_for(task, timeout=3)
+    assert len(events) == 1
+    assert deadline_hit is True
+
+
+async def test_bounded_propagates_caller_cancel_completing_in_same_iteration():
+    # Python 3.11's wait_for returns the result and drops the cancellation when the
+    # awaitable completes in the same iteration the caller cancels; bounded() must not.
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    task = asyncio.create_task(subscriptions.bounded(fut, 5))
+    await asyncio.sleep(0)
+    fut.set_result("done")
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+class _StalledExitConnection:
+    async def __aenter__(self):
+        return FakeTransport([])
+
+    async def __aexit__(self, *exc):
+        await asyncio.Event().wait()
+
+
+async def test_bounded_connection_stalled_exit_preserves_outcome(monkeypatch):
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+    loop = asyncio.get_running_loop()
+    start = time.monotonic()
+    async with subscriptions.bounded_connection(
+        _StalledExitConnection(), deadline_ts=loop.time() + 0.05
+    ):
+        pass
+    with pytest.raises(ValueError, match="primary"):
+        async with subscriptions.bounded_connection(
+            _StalledExitConnection(), deadline_ts=loop.time() + 0.05
+        ):
+            raise ValueError("primary")
+    assert time.monotonic() - start < 2 * 0.05 + 1.0
+
+
+@pytest.mark.parametrize("blocked_at", ["recv", "pong", "close"])
+async def test_caller_cancel_in_same_tick_as_operation_timeout_propagates(monkeypatch, blocked_at):
+    # Caller cancel + the inner wait_for timer + the outer timeout_at all become due in
+    # one loop iteration (the loop is stalled synchronously once the transport reports
+    # it is blocked). The caller's cancellation must not be mistaken for the operation
+    # timeout, in the sampling phase (blocked recv / pong) or in cleanup (blocked close).
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+    blocked = asyncio.Event()
+
+    class SignalTransport(FakeTransport):
+        async def recv(self):
+            if self._script and self._script[0] is _BLOCK:
+                blocked.set()
+            return await super().recv()
+
+        async def send(self, message):
+            await super().send(message)
+            if blocked_at == "pong" and json.loads(message)["type"] == "pong":
+                blocked.set()
+                await asyncio.Event().wait()
+
+        async def close(self):
+            if blocked_at == "close":
+                blocked.set()
+                await asyncio.Event().wait()
+
+    script = {
+        "recv": [_ack(), _next("a"), _BLOCK],
+        "pong": [_ack(), _next("a"), json.dumps({"type": "ping"})],
+        "close": [_ack(), _next("a"), _next("a")],
+    }[blocked_at]
+    task = asyncio.create_task(_sample_transport(SignalTransport(script), deadline_s=0.05))
+    await asyncio.wait_for(blocked.wait(), timeout=3)
+    # Schedule the caller cancel as a timer after both deadlines, then stall the loop so
+    # all three timers are due in the same iteration.
+    loop = asyncio.get_running_loop()
+    loop.call_at(loop.time() + 0.12, task.cancel)
+    time.sleep(0.3)
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_blocking_on_new_callback_is_bounded_by_deadline(monkeypatch):
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+
+    async def on_new(count):
+        await asyncio.Event().wait()
+
+    start = time.monotonic()
+    events, deadline_hit = await asyncio.wait_for(
+        subscriptions.sample_subscription(
+            FakeTransport([_ack(), _next("a"), _next("b")]),
+            api_key=KEY,
+            query="subscription { dockerContainerStats { id } }",
+            deadline_s=0.05,
+            key=_key,
+            is_complete=_complete,
+            on_new=on_new,
+        ),
+        timeout=3,
+    )
+    assert deadline_hit is True
+    assert time.monotonic() - start < 0.05 + 0.05 + 1.0
+
+
+class _ReadyFrames:
+    """Transport whose recv/send never suspend (buffered frames)."""
+
+    def __init__(self):
+        self.n = 0
+
+    async def send(self, message):
+        pass
+
+    async def close(self):
+        pass
+
+    async def recv(self):
+        self.n += 1
+        if self.n == 1:
+            return _ack()
+        if self.n > 60:
+            return json.dumps({"type": "complete"})  # finite: a regression ends here
+        time.sleep(0.002)  # each ready frame costs real time, never yielding to the loop
+        return _next(f"c{self.n}")
+
+
+async def test_ready_frames_stop_at_deadline_without_yielding(monkeypatch):
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+    start = time.monotonic()
+    events, deadline_hit = await asyncio.wait_for(
+        subscriptions.sample_subscription(
+            _ReadyFrames(),
+            api_key=KEY,
+            query="subscription { dockerContainerStats { id } }",
+            deadline_s=0.05,
+            key=_key,
+            is_complete=lambda collected, was_new: False,
+        ),
+        timeout=3,
+    )
+    assert deadline_hit is True
+    assert time.monotonic() - start < 0.05 + 0.5
+    assert events
+
+
+async def test_timed_out_on_new_with_buffered_frames_returns_partial(monkeypatch):
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+
+    async def on_new(count):
+        await asyncio.Event().wait()
+
+    events, deadline_hit = await asyncio.wait_for(
+        subscriptions.sample_subscription(
+            FakeTransport([_ack(), _next("a"), _next("b"), _next("a")]),
+            api_key=KEY,
+            query="subscription { dockerContainerStats { id } }",
+            deadline_s=0.05,
+            key=_key,
+            is_complete=_complete,
+            on_new=on_new,
+        ),
+        timeout=3,
+    )
+    assert deadline_hit is True
+    assert len(events) == 1
 
 
 async def test_cleanup_exceptions_are_logged_without_secrets(caplog):

@@ -159,6 +159,55 @@ async def test_reporter_leaks_no_tasks():
     assert len(asyncio.all_tasks()) == before
 
 
+async def test_caller_cancel_coinciding_with_flush_completion_propagates():
+    # Cancel lands in the same iteration the flush (queue.join) completes. On 3.11
+    # wait_for swallowed it; the caller must still see CancelledError.
+    loop = asyncio.get_running_loop()
+    holder: list[asyncio.Task] = []
+
+    class Ctx:
+        async def report_progress(self, progress, total=None, message=None):
+            # Three callback hops later lands the cancel in the iteration where the flush
+            # (queue.join) has just completed, before its waiter resumes.
+            loop.call_soon(lambda: loop.call_soon(lambda: loop.call_soon(holder[0].cancel)))
+
+    async def body():
+        async with progress_reporter(Ctx()) as progress:
+            await progress("x")
+
+    holder.append(asyncio.ensure_future(body()))
+    with pytest.raises(asyncio.CancelledError):
+        await holder[0]
+
+
+async def test_caller_cancel_while_worker_unwinds_propagates(monkeypatch):
+    # The worker is slow to die; a caller cancel arriving meanwhile must not be eaten
+    # by the worker-join suppression.
+    monkeypatch.setattr(_base, "PROGRESS_TIMEOUT_S", 0.05)
+    unwinding = asyncio.Event()
+    release = asyncio.Event()
+
+    class Ctx:
+        async def report_progress(self, progress, total=None, message=None):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                unwinding.set()
+                await release.wait()
+                raise
+
+    async def body():
+        async with progress_reporter(Ctx()) as progress:
+            await progress("x")
+
+    task = asyncio.ensure_future(body())
+    await asyncio.wait_for(unwinding.wait(), timeout=3)
+    task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
 async def test_stalled_reporter_cannot_hang_updates(monkeypatch, mocked_client):
     monkeypatch.setattr(_base, "PROGRESS_TIMEOUT_S", 0.05)
     ctx = _StubCtx(stall=True)
@@ -257,6 +306,95 @@ async def test_with_heartbeat_swallows_callback_errors_and_cancels_task():
         return "ok"
 
     assert await with_heartbeat(work(), boom, interval_s=0.03) == "ok"
+
+
+class _SlowToDieClient:
+    """execute() returns once a heartbeat is mid-callback; that callback is slow to die."""
+
+    long_request_timeout = 5.0
+
+    def __init__(self, in_beat):
+        self.in_beat = in_beat
+
+    async def execute(self, query, variables=None, **kwargs):
+        await self.in_beat.wait()
+        return {"docker": {"updateContainers": [], "updateAllContainers": []}}
+
+
+@pytest.mark.parametrize("path", ["update_containers", "update_all_containers"])
+async def test_update_paths_propagate_caller_cancel_while_heartbeat_unwinds(path):
+    in_beat, unwinding, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def progress(message):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return  # the initial "Updating ..." message
+        in_beat.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            unwinding.set()
+            await release.wait()
+            raise
+
+    client = _SlowToDieClient(in_beat)
+    if path == "update_containers":
+        coro = docker.do_update_containers(
+            client, ["1:a"], confirm=True, progress=progress, heartbeat_s=0.01
+        )
+    else:
+        coro = docker.do_update_all_containers(
+            client, confirm=True, progress=progress, heartbeat_s=0.01
+        )
+    task = asyncio.ensure_future(coro)
+    await asyncio.wait_for(unwinding.wait(), timeout=3)
+    task.cancel()
+    release.set()
+    done, _ = await asyncio.wait({task}, timeout=3)  # a regression fails, never hangs
+    assert done
+    assert task.cancelled()
+
+
+async def test_stalled_callback_cleanup_cannot_hang_reporter_or_heartbeat(monkeypatch):
+    # A callback that blocks in its cancellation cleanup must not hang the tool: the
+    # helper task is abandoned after REAP_TIMEOUT_S.
+    monkeypatch.setattr(_base, "REAP_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(_base, "PROGRESS_TIMEOUT_S", 0.02)
+    release = asyncio.Event()
+
+    class Ctx:
+        async def report_progress(self, progress, total=None, message=None):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release.wait()  # async cleanup that outlives the budget
+                raise
+
+    async def work():
+        await asyncio.sleep(0.05)
+        return "ok"
+
+    async def beat(message):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+            raise
+
+    async def go():
+        async with progress_reporter(Ctx()) as progress:
+            await progress("x")
+            await asyncio.sleep(0.02)
+        return await with_heartbeat(work(), beat, interval_s=0.01)
+
+    try:
+        assert await asyncio.wait_for(go(), timeout=3) == "ok"
+    finally:
+        release.set()
+        await asyncio.sleep(0.01)
+    assert not _base._abandoned
 
 
 async def test_with_heartbeat_without_callback_just_awaits():
