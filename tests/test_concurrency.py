@@ -18,7 +18,7 @@ from unraid_mcp.tools import _base, misc, system
 
 from .conftest import KEY, URL
 
-DELAY = 0.3
+DELAY = 0.4
 
 
 def _data(data):
@@ -29,14 +29,19 @@ def _gql_error(msg="boom"):
     return httpx.Response(200, json={"errors": [{"message": msg}], "data": None})
 
 
-def _router(responses, *, delay=DELAY, log=None):
-    """side_effect that sleeps then answers per query string."""
+def _router(responses, *, delay=DELAY, delays=None, log=None, cancelled=None):
+    """side_effect that sleeps (per-query ``delays`` override ``delay``) then answers."""
 
     async def handler(request: httpx.Request) -> httpx.Response:
         query = json.loads(request.content)["query"]
         if log is not None:
             log.append(query)
-        await asyncio.sleep(delay)
+        try:
+            await asyncio.sleep((delays or {}).get(query, delay))
+        except asyncio.CancelledError:
+            if cancelled is not None:
+                cancelled.append(query)
+            raise
         out = responses[query]
         if isinstance(out, Exception):
             raise out
@@ -77,19 +82,29 @@ async def test_health_runs_queries_concurrently():
         out = await misc.fetch_health(client)
         elapsed = time.perf_counter() - start
     assert out["overall"] == "ok"
-    assert elapsed < DELAY * 2  # serial would be >= 3 * DELAY
+    assert elapsed < DELAY * 2.5  # serial would be >= 3 * DELAY
 
 
 async def test_health_array_failure_still_raises_and_cancels_siblings():
     log: list[str] = []
+    cancelled: list[str] = []
     resp = {
-        queries.ARRAY_STATUS: _gql_error("array down"),
+        queries.ARRAY_STATUS: httpx.ConnectError("refused"),
         queries.UPS_DEVICES: UPS_OK,
         queries.NOTIFICATIONS_OVERVIEW: NOTIF_OK,
     }
-    async with _Mock(resp, log=log) as client:
+    delays = {
+        queries.ARRAY_STATUS: 0.02,
+        queries.UPS_DEVICES: 10,
+        queries.NOTIFICATIONS_OVERVIEW: 10,
+    }
+    async with _Mock(resp, delays=delays, log=log, cancelled=cancelled) as client:
+        start = time.perf_counter()
         with pytest.raises(UnraidConnectionError):
             await misc.fetch_health(client)
+        assert time.perf_counter() - start < 2  # did not wait for the slow siblings
+    assert set(log) == set(resp)  # all three were in flight
+    assert set(cancelled) == {queries.UPS_DEVICES, queries.NOTIFICATIONS_OVERVIEW}
     assert not [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
 
 
@@ -117,7 +132,7 @@ async def test_plugins_runs_queries_concurrently():
         out = await misc.fetch_plugins(client)
         elapsed = time.perf_counter() - start
     assert [p["name"] for p in out] == ["a", "b.plg"]  # dedup still uses known_names
-    assert elapsed < DELAY * 1.7  # serial would be >= 2 * DELAY
+    assert elapsed < DELAY * 1.9  # serial would be >= 2 * DELAY
 
 
 async def test_plugins_installed_failure_degrades_and_plugins_failure_raises():
@@ -146,7 +161,7 @@ async def test_system_info_runs_queries_concurrently():
         out = await system.fetch_system_info(client)
         elapsed = time.perf_counter() - start
     assert out["flash"]["guid"] == "g"
-    assert elapsed < DELAY * 1.7
+    assert elapsed < DELAY * 1.9
 
 
 async def test_gather_all_cancels_siblings_on_failure():
