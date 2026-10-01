@@ -9,9 +9,14 @@ from __future__ import annotations
 
 import httpx
 import pytest
+import respx
+from mcp.client import Client
 from mcp.server.mcpserver.exceptions import ToolError
 
+from unraid_mcp.server import build_server
 from unraid_mcp.tools import misc
+
+from .conftest import KEY, URL
 
 
 async def test_raw_query_executes_read_only(mocked_client):
@@ -70,3 +75,51 @@ async def test_raw_query_allows_legit_queries(mocked_client, good):
     async with mocked_client(httpx.Response(200, json={"data": {"ok": 1}})) as (client, route):
         await misc.do_raw_query(client, good)
         assert route.call_count == 1
+
+
+@pytest.mark.parametrize("secret", [KEY, "bearer-token-1234567890123456789012"])
+async def test_run_graphql_query_redacts_nested_tool_output(settings_factory, secret):
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(
+                200, json={"data": {"server": {"apikey": [secret, {"nested": secret}]}}}
+            )
+        )
+        server = build_server(
+            settings_factory(
+                allow_raw_query=True, bearer_token="bearer-token-1234567890123456789012"
+            )
+        )
+        async with Client(server) as session:
+            result = await session.call_tool(
+                "run_graphql_query", {"query": "query { server { apikey } }"}
+            )
+    assert not result.is_error
+    assert secret not in str(result)
+    assert "***REDACTED***" in str(result)
+
+
+@pytest.mark.parametrize("data", [None, {}])
+async def test_raw_query_empty_data(mocked_client, data):
+    async with mocked_client(httpx.Response(200, json={"data": data})) as (client, route):
+        assert await misc.do_raw_query(client, "query { server { apikey } }") == {}
+        assert route.call_count == 1
+
+
+async def test_run_graphql_query_redacts_tool_error_output(settings_factory):
+    token = "bearer-token-1234567890123456789012"
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(
+                200, json={"data": None, "errors": [{"message": f"rejected {KEY} {token}"}]}
+            )
+        )
+        server = build_server(settings_factory(allow_raw_query=True, bearer_token=token))
+        async with Client(server) as session:
+            result = await session.call_tool(
+                "run_graphql_query", {"query": "query { server { apikey } }"}
+            )
+    assert result.is_error
+    assert KEY not in str(result)
+    assert token not in str(result)
+    assert "***REDACTED***" in str(result)

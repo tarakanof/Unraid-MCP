@@ -11,7 +11,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from .. import queries, subscriptions
 from ..client import UnraidClient
 from ..config import Settings
-from ..errors import UnraidGraphQLError
+from ..errors import UnraidConnectionError, UnraidGraphQLError
 from ..formatting import (
     sanitize_control,
     shape_container,
@@ -23,6 +23,7 @@ from ..formatting import (
     shape_mutation_result,
     shape_mutation_result_list,
 )
+from ..logging import redact
 from ._base import (
     DESTRUCTIVE,
     MUTATING,
@@ -195,6 +196,7 @@ async def fetch_container_stats(
     """
     open_conn = connect or subscriptions.open_ws
     api_key = settings.api_key.get_secret_value()
+    bearer_token = settings.bearer_token.get_secret_value() if settings.bearer_token else None
     try:
         async with open_conn(
             settings.ws_url(), settings.ssl_context(), open_timeout=timeout_s
@@ -202,11 +204,14 @@ async def fetch_container_stats(
             events, deadline_hit = await subscriptions.sample_subscription(
                 transport,
                 api_key=api_key,
+                bearer_token=bearer_token,
                 query=queries.DOCKER_CONTAINER_STATS,
                 deadline_s=timeout_s,
                 key=_stats_key,
                 is_complete=_stats_complete,
             )
+    except UnraidConnectionError as exc:
+        raise UnraidConnectionError(redact(str(exc), (api_key, bearer_token))) from None
     except UnraidGraphQLError as exc:
         if unsupported_field_error(exc):
             raise feature_unsupported(

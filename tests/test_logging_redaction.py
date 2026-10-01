@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from unraid_mcp.logging import RedactionFilter, configure_logging, get_logger
+import pytest
+
+from unraid_mcp.logging import RedactionFilter, configure_logging, get_logger, redact
 
 
 def test_redaction_filter_scrubs_secret_from_message():
@@ -74,3 +76,39 @@ def test_configure_logging_is_idempotent(capsys):
 def captured_lines(capsys) -> int:
     err = capsys.readouterr().err.strip()
     return len([line for line in err.splitlines() if "hello" in line])
+
+
+@pytest.mark.parametrize(
+    "secret", ["supersecretkey123", "bearer-token-1234567890123456789012", 'a\n"b']
+)
+def test_redact_nested_containers_and_representations(secret):
+    class Echo:
+        def __str__(self):
+            return f"echo {secret}"
+
+    value = {secret: [None, (f"prefix {secret}", {"echo": Echo()})], "number": 42}
+    result = redact(value, [secret, None, ""])
+    assert result == {
+        "***REDACTED***": [None, ("prefix ***REDACTED***", {"echo": "echo ***REDACTED***"})],
+        "number": 42,
+    }
+    assert secret in value
+
+
+def test_redact_clean_values_pass_through_unchanged():
+    value = {"items": [None, ("safe", 1, False)]}
+    assert redact(value, ["supersecretkey123"]) is value
+    assert redact(value, []) is value
+
+
+def test_configure_logging_redacts_bearer_token_in_traceback(capsys):
+    token = "bearer-token-1234567890123456789012"
+    configure_logging(secrets=[token])
+    try:
+        raise RuntimeError(f"reflected {token}")
+    except RuntimeError:
+        get_logger("unraid_mcp.test").exception("request failed with %s", token)
+    captured = capsys.readouterr()
+    assert token not in captured.err
+    assert "***REDACTED***" in captured.err
+    assert captured.out == ""

@@ -27,7 +27,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Protocol
 
 from .errors import UnraidAuthError, UnraidConnectionError, UnraidGraphQLError
-from .logging import get_logger
+from .logging import get_logger, redact
 
 log = get_logger(__name__)
 
@@ -61,15 +61,11 @@ class WSClosed(Exception):
         self.code = code
 
 
-def _redact(text: str, api_key: str) -> str:
-    """Defensively scrub the API key from any server-echoed text."""
-    return text.replace(api_key, "***REDACTED***") if api_key and api_key in text else text
-
-
 async def sample_subscription(
     transport: WSTransport,
     *,
     api_key: str,
+    bearer_token: str | None = None,
     query: str,
     deadline_s: float,
     key: Callable[[dict[str, Any]], str | None],
@@ -92,6 +88,7 @@ async def sample_subscription(
     * :class:`UnraidGraphQLError` — the subscription emitted an ``error`` frame (used
       upstream to detect an unsupported field on old API builds).
     """
+    secrets = (api_key, bearer_token)
     deadline_ts = time.monotonic() + deadline_s
 
     async def _recv() -> dict[str, Any]:
@@ -99,7 +96,10 @@ async def sample_subscription(
         if remaining <= 0:
             raise TimeoutError
         raw = await asyncio.wait_for(transport.recv(), timeout=remaining)
-        return json.loads(raw)
+        try:
+            return redact(json.loads(raw), secrets)
+        except ValueError:
+            raise UnraidConnectionError("Unraid sent an invalid JSON subscription frame.") from None
 
     # 1. connection_init — the ONLY place the API key is sent.
     await transport.send(json.dumps({"type": "connection_init", "payload": {"x-api-key": api_key}}))
@@ -170,7 +170,7 @@ async def sample_subscription(
                 payload = msg.get("payload")
                 errors = payload if isinstance(payload, list) else [{"message": str(payload)}]
                 messages = "; ".join(
-                    _redact(str(e.get("message", "unknown error")), api_key) for e in errors
+                    redact(str(e.get("message", "unknown error")), secrets) for e in errors
                 )
                 raise UnraidGraphQLError(f"Subscription error: {messages}", errors=errors)
             elif mtype == "complete":

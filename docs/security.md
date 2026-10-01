@@ -56,9 +56,15 @@ tools — only create a wider-scoped key if you actually enable mutations.
 
 ## Secrets stay secret
 
-The API key is held as a `SecretStr`, never logged, and never appears in tool output
-or error messages. A redaction filter scrubs it (and any generated bearer token) from
-all log lines as defence in depth.
+The API key and configured bearer token are held as `SecretStr` values. A shared
+redaction helper replaces their literal values with `***REDACTED***` in HTTP
+GraphQL data and errors, including nested containers and structured exception
+`.errors` details. This also covers `run_graphql_query` output.
+
+Websocket frames are scrubbed before processing, including unexpected frame types,
+`error` and `complete` payloads, and returned subscription samples. Client error
+messages and formatted logs, including tracebacks, use the same helper. Clean
+strings and containers pass through unchanged.
 
 ## stdio is clean
 

@@ -16,6 +16,7 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
 from unraid_mcp.config import Settings
+from unraid_mcp.errors import UnraidConnectionError
 from unraid_mcp.subscriptions import WSClosed
 from unraid_mcp.tools import docker
 from unraid_mcp.tools._base import feature_unsupported  # noqa: F401  (documents the path)
@@ -203,3 +204,30 @@ async def test_api_key_never_in_raised_tool_or_domain_error(script, timeout_s):
     with pytest.raises(Exception) as exc:  # ToolError or UnraidError subclass
         await _fetch(script, timeout_s=timeout_s)
     assert KEY not in str(exc.value)
+
+
+async def test_stats_settings_bearer_token_redacted_in_tool_output():
+    token = "bearer-token-1234567890123456789012"
+    _, result = await _fetch(
+        [_ack(), _next(f"docker:{token}"), json.dumps({"type": "complete"})],
+        settings=_settings(bearer_token=token),
+    )
+    assert token not in str(result)
+    assert "***REDACTED***" in str(result)
+
+
+async def test_stats_connection_error_redacts_configured_secrets():
+    token = "bearer-token-1234567890123456789012"
+
+    @asynccontextmanager
+    async def connect(*args, **kwargs):
+        raise UnraidConnectionError(f"failed {KEY} {token}")
+        yield
+
+    with pytest.raises(UnraidConnectionError) as exc:
+        await docker.fetch_container_stats(
+            None, settings=_settings(bearer_token=token), connect=connect
+        )
+    assert KEY not in str(exc.value)
+    assert token not in str(exc.value)
+    assert "***REDACTED***" in str(exc.value)

@@ -223,3 +223,76 @@ async def test_null_errors_treated_as_empty():
         async with httpx.AsyncClient() as http:
             client = await _client(http)
             assert await client.execute("query { a }") == {"a": 1}
+
+
+@pytest.mark.parametrize("secret", [KEY, "bearer-token-1234567890123456789012"])
+async def test_execute_redacts_nested_data_and_partial_error_logs(secret, caplog):
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {"server": [{"apikey": secret}, None]},
+                    "errors": [{"message": f"partial {secret}", "extensions": {"echo": [secret]}}],
+                },
+            )
+        )
+        async with httpx.AsyncClient() as http:
+            client = UnraidClient(URL, KEY, http, bearer_token=secret)
+            result = await client.execute("query { server { apikey } }")
+    assert result == {"server": [{"apikey": "***REDACTED***"}, None]}
+    assert secret not in caplog.text
+    assert "***REDACTED***" in caplog.text
+
+
+async def test_execute_redacts_bearer_token_in_error_details():
+    from pydantic import SecretStr
+
+    token = "bearer-token-1234567890123456789012"
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": None,
+                    "errors": [
+                        {"message": f"rejected {KEY} {token}", "extensions": {"echo": [token, KEY]}}
+                    ],
+                },
+            )
+        )
+        async with httpx.AsyncClient() as http:
+            client = UnraidClient(URL, KEY, http, bearer_token=SecretStr(token))
+            with pytest.raises(UnraidGraphQLError) as exc:
+                await client.execute("query { server { apikey } }")
+    assert token not in str(exc.value)
+    assert KEY not in str(exc.value)
+    assert exc.value.errors[0]["extensions"]["echo"] == ["***REDACTED***", "***REDACTED***"]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(302, headers={"location": f"https://{KEY}.local/graphql"}),
+        httpx.Response(500),
+        httpx.Response(400),
+        httpx.Response(200, text="not json"),
+        httpx.ConnectTimeout(KEY),
+        httpx.ConnectError(KEY),
+    ],
+)
+async def test_execute_redacts_secrets_in_all_mapped_error_messages(response):
+    token = "bearer-token-1234567890123456789012"
+    with respx.mock:
+        route = respx.post(URL)
+        if isinstance(response, Exception):
+            route.mock(side_effect=response)
+        else:
+            route.mock(return_value=response)
+        async with httpx.AsyncClient() as http:
+            client = UnraidClient(URL, KEY, http, host_label=f"{KEY}.{token}", bearer_token=token)
+            with pytest.raises((UnraidConnectionError, UnraidServerError)) as exc:
+                await client.execute("query { server { apikey } }")
+    assert KEY not in str(exc.value)
+    assert token not in str(exc.value)
+    assert "***REDACTED***" in str(exc.value)

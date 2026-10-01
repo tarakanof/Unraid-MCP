@@ -17,10 +17,11 @@ from pydantic import SecretStr
 from .errors import (
     UnraidAuthError,
     UnraidConnectionError,
+    UnraidError,
     UnraidGraphQLError,
     UnraidServerError,
 )
-from .logging import get_logger
+from .logging import get_logger, redact
 
 log = get_logger(__name__)
 
@@ -40,9 +41,14 @@ class UnraidClient:
         http_client: httpx.AsyncClient,
         *,
         host_label: str | None = None,
+        bearer_token: SecretStr | str | None = None,
     ) -> None:
         self._url = url
         self._key = api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key
+        token = (
+            bearer_token.get_secret_value() if isinstance(bearer_token, SecretStr) else bearer_token
+        )
+        self._secrets = (self._key, token)
         self._http = http_client
         self._host = host_label or urlparse(url).netloc or url
 
@@ -50,8 +56,19 @@ class UnraidClient:
         """Run a GraphQL operation and return its ``data`` object.
 
         Raises an :class:`~unraid_mcp.errors.UnraidError` subclass on failure.
-        The API key is never included in any error message.
+        Configured secrets are scrubbed from data and errors.
         """
+        try:
+            return await self._execute(query, variables)
+        except UnraidError as exc:
+            message = redact(str(exc), self._secrets)
+            if isinstance(exc, UnraidGraphQLError):
+                raise UnraidGraphQLError(
+                    message, errors=redact(exc.errors, self._secrets)
+                ) from None
+            raise type(exc)(message) from None
+
+    async def _execute(self, query: str, variables: dict[str, Any] | None) -> dict[str, Any]:
         try:
             response = await self._http.post(
                 self._url,
@@ -97,7 +114,7 @@ class UnraidClient:
             raise UnraidServerError(f"Unexpected HTTP {response.status_code} from {self._host}.")
 
         try:
-            payload = response.json()
+            payload = redact(response.json(), self._secrets)
         except ValueError as exc:
             raise UnraidServerError(
                 f"Unraid returned a non-JSON response (HTTP {response.status_code}) "
@@ -122,12 +139,9 @@ class UnraidClient:
                 f"Invalid GraphQL envelope: errors must be a list. {envelope_hint}"
             )
         if raw_errors:
-            # Defence in depth: never echo the API key even if a misconfigured
-            # upstream reflected it into an error. Redact the whole errors
-            # structure so the exception's .errors attribute is also safe.
-            errors = self._redact_obj(
-                [e if isinstance(e, dict) else {"message": str(e)} for e in raw_errors]
-            )
+            # The whole response was scrubbed above, including structured error
+            # details; coercion runs on that scrubbed payload.
+            errors = [e if isinstance(e, dict) else {"message": str(e)} for e in raw_errors]
             messages = "; ".join(str(e.get("message", "unknown error")) for e in errors)
             if data is None or all(value is None for value in data.values()):
                 raise UnraidGraphQLError(f"GraphQL error: {messages}", errors=errors)
@@ -137,18 +151,3 @@ class UnraidClient:
             log.warning("GraphQL returned partial errors: %s", messages)
 
         return data or {}
-
-    def _redact(self, text: str) -> str:
-        if self._key and self._key in text:
-            return text.replace(self._key, "***REDACTED***")
-        return text
-
-    def _redact_obj(self, obj: Any) -> Any:
-        """Recursively redact the API key from any string within a JSON value."""
-        if isinstance(obj, str):
-            return self._redact(obj)
-        if isinstance(obj, list):
-            return [self._redact_obj(item) for item in obj]
-        if isinstance(obj, dict):
-            return {key: self._redact_obj(value) for key, value in obj.items()}
-        return obj

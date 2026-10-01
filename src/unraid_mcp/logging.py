@@ -11,10 +11,56 @@ Two invariants matter here:
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
+from collections.abc import Iterable
+from typing import Any
 
 _REDACTION = "***REDACTED***"
+
+
+def redact(value: Any, secrets: Iterable[str | None]) -> Any:
+    """Scrub strings, containers and object representations using configured secrets.
+
+    Empty secrets are ignored. Clean strings and containers pass through unchanged.
+    """
+    configured = sorted({secret for secret in secrets if secret}, key=len, reverse=True)
+    if not configured:
+        return value
+
+    def scrub(item: Any) -> Any:
+        if isinstance(item, str):
+            for secret in configured:
+                if secret in item:
+                    item = item.replace(secret, _REDACTION)
+            return item
+        if isinstance(item, dict):
+            pairs = [(scrub(k), scrub(v)) for k, v in item.items()]
+            if all(
+                k is old_k and v is old_v
+                for (k, v), (old_k, old_v) in zip(pairs, item.items(), strict=True)
+            ):
+                return item
+            return dict(pairs)
+        if isinstance(item, (list, tuple)):
+            values = [scrub(v) for v in item]
+            if all(v is old for v, old in zip(values, item, strict=True)):
+                return item
+            return tuple(values) if isinstance(item, tuple) else values
+        if item is None or isinstance(item, (bool, int, float)):
+            return item
+        rendered = str(item)
+        scrubbed = scrub(rendered)
+        return scrubbed if scrubbed != rendered else item
+
+    if isinstance(value, (dict, list, tuple)):
+        rendered = json.dumps(value, ensure_ascii=False, default=str)
+        if not any(
+            json.dumps(secret, ensure_ascii=False)[1:-1] in rendered for secret in configured
+        ):
+            return value
+    return scrub(value)
 
 
 class RedactionFilter(logging.Filter):
@@ -36,10 +82,7 @@ class RedactionFilter(logging.Filter):
                 message = record.getMessage()
             except Exception:
                 message = str(record.msg)
-            scrubbed = message
-            for secret in self._secrets:
-                if secret in scrubbed:
-                    scrubbed = scrubbed.replace(secret, _REDACTION)
+            scrubbed = redact(message, self._secrets)
             if scrubbed != message:
                 record.msg = scrubbed
                 record.args = None
@@ -60,10 +103,7 @@ class RedactingFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         formatted = super().format(record)
-        for secret in self._secrets:
-            if secret in formatted:
-                formatted = formatted.replace(secret, _REDACTION)
-        return formatted
+        return redact(formatted, self._secrets)
 
 
 def configure_logging(

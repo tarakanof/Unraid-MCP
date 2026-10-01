@@ -83,11 +83,12 @@ def _next(cid: str, cpu: float = 1.5, mem: float = 2.5) -> str:
     )
 
 
-async def _sample(script, *, deadline_s=5.0):
+async def _sample(script, *, deadline_s=5.0, bearer_token=None):
     transport = FakeTransport(script)
     result = await sample_subscription(
         transport,
         api_key=KEY,
+        bearer_token=bearer_token,
         query="subscription { dockerContainerStats { id } }",
         deadline_s=deadline_s,
         key=_key,
@@ -242,3 +243,54 @@ async def test_api_key_not_logged(caplog):
     with caplog.at_level(logging.DEBUG, logger="unraid_mcp.subscriptions"):
         await _sample([_ack(), _next("a"), _next("a")])
     assert KEY not in caplog.text
+
+
+@pytest.mark.parametrize("secret", [KEY, "bearer-token-1234567890123456789012"])
+async def test_unexpected_frame_type_redacts_secrets(secret):
+    with pytest.raises(UnraidConnectionError) as exc:
+        await _sample([json.dumps({"type": f"unexpected {secret}"})], bearer_token=secret)
+    assert secret not in str(exc.value)
+    assert "***REDACTED***" in str(exc.value)
+
+
+@pytest.mark.parametrize("secret", [KEY, "bearer-token-1234567890123456789012"])
+@pytest.mark.parametrize("as_list", [True, False])
+async def test_error_frame_redacts_message_and_structured_errors(secret, as_list):
+    payload = {"message": f"bad {secret}", "extensions": {"echo": [secret, {"nested": secret}]}}
+    if as_list:
+        payload = [payload]
+    with pytest.raises(UnraidGraphQLError) as exc:
+        await _sample(
+            [_ack(), json.dumps({"type": "error", "payload": payload})], bearer_token=secret
+        )
+    assert secret not in str(exc.value)
+    assert secret not in str(exc.value.errors)
+    assert "***REDACTED***" in str(exc.value)
+    assert "***REDACTED***" in str(exc.value.errors)
+
+
+@pytest.mark.parametrize("secret", [KEY, "bearer-token-1234567890123456789012"])
+async def test_subscription_samples_and_complete_payload_redact_secrets(secret, caplog):
+    frame = json.dumps(
+        {
+            "type": "next",
+            "payload": {
+                "data": {"dockerContainerStats": {"id": "a", "echo": [secret, {"nested": secret}]}}
+            },
+        }
+    )
+    complete = json.dumps({"type": "complete", "payload": {"echo": secret}})
+    with caplog.at_level(logging.DEBUG, logger="unraid_mcp.subscriptions"):
+        _, (events, deadline_hit) = await _sample([_ack(), frame, complete], bearer_token=secret)
+    assert events[0]["dockerContainerStats"]["echo"] == [
+        "***REDACTED***",
+        {"nested": "***REDACTED***"},
+    ]
+    assert deadline_hit is False
+    assert secret not in caplog.text
+
+
+async def test_invalid_json_frame_maps_to_secret_free_connection_error():
+    with pytest.raises(UnraidConnectionError) as exc:
+        await _sample([f"invalid {KEY}"])
+    assert KEY not in str(exc.value)
