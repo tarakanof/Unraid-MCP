@@ -140,7 +140,11 @@ def shape_physical_disk(d: dict | None) -> dict[str, Any] | None:
         "spinning": d.get("isSpinning"),
         "size": _size_from_bytes(d.get("size")),
         "firmware": d.get("firmwareRevision"),
-        "partitions": d.get("partitions"),
+        "partitions": [
+            {**p, "size": _size_from_bytes(p.get("size"))}
+            for p in (d.get("partitions") or [])
+            if isinstance(p, dict)
+        ],
     }
 
 

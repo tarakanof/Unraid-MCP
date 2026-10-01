@@ -205,6 +205,9 @@ async def test_get_disk_detail(live_client):
     if detail is not None:
         assert "size" in detail
         _check_shapes(detail)
+        assert isinstance(detail.get("partitions"), list)
+        for part in detail["partitions"]:
+            assert set(part["size"]) == {"bytes", "human"}, part
 
 
 async def test_get_container_detail(live_client):

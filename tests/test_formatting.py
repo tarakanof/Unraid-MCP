@@ -229,6 +229,39 @@ def test_shape_physical_disk_size_is_bytes():
     assert out["size"]["human"].endswith("TiB")
 
 
+def assert_sizes_shaped(obj):
+    """Recursively assert every size-like key holds a ``{bytes, human}`` dict."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key == "size" or key.endswith("_size") or key == "capacity":
+                assert isinstance(value, dict) and set(value) == {"bytes", "human"}, (key, value)
+            assert_sizes_shaped(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            assert_sizes_shaped(item)
+
+
+def test_shape_physical_disk_partition_sizes():
+    out = shape_physical_disk(
+        {
+            "id": "1:abc",
+            "size": 1024**4,
+            "partitions": [
+                {"name": "sdb1", "fsType": "XFS", "size": 1024**3},
+                {"name": "sdb2", "fsType": "VFAT", "size": None},
+            ],
+        }
+    )
+    assert out["partitions"][0]["size"] == {"bytes": 1024**3, "human": "1.0 GiB"}
+    assert out["partitions"][0]["name"] == "sdb1"
+    assert out["partitions"][1]["size"] == {"bytes": None, "human": None}
+    assert_sizes_shaped(out)
+
+
+def test_shape_physical_disk_no_partitions():
+    assert shape_physical_disk({"id": "x", "partitions": None})["partitions"] == []
+
+
 @pytest.mark.parametrize(
     "raw,path,expected",
     [
