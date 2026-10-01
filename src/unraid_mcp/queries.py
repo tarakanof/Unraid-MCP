@@ -62,6 +62,19 @@ query GetSystemMetrics {
 }
 """
 
+# Per-interface throughput (unraid/api 4.35.0+). A separate query so older API
+# builds lacking `metrics.network` still return cpu/memory/temperature.
+SYSTEM_METRICS_NETWORK = """
+query GetSystemMetricsNetwork {
+  metrics {
+    network {
+      name operstate rxSec txSec utilizationPercent bytesReceived bytesSent
+      receiveErrors transmitErrors receiveDropped transmitDropped lastUpdated
+    }
+  }
+}
+"""
+
 SERVICES = """
 query GetServices {
   services { id name online uptime { timestamp } version }

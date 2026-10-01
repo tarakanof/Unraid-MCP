@@ -217,6 +217,41 @@ def shape_metrics(data: dict | None) -> dict[str, Any]:
     return out
 
 
+def _rate(value: Any) -> dict[str, Any]:
+    """Format a bytes-per-second rate as ``{"bytes_per_sec", "human"}``."""
+    if value is None:
+        return {"bytes_per_sec": None, "human": None}
+    human = human_size(value)
+    return {"bytes_per_sec": round(float(value), 1), "human": f"{human}/s"}
+
+
+def shape_metrics_network(data: dict | None) -> list[dict[str, Any]]:
+    """Shape ``metrics.network`` per-interface throughput.
+
+    Rates are ``{bytes_per_sec, human}``, totals ``{bytes, human}``, error and
+    drop counters plain ints (``None`` when the API returns null).
+    """
+    network = ((data or {}).get("metrics") or {}).get("network") or []
+    return [
+        {
+            "name": n.get("name"),
+            "operstate": n.get("operstate"),
+            "rx": _rate(n.get("rxSec")),
+            "tx": _rate(n.get("txSec")),
+            "utilization_percent": n.get("utilizationPercent"),
+            "bytes_received": _size_from_bytes(n.get("bytesReceived")),
+            "bytes_sent": _size_from_bytes(n.get("bytesSent")),
+            "receive_errors": n.get("receiveErrors"),
+            "transmit_errors": n.get("transmitErrors"),
+            "receive_dropped": n.get("receiveDropped"),
+            "transmit_dropped": n.get("transmitDropped"),
+            "last_updated": n.get("lastUpdated"),
+        }
+        for n in network
+        if n
+    ]
+
+
 def shape_services(data: dict | None) -> list[dict[str, Any]]:
     services = (data or {}).get("services") or []
     out = []
