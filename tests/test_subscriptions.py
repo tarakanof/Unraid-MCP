@@ -439,22 +439,61 @@ async def test_blocked_cleanup_preserves_primary_outcome(
 
 
 async def test_loop_stall_past_operation_deadline_keeps_partial_result(monkeypatch):
-    # A loop stall beyond deadline + grace makes recv's wait_for timer and the outer
-    # timeout_at fire in one iteration (double cancel). The partial result must survive.
+    # A loop stall beyond deadline + grace makes the recv timer and any outer timeout
+    # fire in one iteration (double cancel). The partial result must survive.
     monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
-    transport = BlockingTransport([_ack(), _next("a"), _BLOCK], blocked_close=True)
+    blocked = asyncio.Event()
 
-    async def staller():
-        await asyncio.sleep(0.025)
-        time.sleep(0.2)  # blocks the loop well past deadline + grace
+    class SignalTransport(BlockingTransport):
+        async def recv(self):
+            if self._script and self._script[0] is _BLOCK:
+                blocked.set()
+            return await super().recv()
 
-    stall = asyncio.create_task(staller())
-    events, deadline_hit = await asyncio.wait_for(
-        _sample_transport(transport, deadline_s=0.05), timeout=3
-    )
-    await stall
+    transport = SignalTransport([_ack(), _next("a"), _BLOCK], blocked_close=True)
+    task = asyncio.create_task(_sample_transport(transport, deadline_s=0.05))
+    await asyncio.wait_for(blocked.wait(), timeout=3)
+    time.sleep(0.2)  # blocks the loop well past deadline + grace
+    events, deadline_hit = await asyncio.wait_for(task, timeout=3)
     assert len(events) == 1
     assert deadline_hit is True
+
+
+async def test_bounded_propagates_caller_cancel_completing_in_same_iteration():
+    # Python 3.11's wait_for returns the result and drops the cancellation when the
+    # awaitable completes in the same iteration the caller cancels; bounded() must not.
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    task = asyncio.create_task(subscriptions.bounded(fut, 5))
+    await asyncio.sleep(0)
+    fut.set_result("done")
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+class _StalledExitConnection:
+    async def __aenter__(self):
+        return FakeTransport([])
+
+    async def __aexit__(self, *exc):
+        await asyncio.Event().wait()
+
+
+async def test_bounded_connection_stalled_exit_preserves_outcome(monkeypatch):
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+    loop = asyncio.get_running_loop()
+    start = time.monotonic()
+    async with subscriptions.bounded_connection(
+        _StalledExitConnection(), deadline_ts=loop.time() + 0.05
+    ):
+        pass
+    with pytest.raises(ValueError, match="primary"):
+        async with subscriptions.bounded_connection(
+            _StalledExitConnection(), deadline_ts=loop.time() + 0.05
+        ):
+            raise ValueError("primary")
+    assert time.monotonic() - start < 2 * 0.05 + 1.0
 
 
 @pytest.mark.parametrize("blocked_at", ["recv", "pong", "close"])
@@ -497,6 +536,29 @@ async def test_caller_cancel_in_same_tick_as_operation_timeout_propagates(monkey
     time.sleep(0.3)
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+async def test_blocking_on_new_callback_is_bounded_by_deadline(monkeypatch):
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+
+    async def on_new(count):
+        await asyncio.Event().wait()
+
+    start = time.monotonic()
+    events, deadline_hit = await asyncio.wait_for(
+        subscriptions.sample_subscription(
+            FakeTransport([_ack(), _next("a"), _next("b")]),
+            api_key=KEY,
+            query="subscription { dockerContainerStats { id } }",
+            deadline_s=0.05,
+            key=_key,
+            is_complete=_complete,
+            on_new=on_new,
+        ),
+        timeout=3,
+    )
+    assert deadline_hit is True
+    assert time.monotonic() - start < 0.05 + 0.05 + 1.0
 
 
 async def test_cleanup_exceptions_are_logged_without_secrets(caplog):

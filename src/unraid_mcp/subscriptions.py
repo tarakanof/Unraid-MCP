@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import ssl
+import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any, Protocol
@@ -104,10 +105,10 @@ async def sample_subscription(
     subscribed = False
 
     async def _send(message: str) -> None:
-        await asyncio.wait_for(transport.send(message), timeout=max(0, deadline_ts - loop.time()))
+        await bounded(transport.send(message), deadline_ts - loop.time())
 
     async def _recv() -> dict[str, Any]:
-        raw = await asyncio.wait_for(transport.recv(), timeout=max(0, deadline_ts - loop.time()))
+        raw = await bounded(transport.recv(), deadline_ts - loop.time())
         try:
             return redact(json.loads(raw), secrets)
         except ValueError:
@@ -182,9 +183,10 @@ async def sample_subscription(
                         collected[k] = data
                         if on_new is not None:
                             # Must be non-blocking (the progress reporter only enqueues);
-                            # failures never break sampling.
+                            # failures and timeouts (bounded by the sampling deadline)
+                            # never break sampling.
                             try:
-                                await on_new(len(collected))
+                                await bounded(on_new(len(collected)), deadline_ts - loop.time())
                             except Exception as exc:  # noqa: BLE001
                                 log.debug("on_new callback failed: %s", type(exc).__name__)
                     if is_complete(collected, was_new):
@@ -213,25 +215,23 @@ async def sample_subscription(
         if subscribed:
             try:
                 # Reserve half the grace for closing even if unsubscribe blocks.
-                await asyncio.wait_for(
+                await bounded(
                     transport.send(json.dumps({"id": _SUB_ID, "type": "complete"})),
-                    timeout=max(0, (cleanup_deadline - loop.time()) / 2),
+                    (cleanup_deadline - loop.time()) / 2,
                 )
             except Exception:
                 log.debug("subscription cleanup: unsubscribe failed")
         try:
-            await asyncio.wait_for(
-                transport.close(), timeout=max(0, cleanup_deadline - loop.time())
-            )
+            await bounded(transport.close(), cleanup_deadline - loop.time())
         except Exception:
             log.debug("subscription cleanup: close failed")
 
-    # No outer timeout_at: every await above is already bounded (sampling by deadline_ts,
-    # cleanup by cleanup_deadline <= operation_deadline). An outer timeout cancelling the
-    # same task as an inner wait_for timer double-cancels under a loop stall, which made
-    # wait_for raise CancelledError (losing the partial result) and made a coinciding caller
-    # cancel indistinguishable from the timeout. With only per-await timers, any
-    # CancelledError reaching here is a genuine caller cancellation and propagates.
+    # No outer timeout_at: every await above is bounded by its own sequential timer
+    # (sampling by deadline_ts, cleanup by cleanup_deadline <= operation_deadline). An outer
+    # timeout cancelling the same task double-cancels under a loop stall (losing the
+    # partial result) and makes a coinciding caller cancel indistinguishable from the
+    # timeout. With only per-await timers, any CancelledError reaching here is a genuine
+    # caller cancellation and propagates.
     try:
         try:
             return await _sample()
@@ -245,6 +245,43 @@ async def sample_subscription(
         raise UnraidConnectionError(
             "Unraid closed the stats subscription while sending a protocol frame."
         ) from None
+
+
+@asynccontextmanager
+async def bounded_connection(cm: Any, *, deadline_ts: float) -> AsyncIterator[WSTransport]:
+    """Enter a connection context manager with every phase individually bounded.
+
+    Setup may take until ``deadline_ts + CLEANUP_GRACE_S``; exit gets ``CLEANUP_GRACE_S``.
+    A stalled exit is abandoned (the production transport's ``close`` aborts the socket
+    in its own ``finally``) and never replaces the primary outcome.
+    """
+    loop = asyncio.get_running_loop()
+    transport = await bounded(cm.__aenter__(), deadline_ts + CLEANUP_GRACE_S - loop.time())
+    exc_info: tuple[Any, Any, Any] = (None, None, None)
+    try:
+        yield transport
+    except BaseException:
+        exc_info = sys.exc_info()
+        raise
+    finally:
+        try:
+            await bounded(cm.__aexit__(*exc_info), CLEANUP_GRACE_S)
+        except Exception:
+            log.debug("subscription cleanup: connection exit failed")
+
+
+async def bounded(awaitable: Awaitable[Any], timeout: float) -> Any:
+    """Await ``awaitable`` for at most ``timeout`` seconds (raises ``TimeoutError``).
+
+    Uses ``asyncio.timeout`` rather than ``wait_for``: on Python 3.11 ``wait_for`` can
+    swallow a caller cancellation that lands in the same iteration the awaitable
+    completes, and under a loop stall a stacked timer + cancel makes it raise
+    ``CancelledError`` instead of ``TimeoutError``. ``timeout`` converts only its own
+    cancellation, so a caller cancel always propagates. Keep these awaits sequential,
+    never nested under another timeout on the same task.
+    """
+    async with asyncio.timeout(max(0, timeout)):
+        return await awaitable
 
 
 class _WebsocketsTransport:
@@ -312,7 +349,7 @@ async def open_ws(
             yield transport
         finally:
             try:
-                await asyncio.wait_for(transport.close(), timeout=CLEANUP_GRACE_S)
+                await bounded(transport.close(), CLEANUP_GRACE_S)
             except Exception:
                 log.debug("subscription cleanup: close failed")
     except (OSError, websockets.WebSocketException) as exc:
