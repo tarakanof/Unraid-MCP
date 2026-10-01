@@ -225,6 +225,14 @@ def _rate(value: Any) -> dict[str, Any]:
     return {"bytes_per_sec": round(float(value), 1), "human": f"{human}/s"}
 
 
+def _count(value: Any) -> int | None:
+    """BigInt counters may arrive as strings; coerce to int, None if unparseable."""
+    try:
+        return int(value) if value is not None and value != "" else None
+    except (TypeError, ValueError):
+        return None
+
+
 def shape_metrics_network(data: dict | None) -> list[dict[str, Any]]:
     """Shape ``metrics.network`` per-interface throughput.
 
@@ -241,10 +249,10 @@ def shape_metrics_network(data: dict | None) -> list[dict[str, Any]]:
             "utilization_percent": n.get("utilizationPercent"),
             "bytes_received": _size_from_bytes(n.get("bytesReceived")),
             "bytes_sent": _size_from_bytes(n.get("bytesSent")),
-            "receive_errors": n.get("receiveErrors"),
-            "transmit_errors": n.get("transmitErrors"),
-            "receive_dropped": n.get("receiveDropped"),
-            "transmit_dropped": n.get("transmitDropped"),
+            "receive_errors": _count(n.get("receiveErrors")),
+            "transmit_errors": _count(n.get("transmitErrors")),
+            "receive_dropped": _count(n.get("receiveDropped")),
+            "transmit_dropped": _count(n.get("transmitDropped")),
             "last_updated": n.get("lastUpdated"),
         }
         for n in network

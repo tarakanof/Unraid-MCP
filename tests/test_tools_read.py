@@ -232,10 +232,10 @@ _NET_ROW = {
     "utilizationPercent": 10.3,
     "bytesReceived": "1073741824",
     "bytesSent": 2048,
-    "receiveErrors": 1,
-    "transmitErrors": 0,
+    "receiveErrors": "1",
+    "transmitErrors": "0",
     "receiveDropped": 2,
-    "transmitDropped": 0,
+    "transmitDropped": "bogus",
     "lastUpdated": "2026-01-01T00:00:00Z",
 }
 _METRICS_OK = {"metrics": {"cpu": {"percentTotal": 1.0, "cpus": []}}}
@@ -256,6 +256,8 @@ async def test_system_metrics_includes_network(mocked_client):
     assert nic["bytes_sent"] == {"bytes": 2048, "human": "2.0 KiB"}
     assert nic["receive_errors"] == 1
     assert nic["receive_dropped"] == 2
+    assert nic["transmit_errors"] == 0
+    assert nic["transmit_dropped"] is None
     assert nic["utilization_percent"] == 10.3
     assert "cpu" in out
 
