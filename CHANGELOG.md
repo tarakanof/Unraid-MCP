@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.1 - 2026-10-01
+
+### Fixed
+
+- **Container stats could turn collected samples into an error.** Under an
+  event-loop stall, coincident timers in the subscription sampler converted a
+  partial result into "exceeded its sampling deadline". Every await in the
+  stats and Docker-update paths now has its own `asyncio.timeout` bound. Caller
+  cancellation always propagates, including around the Python 3.11 `wait_for`
+  bug. A blocked progress callback or connection close can no longer hang a
+  tool, and buffered frames can't overrun the sampling deadline (#144).
+
 ## 0.8.0 - 2026-10-01
 
 Audit release (epic #121): fixes from a Codex code review, gaps against MCP spec
