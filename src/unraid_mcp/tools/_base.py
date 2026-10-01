@@ -180,6 +180,26 @@ async def gather_all(*aws: Awaitable[Any]) -> list[Any]:
         raise
 
 
+async def execute_with_fallback(
+    client: UnraidClient,
+    query: str,
+    legacy_query: str,
+    variables: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Run ``query``; if the API rejects a newer field, retry once with
+    ``legacy_query`` (the baseline selection every supported build accepts).
+
+    Only an unknown-field validation error triggers the retry — auth, network
+    and other GraphQL errors propagate untouched.
+    """
+    try:
+        return await client.execute(query, variables)
+    except UnraidGraphQLError as exc:
+        if not unsupported_field_error(exc):
+            raise
+        return await client.execute(legacy_query, variables)
+
+
 def require_confirm(confirm: bool, action: str) -> None:
     """Raise ``ToolError`` (before any network call) if a destructive action was
     not explicitly confirmed."""

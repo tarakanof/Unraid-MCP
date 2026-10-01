@@ -74,8 +74,8 @@ NOTIF_OK = _data({"notifications": {"overview": {"unread": {"alert": 0, "warning
 
 async def test_health_runs_queries_concurrently():
     resp = {
-        queries.ARRAY_STATUS: ARRAY_OK,
-        queries.UPS_DEVICES: UPS_OK,
+        queries.ARRAY_STATUS_LEGACY: ARRAY_OK,
+        queries.UPS_DEVICES_LEGACY: UPS_OK,
         queries.NOTIFICATIONS_OVERVIEW: NOTIF_OK,
         queries.WARNINGS_AND_ALERTS: ALERTS_OK,
     }
@@ -91,14 +91,14 @@ async def test_health_array_failure_still_raises_and_cancels_siblings():
     log: list[str] = []
     cancelled: list[str] = []
     resp = {
-        queries.ARRAY_STATUS: httpx.ConnectError("refused"),
-        queries.UPS_DEVICES: UPS_OK,
+        queries.ARRAY_STATUS_LEGACY: httpx.ConnectError("refused"),
+        queries.UPS_DEVICES_LEGACY: UPS_OK,
         queries.NOTIFICATIONS_OVERVIEW: NOTIF_OK,
         queries.WARNINGS_AND_ALERTS: ALERTS_OK,
     }
     delays = {
-        queries.ARRAY_STATUS: 0.02,
-        queries.UPS_DEVICES: 10,
+        queries.ARRAY_STATUS_LEGACY: 0.02,
+        queries.UPS_DEVICES_LEGACY: 10,
         queries.NOTIFICATIONS_OVERVIEW: 10,
         queries.WARNINGS_AND_ALERTS: 10,
     }
@@ -109,7 +109,7 @@ async def test_health_array_failure_still_raises_and_cancels_siblings():
         assert time.perf_counter() - start < 2  # did not wait for the slow siblings
     assert set(log) == set(resp)  # all four were in flight
     assert set(cancelled) == {
-        queries.UPS_DEVICES,
+        queries.UPS_DEVICES_LEGACY,
         queries.NOTIFICATIONS_OVERVIEW,
         queries.WARNINGS_AND_ALERTS,
     }
@@ -118,8 +118,8 @@ async def test_health_array_failure_still_raises_and_cancels_siblings():
 
 async def test_health_ups_failure_still_degrades():
     resp = {
-        queries.ARRAY_STATUS: ARRAY_OK,
-        queries.UPS_DEVICES: _gql_error("no ups"),
+        queries.ARRAY_STATUS_LEGACY: ARRAY_OK,
+        queries.UPS_DEVICES_LEGACY: _gql_error("no ups"),
         queries.UPS_CONFIGURATION: _data({"upsConfiguration": {"service": "enable"}}),
         queries.NOTIFICATIONS_OVERVIEW: NOTIF_OK,
         queries.WARNINGS_AND_ALERTS: ALERTS_OK,

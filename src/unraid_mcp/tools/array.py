@@ -18,13 +18,22 @@ from ..formatting import (
     shape_physical_disk,
     shape_physical_disks,
 )
-from ._base import DESTRUCTIVE, MUTATING, READ_ONLY, guarded, require_confirm
+from ._base import (
+    DESTRUCTIVE,
+    MUTATING,
+    READ_ONLY,
+    execute_with_fallback,
+    guarded,
+    require_confirm,
+)
 
 # ── Read logic ───────────────────────────────────────────────────────────────
 
 
 async def fetch_array_status(client: UnraidClient) -> dict[str, Any]:
-    return shape_array_status(await client.execute(queries.ARRAY_STATUS))
+    return shape_array_status(
+        await execute_with_fallback(client, queries.ARRAY_STATUS, queries.ARRAY_STATUS_LEGACY)
+    )
 
 
 async def fetch_parity_status(client: UnraidClient) -> dict[str, Any]:
