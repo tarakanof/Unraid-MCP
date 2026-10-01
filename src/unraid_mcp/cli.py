@@ -33,8 +33,8 @@ def _with_bearer_token(settings: Settings) -> Settings:
 
     A configured token is kept. Otherwise one is generated and shown exactly
     once so the operator can configure their client (localhost binds only: a
-    non-localhost bind without a token is refused with ``UnraidConfigError``). The effective token lives
-    on the settings so the client, stats sampler and logging all scrub it.
+    non-localhost bind without a token is refused with ``UnraidConfigError``).
+    The effective token lives on the settings so the client, stats sampler and logging all scrub it.
     """
     if settings.bearer_token and settings.bearer_token.get_secret_value():
         return settings
