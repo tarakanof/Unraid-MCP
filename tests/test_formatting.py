@@ -434,6 +434,7 @@ def test_mutation_list_shaper_preserves_explicit_list(payload):
         ([{"date": "2026-01-01"}], {"ok": True, "history_count": 1}),
         ({}, {"ok": True}),
         (True, {"ok": True}),
+        (False, {"ok": False}),
     ],
 )
 def test_shape_mutation_json_result_accepts_any_non_null(payload, expected):

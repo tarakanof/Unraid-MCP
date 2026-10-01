@@ -555,6 +555,8 @@ def shape_mutation_json_result(data: dict | None, result_path: tuple[str, ...]) 
     action succeeded. A null/missing field is still an error.
     """
     payload = _mutation_payload(data, result_path, allow_empty=True)
+    if isinstance(payload, bool):
+        return {"ok": payload}
     out: dict[str, Any] = {"ok": True}
     if isinstance(payload, list):
         out["history_count"] = len(payload)
