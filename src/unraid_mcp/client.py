@@ -52,6 +52,11 @@ class UnraidClient:
         self._http = http_client
         self._host = host_label or urlparse(url).netloc or url
 
+    @property
+    def secrets(self) -> tuple[str | None, ...]:
+        """Configured secrets (API key, bearer token) for scrubbing output."""
+        return self._secrets
+
     async def execute(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         """Run a GraphQL operation and return its ``data`` object.
 

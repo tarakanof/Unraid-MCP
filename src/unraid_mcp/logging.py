@@ -124,6 +124,11 @@ def configure_logging(
     # one meaningless line per request. Keep that logger at WARNING.
     logging.getLogger("mcp.server.streamable_http").setLevel(logging.WARNING)
 
+    # websockets logs raw frames at DEBUG (and its own repr/escaping), which
+    # can embed secrets in forms literal-substring redaction cannot match.
+    # Never emit them, whatever our own level is.
+    logging.getLogger("websockets").setLevel(logging.INFO)
+
     # Remove handlers we control to keep this idempotent across reconfigures.
     for handler in list(root.handlers):
         if getattr(handler, "_unraid_mcp", False):

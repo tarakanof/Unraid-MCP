@@ -123,14 +123,14 @@ def test_main_stdio_logging_redacts_bearer_token(clean_env, monkeypatch, capsys)
     clean_env.setenv("UNRAID_API_KEY", "supersecretkey123")
     clean_env.setenv("UNRAID_MCP_BEARER_TOKEN", TOKEN)
     fake = MagicMock()
-    fake.run.side_effect = lambda transport: logging.getLogger("websockets.client").debug(
+    fake.run.side_effect = lambda transport: logging.getLogger("httpcore.transport").debug(
         "< TEXT %r", f'{{"type":"error","payload":"{TOKEN}"}}'
     )
     clean_env.setenv("UNRAID_MCP_LOG_LEVEL", "DEBUG")
     monkeypatch.setattr(cli, "build_server", lambda settings: fake)
     assert cli.main() == 0
     err = capsys.readouterr().err
-    assert "websockets.client" in err
+    assert "httpcore.transport" in err
     assert TOKEN not in err
     assert "***REDACTED***" in err
 

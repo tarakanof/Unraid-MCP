@@ -112,3 +112,18 @@ def test_configure_logging_redacts_bearer_token_in_traceback(capsys):
     assert token not in captured.err
     assert "***REDACTED***" in captured.err
     assert captured.out == ""
+
+
+def test_websockets_frames_never_logged_even_at_debug(capsys):
+    import logging
+
+    from websockets.frames import Frame, Opcode
+
+    configure_logging("DEBUG", "supersecretkey123")
+    frame = Frame(Opcode.TEXT, b'{"payload": "supersecretkey123", "q": "a\\"b"}')
+    logging.getLogger("websockets.client").debug("< %s", frame)
+    logging.getLogger("websockets.client").info("handshake ok")
+    err = capsys.readouterr().err
+    assert "supersecretkey123" not in err
+    assert "TEXT" not in err
+    assert "handshake ok" in err

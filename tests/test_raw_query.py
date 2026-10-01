@@ -123,3 +123,15 @@ async def test_run_graphql_query_redacts_tool_error_output(settings_factory):
     assert KEY not in str(result)
     assert token not in str(result)
     assert "***REDACTED***" in str(result)
+
+
+@pytest.mark.parametrize("which", ["key", "token"])
+async def test_run_graphql_query_parse_error_redacts_secrets(settings_factory, which):
+    token = "bearertoken1234567890123456789012"
+    secret = KEY if which == "key" else token
+    server = build_server(settings_factory(allow_raw_query=True, bearer_token=token))
+    async with Client(server) as session:
+        result = await session.call_tool("run_graphql_query", {"query": f"query {{ a }} q{secret}"})
+    assert result.is_error
+    assert secret not in str(result)
+    assert "***REDACTED***" in str(result)

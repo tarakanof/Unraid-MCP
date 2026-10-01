@@ -11,6 +11,7 @@ from mcp.types import ToolAnnotations
 
 from ..client import UnraidClient
 from ..errors import UnraidError, UnraidGraphQLError
+from ..logging import redact
 
 if TYPE_CHECKING:  # avoid a runtime import cycle (server imports tools imports _base)
     from ..server import AppContext
@@ -102,10 +103,12 @@ async def guarded(
     client = get_client(ctx)
     try:
         return await fn(client, *args, **kwargs)
-    except ToolError:
-        raise
+    except ToolError as exc:
+        # Local errors (e.g. GraphQL parse failures) can echo caller input,
+        # which may contain a configured secret.
+        raise ToolError(redact(str(exc), client.secrets)) from None
     except UnraidError as exc:
-        raise ToolError(str(exc)) from None
+        raise ToolError(redact(str(exc), client.secrets)) from None
 
 
 async def safe_query(
