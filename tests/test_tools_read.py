@@ -784,13 +784,17 @@ async def test_container_falls_back_on_old_api(mocked_client):
             ]
         }
     }
-    async with mocked_client([missing_field_error, _resp(list_data)]) as (c, r):
+    async with mocked_client([missing_field_error, missing_field_error, _resp(list_data)]) as (
+        c,
+        r,
+    ):
         out = await docker.fetch_container(c, "1:abcdef")
     assert out["id"] == "1:abcdef"
-    assert r.call_count == 2
+    assert r.call_count == 3
     calls = r.calls
     assert json.loads(calls[0].request.content)["query"] == queries.DOCKER_CONTAINER
-    assert json.loads(calls[1].request.content)["query"] == queries.LIST_CONTAINERS
+    assert json.loads(calls[1].request.content)["query"] == queries.DOCKER_CONTAINER_BASIC
+    assert json.loads(calls[2].request.content)["query"] == queries.LIST_CONTAINERS
 
 
 async def test_container_null_native_result_falls_back(mocked_client):
@@ -804,20 +808,27 @@ async def test_container_null_native_result_falls_back(mocked_client):
     assert r.call_count == 2
 
 
-async def test_container_name_lookup_stays_list_based(mocked_client):
-    """A plain name (no colon) never triggers the native id query."""
-    data = {
-        "docker": {
-            "containers": [
-                {"id": "1:abcdef", "names": ["/plex"], "state": "RUNNING"},
-            ]
-        }
-    }
-    async with mocked_client(_resp(data)) as (c, r):
+async def test_container_name_lookup_upgrades_to_detail(mocked_client):
+    """A name resolves via the list, then the native detail query by id, so name
+    and id lookups return identical output."""
+    lst = {"docker": {"containers": [{"id": "1:abcdef", "names": ["/plex"]}]}}
+    det = {"docker": {"container": _FULL_CONTAINER}}
+    async with mocked_client([_resp(lst), _resp(det)]) as (c, r):
+        by_name = await docker.fetch_container(c, "plex")
+    assert r.call_count == 2
+    assert json.loads(r.calls[1].request.content)["query"] == queries.DOCKER_CONTAINER
+    assert _sent_vars(r) == {"id": "1:abcdef"}
+    async with mocked_client(_resp(det)) as (c, _):
+        by_id = await docker.fetch_container(c, "1:abcdef")
+    assert by_name == by_id
+
+
+async def test_container_name_lookup_detail_null_keeps_list_row(mocked_client):
+    lst = {"docker": {"containers": [{"id": "1:abcdef", "names": ["/plex"]}]}}
+    async with mocked_client([_resp(lst), _resp({"docker": {"container": None}})]) as (c, r):
         out = await docker.fetch_container(c, "plex")
     assert out["id"] == "1:abcdef"
-    assert r.call_count == 1
-    assert _sent_query(r) == queries.LIST_CONTAINERS
+    assert r.call_count == 2
 
 
 async def test_vms_with_domains_and_fallback(mocked_client):
@@ -1322,6 +1333,232 @@ async def test_read_log_file_unsupported_api(mocked_client):
     async with mocked_client(resp) as (c, r):
         with pytest.raises(ToolError, match="does not support"):
             await misc.fetch_log_file(c, "/var/log/syslog", api_version="7.1.0")
+
+
+# ── #116: richer container fields + port conflicts ──────────────────────────
+
+_FULL_CONTAINER = {
+    "id": "1:abcdef",
+    "names": ["/plex"],
+    "image": "plexinc/pms",
+    "state": "RUNNING",
+    "status": "Up 2 hours",
+    "autoStart": True,
+    "autoStartOrder": 3,
+    "autoStartWait": 10,
+    "isUpdateAvailable": True,
+    "isRebuildReady": False,
+    "isOrphaned": False,
+    "webUiUrl": "http://tower:32400/web",
+    "lanIpPorts": ["192.168.1.2:32400"],
+    "iconUrl": "http://x/icon.png",
+    "projectUrl": "http://x",
+    "supportUrl": "http://x/support",
+    "templatePath": "/boot/config/plugins/dockerMan/templates-user/my-plex.xml",
+    "hostConfig": {"networkMode": "bridge"},
+    "mounts": [{"Source": "/mnt/user/media", "Destination": "/media"}],
+    "labels": {"net.unraid.docker.managed": "dockerman"},
+    "tailscaleEnabled": True,
+    "tailscaleStatus": {"online": True, "version": "1.60", "hostname": "plex"},
+    "ports": [],
+}
+
+
+async def test_list_containers_includes_cheap_fields(mocked_client):
+    async with mocked_client(_resp({"docker": {"containers": [_FULL_CONTAINER]}})) as (c, r):
+        out = await docker.fetch_containers(c)
+    assert _sent_query(r) == queries.LIST_CONTAINERS
+    assert out[0]["update_available"] is True
+    assert out[0]["orphaned"] is False
+    assert out[0]["web_ui_url"] == "http://tower:32400/web"
+    assert out[0]["auto_start_order"] == 3
+    assert out[0]["network_mode"] == "bridge"
+    assert "size_rw" not in out[0] and "labels" not in out[0]
+
+
+async def test_list_containers_null_new_fields(mocked_client):
+    row = {"id": "1:a", "names": ["/x"], "hostConfig": None}
+    async with mocked_client(_resp({"docker": {"containers": [row]}})) as (c, _):
+        out = await docker.fetch_containers(c)
+    assert out[0]["network_mode"] is None
+    assert out[0]["update_available"] is None
+    assert out[0]["web_ui_url"] is None
+
+
+async def test_list_containers_older_api_falls_back(mocked_client):
+    err = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "isOrphaned" on type "DockerContainer".'}],
+            "data": None,
+        },
+    )
+    basic = {"docker": {"containers": [{"id": "1:a", "names": ["/x"], "state": "RUNNING"}]}}
+    async with mocked_client([err, _resp(basic)]) as (c, r):
+        out = await docker.fetch_containers(c)
+    assert r.call_count == 2
+    assert json.loads(r.calls[1].request.content)["query"] == queries.LIST_CONTAINERS_BASIC
+    assert out[0]["name"] == "x"
+    assert out[0]["update_available"] is None
+
+
+async def test_list_containers_other_error_not_swallowed(mocked_client):
+    err = httpx.Response(200, json={"errors": [{"message": "boom"}], "data": None})
+    async with mocked_client(err) as (c, r):
+        with pytest.raises(UnraidGraphQLError):
+            await docker.fetch_containers(c)
+    assert r.call_count == 1
+
+
+async def test_container_detail_fields_no_size_keys(mocked_client):
+    async with mocked_client(_resp({"docker": {"container": _FULL_CONTAINER}})) as (c, r):
+        out = await docker.fetch_container(c, "1:abcdef")
+    assert r.call_count == 1
+    assert not any(k.startswith("size_") for k in out)
+    assert "sizeRootFs" not in _sent_query(r)
+    assert out["mounts"] == _FULL_CONTAINER["mounts"]
+    assert out["labels"] == _FULL_CONTAINER["labels"]
+    assert out["labels_truncated"] is False
+    assert out["lan_ip_ports"] == ["192.168.1.2:32400"]
+    assert out["rebuild_ready"] is False
+    assert out["tailscale"]["online"] is True
+    assert out["tailscale_enabled"] is True
+
+
+async def test_container_detail_null_fields_and_big_labels(mocked_client):
+    row = {
+        "id": "1:a",
+        "names": ["/x"],
+        "labels": {f"k{i}": "v" * 100 for i in range(100)},
+        "mounts": None,
+        "tailscaleStatus": None,
+    }
+    async with mocked_client(_resp({"docker": {"container": row}})) as (c, _):
+        out = await docker.fetch_container(c, "1:a")
+    assert out["labels"] is None
+    assert out["labels_truncated"] is True
+    assert out["mounts"] == []
+    assert out["tailscale"] is None
+
+
+async def test_container_detail_older_api_falls_back_to_basic(mocked_client):
+    err = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "sizeRw" on type "DockerContainer".'}],
+            "data": None,
+        },
+    )
+    basic = {"docker": {"container": {"id": "1:a", "names": ["/x"], "state": "RUNNING"}}}
+    async with mocked_client([err, _resp(basic)]) as (c, r):
+        out = await docker.fetch_container(c, "1:a")
+    assert r.call_count == 2
+    assert json.loads(r.calls[1].request.content)["query"] == queries.DOCKER_CONTAINER_BASIC
+    assert out["name"] == "x"
+
+
+async def test_port_conflicts_happy(mocked_client):
+    data = {
+        "docker": {
+            "portConflicts": {
+                "containerPorts": [
+                    {
+                        "privatePort": 80,
+                        "type": "TCP",
+                        "containers": [{"id": "1:a", "name": "a"}, {"id": "1:b", "name": "b"}],
+                    }
+                ],
+                "lanPorts": [
+                    {
+                        "lanIpPort": "192.168.1.2:8080",
+                        "publicPort": 8080,
+                        "type": "TCP",
+                        "containers": [{"id": "1:a", "name": "a"}],
+                    }
+                ],
+            }
+        }
+    }
+    async with mocked_client(_resp(data)) as (c, r):
+        out = await docker.fetch_docker_port_conflicts(c)
+    assert _sent_query(r) == queries.DOCKER_PORT_CONFLICTS
+    assert out["has_conflicts"] is True
+    assert out["container_ports"][0]["private_port"] == 80
+    assert [x["name"] for x in out["container_ports"][0]["containers"]] == ["a", "b"]
+    assert out["lan_ports"][0]["lan_ip_port"] == "192.168.1.2:8080"
+
+
+async def test_port_conflicts_empty_and_null(mocked_client):
+    empty = {"docker": {"portConflicts": {"containerPorts": [], "lanPorts": []}}}
+    async with mocked_client(_resp(empty)) as (c, _):
+        out = await docker.fetch_docker_port_conflicts(c)
+    assert out == {"container_ports": [], "lan_ports": [], "has_conflicts": False}
+    async with mocked_client(_resp({"docker": {"portConflicts": None}})) as (c, _):
+        assert (await docker.fetch_docker_port_conflicts(c))["has_conflicts"] is False
+
+
+async def test_port_conflicts_unsupported_api(mocked_client):
+    err = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "portConflicts" on type "Docker".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client(err) as (c, _):
+        with pytest.raises(ToolError, match="port-conflict"):
+            await docker.fetch_docker_port_conflicts(c, api_version="7.1.0")
+
+
+async def test_port_conflicts_other_error_propagates(mocked_client):
+    err = httpx.Response(200, json={"errors": [{"message": "boom"}], "data": None})
+    async with mocked_client(err) as (c, _):
+        with pytest.raises(UnraidGraphQLError):
+            await docker.fetch_docker_port_conflicts(c)
+
+
+_SIZES = {
+    "docker": {
+        "containers": [
+            {"id": "1:other", "sizeRootFs": 5, "sizeRw": 5, "sizeLog": 5},
+            {"id": "1:abcdef", "sizeRootFs": 2147483648, "sizeRw": "1024", "sizeLog": None},
+        ]
+    }
+}
+
+
+async def test_container_include_sizes_true(mocked_client):
+    det = {"docker": {"container": _FULL_CONTAINER}}
+    async with mocked_client([_resp(det), _resp(_SIZES)]) as (c, r):
+        out = await docker.fetch_container(c, "1:abcdef", include_sizes=True)
+    assert r.call_count == 2
+    assert json.loads(r.calls[1].request.content)["query"] == queries.DOCKER_CONTAINER_SIZES
+    assert out["size_root_fs"] == {"bytes": 2147483648, "human": "2.0 GiB"}
+    assert out["size_rw"] == {"bytes": 1024, "human": "1.0 KiB"}
+    assert out["size_log"] == {"bytes": None, "human": None}
+    assert out["id"] == "1:abcdef"
+
+
+async def test_container_include_sizes_missing_container_is_null(mocked_client):
+    det = {"docker": {"container": _FULL_CONTAINER}}
+    other = {"docker": {"containers": [{"id": "1:other", "sizeRw": 5}]}}
+    async with mocked_client([_resp(det), _resp(other)]) as (c, _):
+        out = await docker.fetch_container(c, "1:abcdef", include_sizes=True)
+    assert out["size_rw"] == {"bytes": None, "human": None}
+
+
+async def test_container_include_sizes_unsupported_api(mocked_client):
+    det = {"docker": {"container": _FULL_CONTAINER}}
+    err = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "sizeRw" on type "DockerContainer".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client([_resp(det), err]) as (c, _):
+        with pytest.raises(ToolError, match="sizes"):
+            await docker.fetch_container(c, "1:abcdef", include_sizes=True)
 
 
 @pytest.mark.parametrize(
