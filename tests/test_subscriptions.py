@@ -360,6 +360,50 @@ async def test_blocked_pong_returns_partial_at_deadline():
     assert deadline_hit is True
 
 
+async def test_pong_send_closed_returns_partial():
+    class ClosingPong(FakeTransport):
+        async def send(self, message):
+            await super().send(message)
+            if json.loads(message)["type"] == "pong":
+                raise WSClosed()
+
+    transport = ClosingPong([_ack(), _next("a"), json.dumps({"type": "ping"})])
+    events, deadline_hit = await _sample_transport(transport, deadline_s=5.0)
+    assert events == [json.loads(_next("a"))["payload"]["data"]]
+    assert deadline_hit is True
+
+
+async def test_pong_send_closed_without_data_is_connection_error():
+    class ClosingPong(FakeTransport):
+        async def send(self, message):
+            await super().send(message)
+            if json.loads(message)["type"] == "pong":
+                raise WSClosed()
+
+    transport = ClosingPong([_ack(), json.dumps({"type": "ping"})])
+    with pytest.raises(UnraidConnectionError, match="before sending any data"):
+        await _sample_transport(transport, deadline_s=5.0)
+
+
+async def test_operation_timeout_during_cleanup_detected_despite_early_clock(monkeypatch):
+    # asyncio may fire timers slightly early: loop.time() then still reads before
+    # the deadline. The timeout must be recognised via the timeout context itself.
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+    loop = asyncio.get_running_loop()
+    real_time = loop.time
+
+    class EarlyClock(FakeTransport):
+        async def close(self):
+            # Timers are already scheduled; lag the clock so they fire "early".
+            monkeypatch.setattr(loop, "time", lambda: real_time() - 0.5, raising=False)
+            await asyncio.Event().wait()
+
+    events, _ = await asyncio.wait_for(
+        _sample_transport(EarlyClock([_ack(), _next("a"), _BLOCK])), timeout=3
+    )
+    assert events
+
+
 @pytest.mark.parametrize(
     "blocked_send,blocked_close", [("complete", False), (None, True), ("complete", True)]
 )

@@ -152,6 +152,8 @@ async def sample_subscription(
             while True:
                 try:
                     msg = await _recv()
+                    if msg.get("type") == "ping":
+                        await _send(json.dumps({"type": "pong"}))
                 except TimeoutError:
                     deadline_hit = True
                     break
@@ -188,9 +190,7 @@ async def sample_subscription(
                     raise UnraidGraphQLError(f"Subscription error: {messages}", errors=errors)
                 elif mtype == "complete":
                     break
-                elif mtype == "ping":
-                    await _send(json.dumps({"type": "pong"}))
-                # connection_ack duplicates / unknown frames are ignored.
+                # ping handled above; connection_ack duplicates / unknown frames are ignored.
         except TimeoutError:
             # A blocked pong consumes the same sampling window as a blocked recv.
             deadline_hit = True
@@ -219,7 +219,7 @@ async def sample_subscription(
             log.debug("subscription cleanup: close failed")
 
     try:
-        async with asyncio.timeout_at(operation_deadline):
+        async with asyncio.timeout_at(operation_deadline) as op_timeout:
             try:
                 return await _sample()
             finally:
@@ -228,7 +228,9 @@ async def sample_subscription(
                 except asyncio.CancelledError:
                     # The operation timeout may fire while cleanup is awaiting close.
                     # Preserve the primary result/error, but propagate caller cancellation.
-                    if loop.time() < operation_deadline:
+                    # expired() is authoritative; loop.time() can read early since
+                    # asyncio fires timers up to clock_resolution ahead of schedule.
+                    if not op_timeout.expired():
                         raise
                     log.debug("subscription cleanup: operation deadline reached")
     except TimeoutError:
