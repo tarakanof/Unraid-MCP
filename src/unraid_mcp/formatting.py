@@ -17,6 +17,7 @@ import re
 from typing import Any
 
 from .errors import UnraidServerError
+from .types import ArrayDisk, Container, Disk, HealthSummary, Size
 
 _FAILED_STATUSES = {"DISK_DSBL", "DISK_INVALID", "DISK_WRONG", "DISK_DSBL_NEW", "DISK_NP_DSBL"}
 # DISK_NP means "no device present" - an empty/unassigned array slot, which is a
@@ -51,12 +52,12 @@ def kib_to_bytes(value: Any) -> int | None:
         return None
 
 
-def _size_from_kib(value: Any) -> dict[str, Any]:
+def _size_from_kib(value: Any) -> Size:
     b = kib_to_bytes(value)
     return {"bytes": b, "human": human_size(b)}
 
 
-def _size_from_bytes(value: Any) -> dict[str, Any]:
+def _size_from_bytes(value: Any) -> Size:
     try:
         b = int(value) if value is not None and value != "" else None
     except (TypeError, ValueError):
@@ -84,7 +85,7 @@ def array_disk_health(status: str | None, warning: Any = 0, critical: Any = 0) -
     return "unknown"
 
 
-def _shape_array_disk(d: dict | None) -> dict[str, Any] | None:
+def _shape_array_disk(d: dict | None) -> ArrayDisk | None:
     if not d:
         return None
     return {
@@ -136,7 +137,7 @@ def shape_array_status(data: dict | None) -> dict[str, Any]:
     }
 
 
-def shape_physical_disk(d: dict | None) -> dict[str, Any] | None:
+def shape_physical_disk(d: dict | None) -> Disk | None:
     if not d:
         return None
     return {
@@ -160,7 +161,7 @@ def shape_physical_disk(d: dict | None) -> dict[str, Any] | None:
     }
 
 
-def shape_physical_disks(data: dict | None) -> list[dict[str, Any]]:
+def shape_physical_disks(data: dict | None) -> list[Disk | None]:
     return [shape_physical_disk(d) for d in ((data or {}).get("disks") or [])]
 
 
@@ -336,7 +337,7 @@ def _shape_labels(labels: Any) -> tuple[Any, bool]:
     return labels, False
 
 
-def shape_container(c: dict | None) -> dict[str, Any] | None:
+def shape_container(c: dict | None) -> Container | None:
     """Compact list-view shape (cheap fields only). Newer-API fields are ``None``
     when the connected build predates them."""
     if not c:
@@ -367,7 +368,7 @@ def shape_container(c: dict | None) -> dict[str, Any] | None:
     }
 
 
-def shape_container_detail(c: dict | None) -> dict[str, Any] | None:
+def shape_container_detail(c: dict | None) -> Container | None:
     """Single-container shape: the list view plus mounts, labels, links
     and Tailscale. Sizes are NOT included (see :func:`shape_container_sizes`)."""
     out = shape_container(c)
@@ -416,7 +417,7 @@ def shape_container_sizes(data: dict | None, container_id: str | None) -> dict[s
     }
 
 
-def shape_containers(data: dict | None) -> list[dict[str, Any]]:
+def shape_containers(data: dict | None) -> list[Container | None]:
     docker = (data or {}).get("docker") or {}
     return [shape_container(c) for c in (docker.get("containers") or [])]
 
@@ -815,7 +816,7 @@ def summarize_health(
     notifications_overview: dict[str, Any],
     checks: dict[str, str] | None = None,
     top_alerts: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
+) -> HealthSummary:
     """Compose a compact, triage-friendly health roll-up from the shaped parts.
 
     ``top_alerts`` is the shaped ``warningsAndAlerts`` list, or None when the API
