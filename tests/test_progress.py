@@ -357,6 +357,46 @@ async def test_update_paths_propagate_caller_cancel_while_heartbeat_unwinds(path
     assert task.cancelled()
 
 
+async def test_stalled_callback_cleanup_cannot_hang_reporter_or_heartbeat(monkeypatch):
+    # A callback that blocks in its cancellation cleanup must not hang the tool: the
+    # helper task is abandoned after REAP_TIMEOUT_S.
+    monkeypatch.setattr(_base, "REAP_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(_base, "PROGRESS_TIMEOUT_S", 0.02)
+    release = asyncio.Event()
+
+    class Ctx:
+        async def report_progress(self, progress, total=None, message=None):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release.wait()  # async cleanup that outlives the budget
+                raise
+
+    async def work():
+        await asyncio.sleep(0.05)
+        return "ok"
+
+    async def beat(message):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+            raise
+
+    async def go():
+        async with progress_reporter(Ctx()) as progress:
+            await progress("x")
+            await asyncio.sleep(0.02)
+        return await with_heartbeat(work(), beat, interval_s=0.01)
+
+    try:
+        assert await asyncio.wait_for(go(), timeout=3) == "ok"
+    finally:
+        release.set()
+        await asyncio.sleep(0.01)
+    assert not _base._abandoned
+
+
 async def test_with_heartbeat_without_callback_just_awaits():
     async def work():
         return 7
