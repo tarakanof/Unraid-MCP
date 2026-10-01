@@ -46,7 +46,8 @@ when you set `UNRAID_MCP_ALLOW_MUTATIONS=true`, and every one of them needs
 agent→operator channel that posts a persistent message straight into the Unraid
 WebGUI's notification bell, so an agent that spots a problem can leave a note where
 you'll actually see it. Destructive tools also ask the human to approve the exact
-consequence through MCP elicitation when the client supports it; `confirm=true` is
+consequence through MCP elicitation when the client supports it (2026-07-28 clients, or legacy
+clients over stdio; legacy clients over HTTP stay confirm-only); `confirm=true` is
 still required.
 
 A third **dangerous** tier (`UNRAID_MCP_ALLOW_DANGEROUS=true`) unlocks high-blast-radius

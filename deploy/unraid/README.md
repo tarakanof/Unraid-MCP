@@ -55,8 +55,14 @@ clients then connect to `http://<TOWER-IP>:6750/mcp` with a bearer token.
 `UNRAID_MCP_BEARER_TOKEN` is now required: the server refuses to start without
 it (it no longer logs a generated one). If your existing container has no
 **MCP Bearer Token** set, edit it, paste in a value from `openssl rand -hex 32`,
-and Apply. Re-copy `unraid-mcp.xml` to get the new advanced fields. See the repo
-README for the other 0.8 changes.
+and Apply. An installed container is edited from
+`templates-user/my-unraid-mcp.xml`, so re-copying `unraid-mcp.xml` does not add the
+new advanced fields to it. To get them, either add them as variables via **Add
+another Path, Port, Variable...** on the container's Edit page
+(`UNRAID_MCP_ALLOW_DANGEROUS`=`false`, `UNRAID_MCP_TIMEOUT`=`30`,
+`UNRAID_MCP_LONG_TIMEOUT`=`600`), or re-add the container from the refreshed
+template (existing values in `my-unraid-mcp.xml` are kept). See the repo README
+for the other 0.8 changes.
 
 ## Option B — Docker Compose / Portainer
 
