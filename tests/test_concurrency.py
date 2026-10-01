@@ -68,6 +68,7 @@ class _Mock:
 
 ARRAY_OK = _data({"array": {"state": "STARTED", "disks": []}})
 UPS_OK = _data({"upsDevices": []})
+ALERTS_OK = _data({"notifications": {"warningsAndAlerts": []}})
 NOTIF_OK = _data({"notifications": {"overview": {"unread": {"alert": 0, "warning": 0}}}})
 
 
@@ -76,13 +77,14 @@ async def test_health_runs_queries_concurrently():
         queries.ARRAY_STATUS: ARRAY_OK,
         queries.UPS_DEVICES: UPS_OK,
         queries.NOTIFICATIONS_OVERVIEW: NOTIF_OK,
+        queries.WARNINGS_AND_ALERTS: ALERTS_OK,
     }
     async with _Mock(resp) as client:
         start = time.perf_counter()
         out = await misc.fetch_health(client)
         elapsed = time.perf_counter() - start
     assert out["overall"] == "ok"
-    assert elapsed < DELAY * 2.5  # serial would be >= 3 * DELAY
+    assert elapsed < DELAY * 2.5  # serial would be >= 4 * DELAY
 
 
 async def test_health_array_failure_still_raises_and_cancels_siblings():
@@ -92,19 +94,25 @@ async def test_health_array_failure_still_raises_and_cancels_siblings():
         queries.ARRAY_STATUS: httpx.ConnectError("refused"),
         queries.UPS_DEVICES: UPS_OK,
         queries.NOTIFICATIONS_OVERVIEW: NOTIF_OK,
+        queries.WARNINGS_AND_ALERTS: ALERTS_OK,
     }
     delays = {
         queries.ARRAY_STATUS: 0.02,
         queries.UPS_DEVICES: 10,
         queries.NOTIFICATIONS_OVERVIEW: 10,
+        queries.WARNINGS_AND_ALERTS: 10,
     }
     async with _Mock(resp, delays=delays, log=log, cancelled=cancelled) as client:
         start = time.perf_counter()
         with pytest.raises(UnraidConnectionError):
             await misc.fetch_health(client)
         assert time.perf_counter() - start < 2  # did not wait for the slow siblings
-    assert set(log) == set(resp)  # all three were in flight
-    assert set(cancelled) == {queries.UPS_DEVICES, queries.NOTIFICATIONS_OVERVIEW}
+    assert set(log) == set(resp)  # all four were in flight
+    assert set(cancelled) == {
+        queries.UPS_DEVICES,
+        queries.NOTIFICATIONS_OVERVIEW,
+        queries.WARNINGS_AND_ALERTS,
+    }
     assert not [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
 
 
@@ -114,6 +122,7 @@ async def test_health_ups_failure_still_degrades():
         queries.UPS_DEVICES: _gql_error("no ups"),
         queries.UPS_CONFIGURATION: _data({"upsConfiguration": {"service": "enable"}}),
         queries.NOTIFICATIONS_OVERVIEW: NOTIF_OK,
+        queries.WARNINGS_AND_ALERTS: ALERTS_OK,
     }
     async with _Mock(resp, delay=0.01) as client:
         out = await misc.fetch_health(client)

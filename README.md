@@ -175,7 +175,7 @@ and the prompt just orchestrates existing tools.
 
 | URI | Same data as | Contents |
 | --- | --- | --- |
-| `unraid://health` | `get_health_summary` | Array state, capacity, unhealthy disks, parity status, UPS, unread notification counts |
+| `unraid://health` | `get_health_summary` | Array state, capacity, unhealthy disks, parity status, UPS, unread notification counts, `top_alerts` (up to 5 unread warnings/alerts) |
 | `unraid://system-info` | `get_system_info` | OS/kernel, CPU, memory, motherboard, versions, uptime, flash identity |
 
 **Prompt** (always available):

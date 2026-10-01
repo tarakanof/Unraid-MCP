@@ -494,9 +494,27 @@ def shape_flash(data: dict | None) -> dict[str, Any]:
     }
 
 
+_NOTIFICATION_DESC_MAX_CHARS = 500
+
+
+def _truncate_description(item: dict[str, Any]) -> dict[str, Any]:
+    desc = item.get("description")
+    if isinstance(desc, str) and len(desc) > _NOTIFICATION_DESC_MAX_CHARS:
+        return {
+            **item,
+            "description": desc[:_NOTIFICATION_DESC_MAX_CHARS] + _TRUNCATION_MARKER,
+        }
+    return item
+
+
 def shape_notifications(data: dict | None) -> list[dict[str, Any]]:
     notifications = (data or {}).get("notifications") or {}
-    return notifications.get("list") or []
+    return [_truncate_description(n) for n in (notifications.get("list") or [])]
+
+
+def shape_warnings_and_alerts(data: dict | None) -> list[dict[str, Any]]:
+    notifications = (data or {}).get("notifications") or {}
+    return [_truncate_description(n) for n in (notifications.get("warningsAndAlerts") or [])]
 
 
 def shape_notifications_overview(data: dict | None) -> dict[str, Any]:
@@ -646,13 +664,21 @@ def shape_mutation_result_list(
     return list(payload)
 
 
+_TOP_ALERTS_MAX = 5
+
+
 def summarize_health(
     array_out: dict[str, Any],
     ups_list: list[dict[str, Any]],
     notifications_overview: dict[str, Any],
     checks: dict[str, str] | None = None,
+    top_alerts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Compose a compact, triage-friendly health roll-up from the shaped parts."""
+    """Compose a compact, triage-friendly health roll-up from the shaped parts.
+
+    ``top_alerts`` is the shaped ``warningsAndAlerts`` list, or None when the API
+    build lacks that query (the key is then omitted from the result).
+    """
     disks = [
         d
         for d in (
@@ -710,6 +736,9 @@ def summarize_health(
         if runtime is not None and runtime < 300:
             critical = True
             reasons.append(f"UPS {name} runtime is {runtime} seconds (<5 minutes)")
+    if top_alerts and not (unread.get("alert") or unread.get("warning")):
+        # The overview query may have failed while warningsAndAlerts succeeded.
+        reasons.append(f"Unread warning/alert notifications: {len(top_alerts)}")
     attention = bool(reasons)
     failed_checks = [name for name, status in checks.items() if status == "failed"]
     reasons.extend(f"{name.capitalize()} check failed or is unsupported" for name in failed_checks)
@@ -722,7 +751,7 @@ def summarize_health(
         if failed_checks
         else "ok"
     )
-    return {
+    result = {
         "overall": overall,
         "reasons": reasons,
         "checks": checks,
@@ -744,3 +773,9 @@ def summarize_health(
         ],
         "notifications_unread": unread,
     }
+    if top_alerts is not None:
+        result["top_alerts"] = [
+            {"title": a.get("title"), "importance": a.get("importance")}
+            for a in top_alerts[:_TOP_ALERTS_MAX]
+        ]
+    return result

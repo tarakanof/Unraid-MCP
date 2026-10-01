@@ -258,6 +258,16 @@ query ListNotifications($filter: NotificationFilter!) {
 }
 """
 
+WARNINGS_AND_ALERTS = """
+query GetWarningsAndAlerts {
+  notifications {
+    warningsAndAlerts {
+      id title subject description importance link type timestamp formattedTimestamp
+    }
+  }
+}
+"""
+
 UPS_DEVICES = """
 query GetUpsDevices {
   upsDevices {
