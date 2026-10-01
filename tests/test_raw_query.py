@@ -138,7 +138,7 @@ async def test_run_graphql_query_parse_error_redacts_secrets(settings_factory, w
 
 
 async def test_run_graphql_query_redacts_numeric_secret(settings_factory):
-    token = "1234567890123456"
+    token = "12345678901234567890123456789012"
     with respx.mock:
         respx.post(URL).mock(
             return_value=httpx.Response(200, json={"data": {"n": int(token), "ok": 42}})
