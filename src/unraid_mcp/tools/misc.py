@@ -27,6 +27,7 @@ from ..formatting import (
     shape_notifications_overview,
     shape_plugins,
     shape_ups,
+    shape_warnings_and_alerts,
     summarize_health,
 )
 from ._base import (
@@ -201,7 +202,12 @@ async def fetch_health(client: UnraidClient) -> dict[str, Any]:
         except UnraidAuthError:
             return [], False, False
 
-    (array, array_ok), (ups, ups_ok, ups_eligible), (overview, notifications_ok) = await gather_all(
+    (
+        (array, array_ok),
+        (ups, ups_ok, ups_eligible),
+        (overview, notifications_ok),
+        (alerts, alerts_ok),
+    ) = await gather_all(
         safe_query_with_status(
             client, queries.ARRAY_STATUS, shape_array_status, {}, required_field="array"
         ),
@@ -212,6 +218,10 @@ async def fetch_health(client: UnraidClient) -> dict[str, Any]:
             shape_notifications_overview,
             {},
             tolerate_auth=True,
+        ),
+        # Optional: older builds lack warningsAndAlerts; then top_alerts is omitted.
+        safe_query_with_status(
+            client, queries.WARNINGS_AND_ALERTS, shape_warnings_and_alerts, [], tolerate_auth=True
         ),
     )
     checks = {
@@ -230,7 +240,8 @@ async def fetch_health(client: UnraidClient) -> dict[str, Any]:
         # Real boxes with no UPS report service=null, not "disable".
         if config_ok and (config.get("service") or "").lower() != "enable":
             checks["ups"] = "not_configured"
-    return summarize_health(array, ups, overview, checks)
+    top_alerts = alerts if alerts_ok or alerts else None
+    return summarize_health(array, ups, overview, checks, top_alerts)
 
 
 async def do_raw_query(
@@ -273,7 +284,8 @@ def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def get_health_summary(ctx: Context) -> dict[str, Any]:
         """Compact health roll-up for triage: array state, capacity, any unhealthy disks,
-        parity-check status, UPS state, and unread notification counts.
+        parity-check status, UPS state, unread notification counts, and up to 5 top
+        unread warnings/alerts (`top_alerts`, when the API supports it).
 
         overall is critical for red/failed/missing disks, UPS LOWBATT, or ONBATT with
         charge <20% or runtime <300 seconds; attention for other unhealthy disks,

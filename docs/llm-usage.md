@@ -60,7 +60,7 @@ A typical stdio client config:
 
 | Tool | Args | Use it to |
 |------|------|-----------|
-| `get_health_summary` | – | One-call triage: array state, capacity, unhealthy disks, parity status, UPS, unread alert counts. **Start here.** |
+| `get_health_summary` | – | One-call triage: array state, capacity, unhealthy disks, parity status, UPS, unread alert counts, `top_alerts` (up to 5). **Start here.** |
 | `get_system_info` | – | OS/kernel, CPU, memory, motherboard, Unraid + API versions, uptime, and (when supported) flash boot-device identity. |
 | `get_system_metrics` | – | Live utilization: total/per-core CPU %, memory/swap usage, temperatures, per-interface network throughput (`network`, omitted on API < 4.35). Requires API 7.2+; older builds get a friendly error. |
 | `get_services` | – | Health of the Unraid services stack (API, dynamix, etc.): name, online, uptime, version. |
@@ -81,6 +81,7 @@ A typical stdio client config:
 | `list_shares` | – | User shares with free/used/total sizes, allocator, cache mode, and (when set) include/exclude, split level, floor, and encryption status. |
 | `get_notifications_overview` | – | Unread/archive counts by severity. |
 | `list_notifications` | `notification_type="UNREAD"`, `importance=None`, `limit=25`, `offset=0` | List notifications. `notification_type` ∈ `UNREAD`/`ARCHIVE`; `importance` ∈ `INFO`/`WARNING`/`ALERT`. |
+| `list_warnings_and_alerts` | – | Current unread WARNING/ALERT notifications (deduplicated, latest first); same item shape as `list_notifications`. Cheapest "is anything wrong?" check. |
 | `get_ups_status` | – | UPS battery/load/runtime. |
 | `list_network_interfaces` | – | NICs with IPs, speed, state. |
 | `get_connect_status` | – | Registration/license + remote-access status. |
