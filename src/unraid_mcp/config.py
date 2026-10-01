@@ -31,8 +31,10 @@ _INSECURE_BEARER_TOKENS = {
 }
 
 
-class Settings(BaseSettings):
-    """Validated runtime configuration."""
+class BindSettings(BaseSettings):
+    """The HTTP bind/TLS fields only, so the container healthcheck can resolve
+    them with exactly the server's semantics (case-insensitive env, ``.env``)
+    without needing the Unraid API key or bearer token."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -41,6 +43,21 @@ class Settings(BaseSettings):
         extra="ignore",
         populate_by_name=True,
     )
+
+    host: str = Field(default="127.0.0.1", validation_alias="UNRAID_MCP_HOST")
+    port: int = Field(default=6750, validation_alias="UNRAID_MCP_PORT")
+    # Serve the HTTP transport over TLS directly. Both must be set to enable it;
+    # otherwise terminate TLS at a reverse proxy in front of this server.
+    tls_cert: str | None = Field(default=None, validation_alias="UNRAID_MCP_TLS_CERT")
+    tls_key: str | None = Field(default=None, validation_alias="UNRAID_MCP_TLS_KEY")
+
+    @property
+    def tls_enabled(self) -> bool:
+        return bool(self.tls_cert and self.tls_key)
+
+
+class Settings(BindSettings):
+    """Validated runtime configuration."""
 
     # ── Unraid connection ──────────────────────────────────────────────
     api_url: str = Field(validation_alias="UNRAID_API_URL")
@@ -52,17 +69,11 @@ class Settings(BaseSettings):
 
     # ── Transport ──────────────────────────────────────────────────────
     transport: Transport = Field(default="stdio", validation_alias="UNRAID_MCP_TRANSPORT")
-    host: str = Field(default="127.0.0.1", validation_alias="UNRAID_MCP_HOST")
-    port: int = Field(default=6750, validation_alias="UNRAID_MCP_PORT")
     bearer_token: SecretStr | None = Field(default=None, validation_alias="UNRAID_MCP_BEARER_TOKEN")
     # Comma-separated Host / Origin allow-lists for DNS-rebinding protection on
     # the HTTP transport. Required when binding to a non-localhost address.
     allowed_hosts: str | None = Field(default=None, validation_alias="UNRAID_MCP_ALLOWED_HOSTS")
     allowed_origins: str | None = Field(default=None, validation_alias="UNRAID_MCP_ALLOWED_ORIGINS")
-    # Serve the HTTP transport over TLS directly. Both must be set to enable it;
-    # otherwise terminate TLS at a reverse proxy in front of this server.
-    tls_cert: str | None = Field(default=None, validation_alias="UNRAID_MCP_TLS_CERT")
-    tls_key: str | None = Field(default=None, validation_alias="UNRAID_MCP_TLS_KEY")
 
     # ── Safety switches ────────────────────────────────────────────────
     allow_mutations: bool = Field(default=False, validation_alias="UNRAID_MCP_ALLOW_MUTATIONS")
@@ -160,10 +171,6 @@ class Settings(BaseSettings):
     @property
     def binds_localhost(self) -> bool:
         return self.host in ("127.0.0.1", "localhost", "::1")
-
-    @property
-    def tls_enabled(self) -> bool:
-        return bool(self.tls_cert and self.tls_key)
 
     def http_allowed_hosts(self) -> list[str]:
         """Host header allow-list for DNS-rebinding protection (HTTP transport)."""

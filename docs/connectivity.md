@@ -362,8 +362,9 @@ Docker `HEALTHCHECK`, and reverse-proxy upstream checks at `/health` so **the
 bearer token never has to land in monitoring config**:
 
 - **Docker / compose** — [`docker-compose.yml`](../docker-compose.yml) already
-  ships the pattern (a `python -c urllib` probe against `/health`, since the
-  image has no curl/wget). The image also bakes in a `HEALTHCHECK`, so Unraid's
+  ships the pattern (a `python -m unraid_mcp.healthcheck` probe of `/health`, since the
+  image has no curl/wget; it uses https without cert verification when
+  `UNRAID_MCP_TLS_CERT`/`KEY` are set). The image also bakes in a `HEALTHCHECK`, so Unraid's
   Docker tab shows health without any extra config.
 - **Uptime monitors** (Uptime Kuma, etc.) — monitor
   `http(s)://<your-mcp-host>/health` and expect `200`. Behind a reverse proxy

@@ -20,10 +20,11 @@ services:
       - "${UNRAID_MCP_PUBLISHED_ADDR:-127.0.0.1}:6750:6750"
     healthcheck:
       # GET /health is unauthenticated and never calls the Unraid API; the
-      # image has no curl/wget, so use urllib. Also baked into the image as
-      # a HEALTHCHECK; declared here too so `docker compose up` shows status.
-      # Reads UNRAID_MCP_PORT so this still works if you override it below.
-      test: ["CMD", "python", "-c", "import os,urllib.request as u; p=os.environ.get('UNRAID_MCP_PORT','6750'); u.urlopen(f'http://127.0.0.1:{p}/health', timeout=3)"]
+      # image has no curl/wget, so a tiny Python probe is used. Also baked into
+      # the image as a HEALTHCHECK; declared here too so `docker compose up`
+      # shows status. Honors UNRAID_MCP_PORT and switches to https (unverified,
+      # loopback only) when UNRAID_MCP_TLS_CERT/KEY are set.
+      test: ["CMD", "python", "-m", "unraid_mcp.healthcheck"]
       interval: 30s
       timeout: 5s
       start_period: 10s
