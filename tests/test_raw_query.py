@@ -135,3 +135,18 @@ async def test_run_graphql_query_parse_error_redacts_secrets(settings_factory, w
     assert result.is_error
     assert secret not in str(result)
     assert "***REDACTED***" in str(result)
+
+
+async def test_run_graphql_query_redacts_numeric_secret(settings_factory):
+    token = "1234567890123456"
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(200, json={"data": {"n": int(token), "ok": 42}})
+        )
+        server = build_server(settings_factory(allow_raw_query=True, bearer_token=token))
+        async with Client(server) as session:
+            result = await session.call_tool("run_graphql_query", {"query": "query { n ok }"})
+    assert not result.is_error
+    assert token not in str(result)
+    assert "***REDACTED***" in str(result)
+    assert "42" in str(result)

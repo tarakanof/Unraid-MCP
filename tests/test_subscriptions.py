@@ -294,3 +294,11 @@ async def test_invalid_json_frame_maps_to_secret_free_connection_error():
     with pytest.raises(UnraidConnectionError) as exc:
         await _sample([f"invalid {KEY}"])
     assert KEY not in str(exc.value)
+
+
+async def test_numeric_frame_type_redacts_all_digit_secret():
+    secret = "1234567890123456"
+    with pytest.raises(UnraidConnectionError) as exc:
+        await _sample([json.dumps({"type": int(secret)})], bearer_token=secret)
+    assert secret not in str(exc.value)
+    assert "***REDACTED***" in str(exc.value)

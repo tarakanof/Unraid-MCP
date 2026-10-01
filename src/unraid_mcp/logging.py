@@ -48,7 +48,11 @@ def redact(value: Any, secrets: Iterable[str | None]) -> Any:
             if all(v is old for v, old in zip(values, item, strict=True)):
                 return item
             return tuple(values) if isinstance(item, tuple) else values
-        if item is None or isinstance(item, (bool, int, float)):
+        if isinstance(item, (int, float)) and not isinstance(item, bool):
+            # An all-digit secret can come back as a JSON number.
+            text = str(item)
+            return _REDACTION if any(secret in text for secret in configured) else item
+        if item is None or isinstance(item, bool):
             return item
         rendered = str(item)
         scrubbed = scrub(rendered)
