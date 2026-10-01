@@ -213,6 +213,8 @@ def build_server(settings: Settings) -> MCPServer:
                 http,
                 host_label=settings.host_for_messages,
                 bearer_token=settings.bearer_token,
+                timeout=settings.timeout,
+                long_timeout=settings.long_timeout,
             )
             api_version, unraid_version = await _probe_versions(client)
             log.info(

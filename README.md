@@ -51,6 +51,10 @@ container with an available image update in one shot. It only takes effect when
 tools are flagged destructive and still require `confirm=true`. See
 [docs/security.md](docs/security.md) for the full tier breakdown.
 
+Slow mutations (Docker image updates, array start/stop) use a longer HTTP timeout,
+`UNRAID_MCP_LONG_TIMEOUT` (default 600s), instead of `UNRAID_MCP_TIMEOUT` (30s). If one
+times out, the operation may still be running on the server; check status before retrying.
+
 Beyond tools, the server also exposes two MCP **resources** (`unraid://health` and
 `unraid://system-info`) that a client can read without spending a tool call, and a
 **`triage`** prompt that walks an agent through investigating the box. See

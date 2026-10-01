@@ -40,6 +40,7 @@ fix a hostname/IP mismatch.
 | `UNRAID_MCP_ALLOW_DANGEROUS` | `false` | Register the high-blast-radius "dangerous" tools (array topology, container removal). No effect unless `UNRAID_MCP_ALLOW_MUTATIONS` is also `true`. Each still requires `confirm=true`. |
 | `UNRAID_MCP_ALLOW_RAW_QUERY` | `false` | Register the read-only raw GraphQL passthrough tool. |
 | `UNRAID_MCP_TIMEOUT` | `30` | HTTP timeout to the Unraid API (seconds). |
+| `UNRAID_MCP_LONG_TIMEOUT` | `600` | HTTP timeout (seconds) for slow, synchronous mutations: Docker container updates (single/batch/all) and array start/stop. On timeout the operation may still be running on the server; check status before retrying. |
 | `UNRAID_MCP_LOG_LEVEL` | `INFO` | Log level (logs go to stderr): `DEBUG`/`INFO`/`WARNING`/`ERROR`. |
 
 ## Transports

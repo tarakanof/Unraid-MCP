@@ -55,6 +55,8 @@ services:
       UNRAID_MCP_ALLOWED_HOSTS: "${UNRAID_MCP_ALLOWED_HOSTS:-127.0.0.1:6750,localhost:6750}"
       # UNRAID_MCP_TLS_CERT: "/certs/cert.pem"
       # UNRAID_MCP_TLS_KEY: "/certs/key.pem"
+      # HTTP timeout (seconds) for slow mutations (Docker updates, array start/stop).
+      UNRAID_MCP_LONG_TIMEOUT: "600"
       UNRAID_MCP_LOG_LEVEL: "INFO"
     # volumes:
     #   - /mnt/user/appdata/unraid-mcp/certs:/certs:ro

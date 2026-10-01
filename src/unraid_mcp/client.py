@@ -42,6 +42,8 @@ class UnraidClient:
         *,
         host_label: str | None = None,
         bearer_token: SecretStr | str | None = None,
+        timeout: float = 30.0,
+        long_timeout: float = 600.0,
     ) -> None:
         self._url = url
         self._key = api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key
@@ -51,27 +53,49 @@ class UnraidClient:
         self._secrets = (self._key, token)
         self._http = http_client
         self._host = host_label or urlparse(url).netloc or url
+        self.timeout = timeout
+        self.long_timeout = long_timeout
 
     @property
     def secrets(self) -> tuple[str | None, ...]:
         """Configured secrets (API key, bearer token) for scrubbing output."""
         return self._secrets
 
-    async def execute(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+    @property
+    def long_request_timeout(self) -> httpx.Timeout:
+        """Timeout for slow, synchronous mutations: only *read* is long, so
+        connect/write/pool still fail fast on an unreachable server."""
+        return httpx.Timeout(self.timeout, read=self.long_timeout)
+
+    async def execute(
+        self,
+        query: str,
+        variables: dict[str, Any] | None = None,
+        *,
+        timeout: float | httpx.Timeout | None = None,
+    ) -> dict[str, Any]:
         """Run a GraphQL operation and return its ``data`` object.
+
+        ``timeout`` overrides the shared client's timeout for this request only
+        (``None`` keeps the default). Pass it for long-running mutations; a read
+        timeout then reports that the operation may still be running.
 
         Raises an :class:`~unraid_mcp.errors.UnraidError` subclass on failure.
         Configured secrets are scrubbed from data and errors.
         """
-        data, _ = await self.execute_with_errors(query, variables)
+        data, _ = await self.execute_with_errors(query, variables, timeout=timeout)
         return data
 
     async def execute_with_errors(
-        self, query: str, variables: dict[str, Any] | None = None
+        self,
+        query: str,
+        variables: dict[str, Any] | None = None,
+        *,
+        timeout: float | httpx.Timeout | None = None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Return data and redacted partial errors; raise on total query failure."""
         try:
-            return await self._execute(query, variables)
+            return await self._execute(query, variables, timeout)
         except UnraidError as exc:
             message = redact(str(exc), self._secrets)
             if isinstance(exc, UnraidGraphQLError):
@@ -81,15 +105,22 @@ class UnraidClient:
             raise type(exc)(message) from None
 
     async def _execute(
-        self, query: str, variables: dict[str, Any] | None
+        self, query: str, variables: dict[str, Any] | None, timeout: float | httpx.Timeout | None
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         try:
             response = await self._http.post(
                 self._url,
                 json={"query": query, "variables": variables or {}},
                 headers={"x-api-key": self._key, "content-type": "application/json"},
+                timeout=httpx.USE_CLIENT_DEFAULT if timeout is None else timeout,
             )
         except httpx.TimeoutException as exc:
+            if timeout is not None and isinstance(exc, httpx.ReadTimeout):
+                raise UnraidConnectionError(
+                    f"Timed out waiting for Unraid at {self._host} to finish a long-running "
+                    "operation. It may still be running on the server: check its status "
+                    "(e.g. container/array state) before retrying."
+                ) from exc
             raise UnraidConnectionError(
                 f"Timed out talking to Unraid at {self._host}. Is the server up and reachable?"
             ) from exc

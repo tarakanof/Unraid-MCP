@@ -322,3 +322,44 @@ async def test_execute_with_errors_returns_redacted_errors(partial):
         ]
     else:
         assert errors == []
+
+
+async def test_default_timeout_used_for_normal_calls():
+    with respx.mock:
+        route = respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            await (await _client(http)).execute("query { x }")
+        assert route.calls.last.request.extensions["timeout"] == {
+            "connect": 30.0,
+            "read": 30.0,
+            "write": 30.0,
+            "pool": 30.0,
+        }
+
+
+async def test_per_call_timeout_overrides_client_default():
+    with respx.mock:
+        route = respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            await (await _client(http)).execute("mutation { x }", timeout=600.0)
+        assert route.calls.last.request.extensions["timeout"]["read"] == 600.0
+
+
+async def test_timeout_on_long_call_says_may_still_be_running():
+    with respx.mock:
+        respx.post(URL).mock(side_effect=httpx.ReadTimeout("slow"))
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            with pytest.raises(UnraidConnectionError) as exc:
+                await client.execute("mutation { x }", timeout=600.0)
+        assert "may still be running" in str(exc.value)
+        assert KEY not in str(exc.value)
+
+
+async def test_timeout_on_normal_call_does_not_claim_still_running():
+    with respx.mock:
+        respx.post(URL).mock(side_effect=httpx.ReadTimeout("slow"))
+        async with httpx.AsyncClient() as http:
+            with pytest.raises(UnraidConnectionError) as exc:
+                await (await _client(http)).execute("query { x }")
+        assert "may still be running" not in str(exc.value)
