@@ -457,6 +457,48 @@ async def test_loop_stall_past_operation_deadline_keeps_partial_result(monkeypat
     assert deadline_hit is True
 
 
+@pytest.mark.parametrize("blocked_at", ["recv", "pong", "close"])
+async def test_caller_cancel_in_same_tick_as_operation_timeout_propagates(monkeypatch, blocked_at):
+    # Caller cancel + the inner wait_for timer + the outer timeout_at all become due in
+    # one loop iteration (the loop is stalled synchronously once the transport reports
+    # it is blocked). The caller's cancellation must not be mistaken for the operation
+    # timeout, in the sampling phase (blocked recv / pong) or in cleanup (blocked close).
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+    blocked = asyncio.Event()
+
+    class SignalTransport(FakeTransport):
+        async def recv(self):
+            if self._script and self._script[0] is _BLOCK:
+                blocked.set()
+            return await super().recv()
+
+        async def send(self, message):
+            await super().send(message)
+            if blocked_at == "pong" and json.loads(message)["type"] == "pong":
+                blocked.set()
+                await asyncio.Event().wait()
+
+        async def close(self):
+            if blocked_at == "close":
+                blocked.set()
+                await asyncio.Event().wait()
+
+    script = {
+        "recv": [_ack(), _next("a"), _BLOCK],
+        "pong": [_ack(), _next("a"), json.dumps({"type": "ping"})],
+        "close": [_ack(), _next("a"), _next("a")],
+    }[blocked_at]
+    task = asyncio.create_task(_sample_transport(SignalTransport(script), deadline_s=0.05))
+    await asyncio.wait_for(blocked.wait(), timeout=3)
+    # Schedule the caller cancel as a timer after both deadlines, then stall the loop so
+    # all three timers are due in the same iteration.
+    loop = asyncio.get_running_loop()
+    loop.call_at(loop.time() + 0.12, task.cancel)
+    time.sleep(0.3)
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
 async def test_cleanup_exceptions_are_logged_without_secrets(caplog):
     class FailingCleanupTransport(FakeTransport):
         async def send(self, message):

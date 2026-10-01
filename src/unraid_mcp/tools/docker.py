@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import weakref
+from contextlib import AsyncExitStack
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -276,21 +277,30 @@ async def fetch_container_stats(
     bearer_token = settings.bearer_token.get_secret_value() if settings.bearer_token else None
     deadline_ts = asyncio.get_running_loop().time() + timeout_s
     try:
-        async with asyncio.timeout_at(deadline_ts + subscriptions.CLEANUP_GRACE_S):
-            async with open_conn(
-                settings.ws_url(), settings.ssl_context(), open_timeout=timeout_s
-            ) as transport:
-                events, deadline_hit = await subscriptions.sample_subscription(
-                    transport,
-                    api_key=api_key,
-                    bearer_token=bearer_token,
-                    query=queries.DOCKER_CONTAINER_STATS,
-                    deadline_s=timeout_s,
-                    deadline_ts=deadline_ts,
-                    key=_stats_key,
-                    is_complete=_stats_complete,
-                    on_new=_on_new,
-                )
+        # Only connection setup is bounded by a timer spanning the whole operation. A
+        # timeout_at around sampling too would stack a second cancel on the same task as
+        # sample_subscription's own timers and double-cancel under a loop stall.
+        async with AsyncExitStack() as stack:
+            transport = await asyncio.wait_for(
+                stack.enter_async_context(
+                    open_conn(settings.ws_url(), settings.ssl_context(), open_timeout=timeout_s)
+                ),
+                timeout=max(
+                    0,
+                    deadline_ts + subscriptions.CLEANUP_GRACE_S - asyncio.get_running_loop().time(),
+                ),
+            )
+            events, deadline_hit = await subscriptions.sample_subscription(
+                transport,
+                api_key=api_key,
+                bearer_token=bearer_token,
+                query=queries.DOCKER_CONTAINER_STATS,
+                deadline_s=timeout_s,
+                deadline_ts=deadline_ts,
+                key=_stats_key,
+                is_complete=_stats_complete,
+                on_new=_on_new,
+            )
     except TimeoutError:
         raise UnraidConnectionError(
             "The Unraid stats subscription exceeded its operation deadline. Retry the request."

@@ -103,24 +103,11 @@ async def sample_subscription(
     operation_deadline = deadline_ts + CLEANUP_GRACE_S
     subscribed = False
 
-    async def _bounded(awaitable: Any) -> Any:
-        # If the loop stalls past the operation deadline, this wait_for's timer and the
-        # outer timeout_at fire together: the task is cancelled twice and wait_for
-        # re-raises CancelledError instead of TimeoutError. Normalise that back to a
-        # plain deadline timeout so the sampler keeps its partial result; the outer
-        # timeout still uncancels on exit. Genuine caller cancellation re-raises.
-        try:
-            return await asyncio.wait_for(awaitable, timeout=max(0, deadline_ts - loop.time()))
-        except asyncio.CancelledError:
-            if op_timeout.expired():
-                raise TimeoutError from None
-            raise
-
     async def _send(message: str) -> None:
-        await _bounded(transport.send(message))
+        await asyncio.wait_for(transport.send(message), timeout=max(0, deadline_ts - loop.time()))
 
     async def _recv() -> dict[str, Any]:
-        raw = await _bounded(transport.recv())
+        raw = await asyncio.wait_for(transport.recv(), timeout=max(0, deadline_ts - loop.time()))
         try:
             return redact(json.loads(raw), secrets)
         except ValueError:
@@ -239,21 +226,17 @@ async def sample_subscription(
         except Exception:
             log.debug("subscription cleanup: close failed")
 
+    # No outer timeout_at: every await above is already bounded (sampling by deadline_ts,
+    # cleanup by cleanup_deadline <= operation_deadline). An outer timeout cancelling the
+    # same task as an inner wait_for timer double-cancels under a loop stall, which made
+    # wait_for raise CancelledError (losing the partial result) and made a coinciding caller
+    # cancel indistinguishable from the timeout. With only per-await timers, any
+    # CancelledError reaching here is a genuine caller cancellation and propagates.
     try:
-        async with asyncio.timeout_at(operation_deadline) as op_timeout:
-            try:
-                return await _sample()
-            finally:
-                try:
-                    await _cleanup()
-                except asyncio.CancelledError:
-                    # The operation timeout may fire while cleanup is awaiting close.
-                    # Preserve the primary result/error, but propagate caller cancellation.
-                    # expired() is authoritative; loop.time() can read early since
-                    # asyncio fires timers up to clock_resolution ahead of schedule.
-                    if not op_timeout.expired():
-                        raise
-                    log.debug("subscription cleanup: operation deadline reached")
+        try:
+            return await _sample()
+        finally:
+            await _cleanup()
     except TimeoutError:
         raise UnraidConnectionError(
             "The Unraid stats subscription exceeded its sampling deadline. Retry the request."
