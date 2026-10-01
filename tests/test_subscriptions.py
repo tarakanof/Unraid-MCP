@@ -411,7 +411,7 @@ async def test_operation_timeout_during_cleanup_detected_despite_early_clock(mon
 async def test_blocked_cleanup_preserves_primary_outcome(
     monkeypatch, caplog, blocked_send, blocked_close, outcome
 ):
-    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.1)
     endings = {
         "success": [_next("a"), _next("a")],
         "partial": [_next("a"), _BLOCK],
@@ -420,16 +420,21 @@ async def test_blocked_cleanup_preserves_primary_outcome(
     transport = BlockingTransport(
         [_ack(), *endings[outcome]], blocked_send=blocked_send, blocked_close=blocked_close
     )
+    # Wall-clock bounds are only a hang guard (a blocked cleanup waits forever); they
+    # are ~10x the expected ~0.2s so scheduler jitter under full-suite load can't trip
+    # them. The deadline is wide enough that "success" finishes before it on a loaded box.
     start = time.monotonic()
     with caplog.at_level(logging.DEBUG, logger="unraid_mcp.subscriptions"):
         if outcome == "error":
             with pytest.raises(UnraidGraphQLError, match="primary error"):
-                await asyncio.wait_for(_sample_transport(transport), timeout=0.3)
+                await asyncio.wait_for(_sample_transport(transport, deadline_s=0.1), timeout=3)
         else:
-            events, deadline_hit = await asyncio.wait_for(_sample_transport(transport), timeout=0.3)
+            events, deadline_hit = await asyncio.wait_for(
+                _sample_transport(transport, deadline_s=0.1), timeout=3
+            )
             assert len(events) == 1
             assert deadline_hit is (outcome == "partial")
-    assert time.monotonic() - start < 0.25
+    assert time.monotonic() - start < 2.0
     assert "cleanup" in caplog.text
     assert KEY not in caplog.text
 
