@@ -64,7 +64,9 @@ GraphQL data and errors, including nested containers and structured exception
 Websocket frames are scrubbed before processing, including unexpected frame types,
 `error` and `complete` payloads, and returned subscription samples. Client error
 messages and formatted logs, including tracebacks, use the same helper. Clean
-strings and containers pass through unchanged.
+strings and containers pass through unchanged. A bearer token generated on a
+localhost bind is shown once at startup; non-localhost binds refuse to start
+without a configured token, so no generated token is ever logged there.
 
 ## stdio is clean
 
@@ -76,7 +78,8 @@ All logs go to **stderr**; stdout carries only the JSON-RPC protocol. The defaul
 When you run `streamable-http`:
 
 - It binds `127.0.0.1` by default.
-- It requires a bearer token, compared in constant time. Requests with a missing or
+- It requires a bearer token (mandatory on non-localhost binds: the server refuses to
+  start without `UNRAID_MCP_BEARER_TOKEN` rather than log a generated one), compared in constant time. Requests with a missing or
   duplicated `Authorization` header are rejected.
 - Operator-supplied bearer tokens must be at least 32 characters and cannot be
   common placeholders such as `change-me`.

@@ -31,7 +31,7 @@ fix a hostname/IP mismatch.
 | `UNRAID_MCP_TRANSPORT` | `stdio` | `stdio` or `streamable-http`. |
 | `UNRAID_MCP_HOST` | `127.0.0.1` | Bind address for the HTTP transport. |
 | `UNRAID_MCP_PORT` | `6750` | Port for the HTTP transport. |
-| `UNRAID_MCP_BEARER_TOKEN` | – | Bearer token required from HTTP clients. If set, it must be at least 32 random characters and cannot be a placeholder. Auto-generated and printed to stderr if unset (changes every restart, so set a fixed one). |
+| `UNRAID_MCP_BEARER_TOKEN` | – | Bearer token required from HTTP clients. If set, it must be at least 32 random characters and cannot be a placeholder. **Required when `UNRAID_MCP_HOST` is not localhost** (startup fails otherwise). On localhost only, a token is generated and printed to stderr if unset (changes every restart, so set a fixed one). Generate one with `python -c 'import secrets;print(secrets.token_urlsafe(32))'`. |
 | `UNRAID_MCP_ALLOWED_HOSTS` | – | Comma-separated Host allow-list for DNS-rebinding protection (HTTP). Set this whenever you bind to a non-localhost address. |
 | `UNRAID_MCP_ALLOWED_ORIGINS` | – | Comma-separated Origin allow-list for DNS-rebinding protection (HTTP). |
 | `UNRAID_MCP_TLS_CERT` | – | TLS certificate (PEM) to serve the HTTP transport over HTTPS. Set with the key below. |

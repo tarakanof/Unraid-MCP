@@ -32,11 +32,19 @@ def _with_bearer_token(settings: Settings) -> Settings:
     """Return settings carrying the effective HTTP bearer token.
 
     A configured token is kept. Otherwise one is generated and shown exactly
-    once so the operator can configure their client. The effective token lives
+    once so the operator can configure their client (localhost binds only: a
+    non-localhost bind without a token is refused with ``UnraidConfigError``). The effective token lives
     on the settings so the client, stats sampler and logging all scrub it.
     """
     if settings.bearer_token and settings.bearer_token.get_secret_value():
         return settings
+    if not settings.binds_localhost:
+        # A generated token would land in container logs that others may read.
+        raise UnraidConfigError(
+            f"UNRAID_MCP_BEARER_TOKEN is required when binding {settings.host} "
+            "(non-localhost). Set it to a long random value; generate one with: "
+            "python -c 'import secrets;print(secrets.token_urlsafe(32))'"
+        )
     token = secrets.token_urlsafe(32)
     log.warning(
         "No UNRAID_MCP_BEARER_TOKEN set; generated one for this run. "
@@ -105,7 +113,11 @@ def main() -> int:
     # Logging redaction covers the bearer token for every transport: libraries
     # (e.g. websockets at DEBUG) may log raw frames before our own scrubbing.
     if settings.transport == "streamable-http":
-        settings = _with_bearer_token(settings)
+        try:
+            settings = _with_bearer_token(settings)
+        except UnraidConfigError as exc:
+            log.error("%s", exc)
+            return 1
     configure_logging(
         settings.log_level, settings.api_key.get_secret_value(), secrets=_log_secrets(settings)
     )

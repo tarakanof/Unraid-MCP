@@ -10,6 +10,14 @@
   (evacuation, parity-preserving shrink, checkpoints). Use the Unraid webGUI
   storage workflow instead (#99).
 
+### Changed
+
+- **BREAKING: `UNRAID_MCP_BEARER_TOKEN` is now required on non-localhost binds.**
+  Previously the server generated a token and logged it to stderr; on
+  `0.0.0.0` (Docker) anyone able to read container logs could authenticate.
+  It now exits non-zero with an actionable message instead. Localhost binds
+  keep the generate-and-log-once dev convenience (#101).
+
 ## 0.7.0 - 2026-08-06
 
 MCP spec 2026-07-28 adoption (epic #79): SDK v2, stateless HTTP, cache hints.

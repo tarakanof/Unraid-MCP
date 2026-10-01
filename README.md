@@ -75,6 +75,8 @@ docker run --rm -p 127.0.0.1:6750:6750 \
   dtarakanov/unraid-mcp:latest
 ```
 
+The image binds `0.0.0.0` inside the container, so `UNRAID_MCP_BEARER_TOKEN` is required (the server refuses to start without it; it never logs a generated one). Generate one with `openssl rand -hex 32` or `python -c 'import secrets;print(secrets.token_urlsafe(32))'`.
+
 This publishes the port on localhost only. To reach it from other machines, drop the
 `127.0.0.1:` prefix — but set `UNRAID_MCP_ALLOWED_HOSTS` and put TLS in front first.
 [docs/connectivity.md](docs/connectivity.md) has copy-paste recipes per topology.

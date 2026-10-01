@@ -32,6 +32,7 @@ services:
       # --- required ---
       UNRAID_API_URL: "${UNRAID_API_URL:?Set UNRAID_API_URL, e.g. https://yourhash.myunraid.net/graphql}"
       UNRAID_API_KEY: "${UNRAID_API_KEY:?Set UNRAID_API_KEY}"
+      # Required (the container binds 0.0.0.0; the server refuses to start without it).
       # Generate with: openssl rand -hex 32
       UNRAID_MCP_BEARER_TOKEN: "${UNRAID_MCP_BEARER_TOKEN:?Set UNRAID_MCP_BEARER_TOKEN}"
       # --- TLS to the Unraid API ---
