@@ -6,6 +6,17 @@
 
 - UNRAID_API_KEY is validated at startup (>=32 chars, no placeholder); redaction ignores secrets shorter than 8 chars (#152).
 
+### Changed
+
+- **`get_health_summary` / `unraid://health` now include temperature.** A fifth
+  concurrent check (`checks.temperature`) feeds sensor levels into the verdict:
+  a critical sensor gives `critical` (NVMe criticals give `attention`), a warning
+  sensor gives `attention`, plus a `temperature` section (hottest sensor and
+  warning/critical counts). Only real temperature sensors count (lm_sensors
+  fans/voltages/power and sentinel pin readings are ignored). On older APIs
+  without per-sensor `metrics.temperature` status/thresholds the check fails, so
+  health may now report `degraded` there (#151).
+
 ## 0.8.1 - 2026-10-01
 
 ### Fixed

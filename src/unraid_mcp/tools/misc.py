@@ -264,7 +264,7 @@ async def fetch_health(client: UnraidClient) -> HealthSummary:
             checks["ups"] = "not_configured"
     top_alerts = alerts if alerts_ok or alerts else None
     return summarize_health(
-        array, ups, overview, checks, top_alerts, sensors if temperature_ok else None
+        array, ups, overview, checks, top_alerts, sensors if temperature_ok or sensors else None
     )
 
 

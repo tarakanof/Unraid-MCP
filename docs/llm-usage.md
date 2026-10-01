@@ -218,12 +218,20 @@ runtime values do not trigger their numeric thresholds. Parity errors from the
 last completed check keep the verdict at attention until the next check.
 Temperature: the `temperature` section (`hottest` sensor name/value/unit/level plus
 `warning_count` and `critical_count`) is omitted when the temperature check failed
-(older API builds without per-sensor status/thresholds, or a permission error).
+(older API builds without per-sensor status/thresholds, or a permission error)
+and no usable partial data came back; the check is still `failed` then.
 The level is upstream's `current.status`, derived from the thresholds only when
-that is absent. Only real temperature sensors count: every typed sensor
-(CPU/DISK/NVME/MOTHERBOARD/...) plus `CUSTOM` sensors whose name contains "temp".
-Other `CUSTOM` lm_sensors readings (fans, voltages, energy) are ignored, since
-upstream reports them in CELSIUS with spurious `CRITICAL` status. Each warning or
+that is absent; thresholds come from the upstream API's own configuration.
+Upstream `type` is guessed from the sensor name and lm_sensors reports fans,
+voltages, power and energy in CELSIUS (with spurious `CRITICAL` status), so
+sensors are selected by id instead: lm_sensors ids (`<chip>:<label>:<key>`) count
+only when the key is `temp<N>_input`; other ids (`disk:...`, `ipmi:...`) count.
+Without an id, non-`CUSTOM` types or names containing "temp" count. Readings
+at or below -40 or at or above 125 are ignored (unconnected pins read 127, -128,
+255). NVMe sensors at `critical` only raise `attention`: the upstream default
+NVMe critical is 60 C, which NVMe drives routinely reach under load, so
+treating it as `critical` would flap. CPU, HDD and other sensors at `critical`
+raise `critical`. Each warning or
 critical sensor adds a reason such as `Temperature critical: disk1 65°C` (hottest
 first, at most 5 per level).
 Array state remains informational; a stopped array alone does not raise the

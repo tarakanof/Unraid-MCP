@@ -2067,8 +2067,9 @@ async def test_top_alerts_force_attention_when_overview_fails(mocked_client):
     assert out["top_alerts"][0]["importance"] == "ALERT"
 
 
-def _sensor(name, value, status, type_="DISK", unit="CELSIUS"):
+def _sensor(name, value, status, type_="DISK", unit="CELSIUS", id_=None):
     return {
+        "id": id_,
         "name": name,
         "type": type_,
         "current": {"value": value, "unit": unit, "status": status},
@@ -2128,13 +2129,30 @@ async def test_temperature_health_no_sensors(mocked_client):
     assert out["temperature"] == {"hottest": None, "warning_count": 0, "critical_count": 0}
 
 
-async def test_temperature_health_ignores_fans_and_voltages(mocked_client):
-    """lm_sensors CUSTOM fan/energy readings come back as CELSIUS + CRITICAL."""
+async def test_temperature_health_ignores_non_temperature_lm_sensors(mocked_client):
+    """lm_sensors reports fans/volts/power as CELSIUS + CRITICAL; type is name-guessed."""
     sensors = [
-        _sensor("nct6779 CPU Fan", 674, "CRITICAL", "CUSTOM"),
-        _sensor("i915 energy1", 509499.46, "CRITICAL", "CUSTOM"),
-        _sensor("nct6779 MB Temp", 40, "NORMAL", "CUSTOM"),
-        _sensor("k10temp CPU Temp", 43.25, "NORMAL", "CUSTOM"),
+        _sensor(
+            "nct CPU Fan", 674, "CRITICAL", "CUSTOM", id_="nct6779-isa-0290:CPU Fan:fan2_input"
+        ),
+        _sensor(
+            "i915 energy1",
+            509499.46,
+            "CRITICAL",
+            "CUSTOM",
+            id_="i915-pci-0900:energy1:energy1_input",
+        ),
+        _sensor("amdgpu fan1", 3000, "CRITICAL", "GPU", id_="amdgpu-pci-0800:fan1:fan1_input"),
+        _sensor("wmi CPU Fan", 2000, "CRITICAL", "CPU_PACKAGE", id_="asus-wmi:CPU Fan:fan1_input"),
+        _sensor("nct Vcore", 90, "CRITICAL", "CPU_CORE", id_="nct6779-isa-0290:Vcore:in0_input"),
+        _sensor("it87 power1", 99, "CRITICAL", "CUSTOM", id_="it87-isa-0a40:power1:power1_input"),
+        _sensor(
+            "k10temp CPU Temp",
+            43.25,
+            "NORMAL",
+            "CUSTOM",
+            id_="k10temp-pci-00c3:CPU Temp:temp1_input",
+        ),
     ]
     async with mocked_client(_health_responses(sensors)) as (c, _r):
         out = await misc.fetch_health(c)
@@ -2143,12 +2161,64 @@ async def test_temperature_health_ignores_fans_and_voltages(mocked_client):
     assert out["temperature"]["critical_count"] == 0
 
 
-async def test_temperature_health_custom_named_temp_counts(mocked_client):
-    async with mocked_client(
-        _health_responses([_sensor("nct6779 CPUTemp", 95, "CRITICAL", "CUSTOM")])
-    ) as (c, _r):
+@pytest.mark.parametrize("label", ["CPUTIN", "AUXTIN1", "Tdie", "PECI Agent 0"])
+async def test_temperature_health_custom_lm_temp_input_counts(mocked_client, label):
+    sensor = _sensor(label, 95, "CRITICAL", "CUSTOM", id_=f"nct6779-isa-0290:{label}:temp2_input")
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
         out = await misc.fetch_health(c)
     assert out["overall"] == "critical"
+    assert out["reasons"] == [f"Temperature critical: {label} 95°C"]
+
+
+@pytest.mark.parametrize("value", [127, -128, 255])
+async def test_temperature_health_sentinel_readings_ignored(mocked_client, value):
+    sensor = _sensor("AUXTIN3", value, "CRITICAL", "CUSTOM", id_="nct:AUXTIN3:temp6_input")
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "ok"
+    assert out["temperature"]["hottest"] is None
+
+
+@pytest.mark.parametrize(
+    ("sensor", "expected"),
+    [
+        (_sensor("WD SN570", 65, "CRITICAL", "NVME", id_="disk:22392R"), "attention"),
+        (
+            _sensor("Composite", 65, "CRITICAL", "NVME", id_="nvme-pci-0100:Composite:temp1_input"),
+            "attention",
+        ),
+        (_sensor("TOSHIBA", 65, "CRITICAL", "DISK", id_="disk:52U0A0"), "critical"),
+        (_sensor("IPMI CPU", 95, "CRITICAL", "CPU_PACKAGE", id_="ipmi:CPU Temp"), "critical"),
+        (_sensor("MB", 95, "CRITICAL", "MOTHERBOARD", id_="nct:MB:temp1_input"), "critical"),
+    ],
+)
+async def test_temperature_health_ids_kept_and_nvme_downgraded(mocked_client, sensor, expected):
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == expected
+    assert out["reasons"][0].startswith("Temperature critical:")
+    assert out["temperature"]["critical_count"] == 1
+
+
+async def test_temperature_health_nvme_critical_does_not_mask_hdd_critical(mocked_client):
+    sensors = [
+        _sensor("nvme", 70, "CRITICAL", "NVME", id_="disk:n"),
+        _sensor("hdd", 62, "CRITICAL", "DISK", id_="disk:h"),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+
+
+async def test_temperature_health_no_id_fallback(mocked_client):
+    sensors = [
+        _sensor("CPU Fan", 674, "CRITICAL", "CUSTOM"),
+        _sensor("MB Temp", 95, "CRITICAL", "CUSTOM"),
+        _sensor("cpu", 40, "NORMAL", "CPU_PACKAGE"),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["reasons"] == ["Temperature critical: MB Temp 95°C"]
 
 
 async def test_temperature_health_level_derived_when_status_unknown(mocked_client):
@@ -2190,7 +2260,8 @@ async def test_temperature_health_query_failure_degrades(mocked_client, failure)
     assert out["checks"]["temperature"] == "failed"
     assert out["overall"] == "degraded"
     assert out["reasons"] == ["Temperature check failed or is unsupported"]
-    assert "temperature" not in out
+    # Partial GraphQL errors keep usable data (#143); the check stays failed.
+    assert ("temperature" in out) == (failure == "partial")
 
 
 async def test_temperature_health_connection_error_propagates(mocked_client):

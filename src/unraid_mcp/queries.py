@@ -80,7 +80,7 @@ HEALTH_TEMPERATURE = """
 query GetHealthTemperature {
   metrics {
     temperature {
-      sensors { name type current { value unit status } warning critical }
+      sensors { id name type current { value unit status } warning critical }
     }
   }
 }

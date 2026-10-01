@@ -814,22 +814,49 @@ _TEMP_UNIT_SYMBOLS = {"CELSIUS": "°C", "FAHRENHEIT": "°F", "KELVIN": "K", "RAN
 _TEMP_REASONS_MAX = 5
 
 
-def shape_health_temperature(data: dict | None) -> list[dict[str, Any]]:
-    """Shape ``metrics.temperature.sensors`` down to real temperature sensors.
+_LM_KEY = re.compile(r"^[a-z]+\d*_input$")
+_LM_TEMP_KEY = re.compile(r"^temp\d+_input$")
+# Unconnected nct/it87 pins read 127 / -128 / 255; not real temperatures.
+_TEMP_SENTINEL_MIN, _TEMP_SENTINEL_MAX = -40, 125
 
-    lm_sensors chips surface fans (RPM), voltages and energy counters as
-    ``CUSTOM`` sensors reported in CELSIUS with upstream ``CRITICAL`` status
-    (e.g. a 2504 RPM fan at "2504 CELSIUS"). Every typed sensor (CPU/DISK/NVME/
-    MOTHERBOARD/...) is kept; ``CUSTOM`` ones only when the name says "temp"
-    (``CPU Temp``, ``MB Temp``, ``temp1``). Level prefers upstream
-    ``current.status`` (see ``_shape_sensor``).
+
+def _is_real_temperature(sensor: dict[str, Any]) -> bool:
+    """True when the upstream sensor is a temperature reading.
+
+    Upstream ``type`` is derived from the sensor *name* and lm_sensors reports
+    every ``*_input`` (fan RPM, volts, watts, energy) in CELSIUS, so ``type`` is
+    unreliable both ways. The id (``<chip>:<label>:<key>`` for lm_sensors,
+    ``disk:<serial>``, ``ipmi:...``) is not: lm-shaped keys must be
+    ``temp<N>_input``; other ids (disks, IPMI temperature SDRs) are kept. Without
+    an id, fall back to ``type != CUSTOM`` or a "temp" in the name.
+    """
+    sensor_id = sensor.get("id")
+    if sensor_id:
+        key = str(sensor_id).rsplit(":", 1)[-1]
+        return bool(_LM_TEMP_KEY.match(key)) if _LM_KEY.match(key) else True
+    return sensor.get("type") != "CUSTOM" or "temp" in (sensor.get("name") or "").lower()
+
+
+def shape_health_temperature(data: dict | None) -> list[dict[str, Any]]:
+    """Shape ``metrics.temperature.sensors`` down to trustworthy temperatures.
+
+    Drops non-temperature lm_sensors readings (see ``_is_real_temperature``) and
+    sentinel values from unconnected pins. Level prefers upstream
+    ``current.status`` (see ``_shape_sensor``). ``nvme`` marks NVMe sensors, whose
+    upstream critical (60 C default) is routinely reached under load.
     """
     temperature = ((data or {}).get("metrics") or {}).get("temperature") or {}
-    return [
-        _shape_sensor(s)
-        for s in temperature.get("sensors") or []
-        if s and (s.get("type") != "CUSTOM" or "temp" in (s.get("name") or "").lower())
-    ]
+    out = []
+    for s in temperature.get("sensors") or []:
+        if not s or not _is_real_temperature(s):
+            continue
+        value = (s.get("current") or {}).get("value")
+        if value is not None and not _TEMP_SENTINEL_MIN < value < _TEMP_SENTINEL_MAX:
+            continue
+        shaped = _shape_sensor(s)
+        shaped["nvme"] = s.get("type") == "NVME" or "nvme" in str(s.get("id") or "").lower()
+        out.append(shaped)
+    return out
 
 
 def _temperature_signals(
@@ -869,7 +896,10 @@ def _temperature_signals(
         "warning_count": len(warning),
         "critical_count": len(critical),
     }
-    return summary, reasons, bool(critical), bool(warning)
+    # NVMe drives routinely touch their 60 C default critical under load: that
+    # alone is attention, not critical.
+    hard_critical = any(not s.get("nvme") for s in critical)
+    return summary, reasons, hard_critical, bool(warning or critical)
 
 
 def summarize_health(
@@ -885,7 +915,7 @@ def summarize_health(
     ``top_alerts`` is the shaped ``warningsAndAlerts`` list, or None when the API
     build lacks that query (the key is then omitted from the result).
     ``temperature_sensors`` is ``shape_health_temperature`` output, or None when
-    the temperature check failed (the ``temperature`` key is then omitted).
+    the temperature check failed without usable data (the key is then omitted).
     """
     disks = [
         d
