@@ -320,9 +320,10 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         charge <20% or runtime <300 seconds; attention for other unhealthy disks,
         unread alerts/warnings, UPS on battery, or parity errors. Failed queries
         yield degraded when no critical/attention signal exists; otherwise ok.
-        Temperature sensors (CPU/DISK/NVME/... plus CUSTOM sensors named "temp"; fans,
-        voltages and energy counters are ignored) at critical raise critical, at
-        warning raise attention; `temperature` gives the hottest sensor and the
+        Temperature sensors are picked by id (lm_sensors temp<N>_input, disk, IPMI;
+        fans/voltages/power and sentinel readings are ignored). A sensor at critical
+        raises critical (an NVMe at critical only raises attention), at warning
+        raises attention; `temperature` gives the hottest sensor and the
         warning/critical counts (omitted when that query failed).
         UNRAID_MCP_HEALTH_IGNORE_SENSORS excludes named sensors from the
         verdict (counted in `ignored_count`).

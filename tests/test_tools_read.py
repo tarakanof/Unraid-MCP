@@ -2351,3 +2351,33 @@ def test_settings_health_ignored_sensors_parsing(settings_factory):
     assert settings_factory().health_ignored_sensors == ()
     cfg = settings_factory(health_ignore_sensors=" AUXTIN0, nct6779-isa-0290 AUXTIN1 ,,")
     assert cfg.health_ignored_sensors == ("auxtin0", "nct6779-isa-0290 auxtin1")
+
+
+@pytest.mark.parametrize(
+    ("unit", "hot", "sentinel"),
+    [("FAHRENHEIT", 203, 260), ("KELVIN", 368.15, 400.15), ("RANKINE", 662.67, 720.0)],
+)
+async def test_temperature_health_non_celsius_units(mocked_client, unit, hot, sentinel):
+    sensors = [
+        _sensor("cpu", hot, "CRITICAL", "CPU_PACKAGE", unit=unit, id_="ipmi:CPU Temp"),
+        _sensor("pin", sentinel, "CRITICAL", "CUSTOM", unit=unit, id_="nct:AUXTIN3:temp6_input"),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+    assert out["temperature"]["critical_count"] == 1
+    assert out["temperature"]["hottest"]["name"] == "cpu"
+
+
+async def test_temperature_health_ignore_chip_name_does_not_match(mocked_client):
+    sensor = _sensor("nct6779-isa-0290 AUXTIN1", 95, "CRITICAL", "CUSTOM", id_=_PIN)
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c, ignore_sensors=("nct6779-isa-0290",))
+    assert out["overall"] == "critical"
+
+
+async def test_temperature_health_ignore_label_with_server_prefix(mocked_client):
+    sensor = _sensor("nct6779-isa-0290 AUXTIN1", 95, "CRITICAL", "CUSTOM", id_="srv:" + _PIN)
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c, ignore_sensors=("auxtin1",))
+    assert out["overall"] == "ok"

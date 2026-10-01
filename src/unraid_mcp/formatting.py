@@ -820,6 +820,17 @@ _LM_TEMP_KEY = re.compile(r"^temp\d+_input$")
 _TEMP_SENTINEL_MIN, _TEMP_SENTINEL_MAX = -40, 125
 
 
+def _to_celsius(value: float, unit: Any) -> float:
+    """Upstream converts readings to the configured default unit; normalise for the guard."""
+    if unit == "FAHRENHEIT":
+        return (value - 32) * 5 / 9
+    if unit == "KELVIN":
+        return value - 273.15
+    if unit == "RANKINE":
+        return (value - 491.67) * 5 / 9
+    return value
+
+
 def _is_real_temperature(sensor: dict[str, Any]) -> bool:
     """True when the upstream sensor is a temperature reading.
 
@@ -843,9 +854,10 @@ def _sensor_ignored(sensor: dict[str, Any], ignore: tuple[str, ...]) -> bool:
     sensor_id = str(sensor.get("id") or "")
     name = str(sensor.get("name") or "")
     candidates = {sensor_id, name}
+    # lm_sensors ids end ...:<chip>:<label>:<key>; the label is second to last.
     parts = sensor_id.split(":")
-    if len(parts) >= 3:
-        candidates.add(parts[1])
+    if len(parts) >= 3 and _LM_KEY.match(parts[-1]):
+        candidates.add(parts[-2])
     if " " in name:
         candidates.add(name.split(" ", 1)[1])
     return any(c.lower() in ignore for c in candidates if c)
@@ -868,8 +880,11 @@ def shape_health_temperature(
     for s in temperature.get("sensors") or []:
         if not s or not _is_real_temperature(s):
             continue
-        value = (s.get("current") or {}).get("value")
-        if value is not None and not _TEMP_SENTINEL_MIN < value < _TEMP_SENTINEL_MAX:
+        current = s.get("current") or {}
+        value = current.get("value")
+        if value is not None and not (
+            _TEMP_SENTINEL_MIN < _to_celsius(value, current.get("unit")) < _TEMP_SENTINEL_MAX
+        ):
             continue
         shaped = _shape_sensor(s)
         shaped["ignored"] = _sensor_ignored(s, ignore) if ignore else False
