@@ -121,7 +121,7 @@ def test_websockets_frames_never_logged_even_at_debug(capsys):
     from websockets.frames import Frame, Opcode
 
     configure_logging("DEBUG", KEY)
-    frame = Frame(Opcode.TEXT, b'{"payload": KEY, "q": "a\\"b"}')
+    frame = Frame(Opcode.TEXT, f'{{"payload": "{KEY}", "q": "a\\"b"}}'.encode())
     logging.getLogger("websockets.client").debug("< %s", frame)
     logging.getLogger("websockets.client").info("handshake ok")
     err = capsys.readouterr().err
