@@ -12,6 +12,8 @@ from unraid_mcp import queries
 from unraid_mcp.errors import UnraidAuthError, UnraidConnectionError, UnraidGraphQLError
 from unraid_mcp.tools import array, docker, misc, notifications, shares, system, vm
 
+from .test_formatting import assert_sizes_shaped
+
 
 def _resp(data):
     return httpx.Response(200, json={"data": data})
@@ -221,6 +223,22 @@ async def test_disks_and_disk_details(mocked_client):
         out = await array.fetch_disk(c, "1:a")
         assert out["smart_status"] == "OK"
         assert _sent_vars(r) == {"id": "1:a"}
+
+
+async def test_disk_details_partition_sizes_shaped(mocked_client):
+    raw = {
+        "id": "1:a",
+        "size": 1024**4,
+        "partitions": [
+            {"name": "sda1", "fsType": "XFS", "size": 1024**3},
+            {"name": "sda2", "fsType": "VFAT", "size": None},
+        ],
+    }
+    async with mocked_client(_resp({"disk": raw})) as (c, r):
+        out = await array.fetch_disk(c, "1:a")
+    assert out["partitions"][0]["size"] == {"bytes": 1024**3, "human": "1.0 GiB"}
+    assert out["partitions"][1]["size"] == {"bytes": None, "human": None}
+    assert_sizes_shaped(out)
 
 
 async def test_disk_details_null_raises_friendly_error(mocked_client):
