@@ -6,6 +6,12 @@
 
 - UNRAID_API_KEY is validated at startup (>=32 chars, no placeholder); redaction ignores secrets shorter than 8 chars (#152).
 
+### Added
+
+- **`UNRAID_MCP_HEALTH_IGNORE_SENSORS`**: comma-separated temperature sensors
+  (label, full name or id, case-insensitive) the health verdict ignores, with
+  `temperature.ignored_count`. `get_system_metrics` still reports them (#151).
+
 ### Changed
 
 - **`get_health_summary` / `unraid://health` now include temperature.** A fifth

@@ -231,7 +231,9 @@ at or below -40 or at or above 125 are ignored (unconnected pins read 127, -128,
 255). NVMe sensors at `critical` only raise `attention`: the upstream default
 NVMe critical is 60 C, which NVMe drives routinely reach under load, so
 treating it as `critical` would flap. CPU, HDD and other sensors at `critical`
-raise `critical`. Each warning or
+raise `critical`.
+Sensors listed in `UNRAID_MCP_HEALTH_IGNORE_SENSORS` (label, name or id) are left out
+of the verdict and counted in `temperature.ignored_count`. Each warning or
 critical sensor adds a reason such as `Temperature critical: disk1 65°C` (hottest
 first, at most 5 per level).
 Array state remains informational; a stopped array alone does not raise the

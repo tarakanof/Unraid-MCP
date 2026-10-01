@@ -76,6 +76,7 @@ HEALTH = {
         "hottest": {"name": "CPU", "value": 55.0, "unit": "CELSIUS", "level": "normal"},
         "warning_count": 0,
         "critical_count": 0,
+        "ignored_count": 0,
     },
 }
 

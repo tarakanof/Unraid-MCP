@@ -2102,6 +2102,7 @@ async def test_temperature_health_critical(mocked_client):
         "hottest": {"name": "disk1", "value": 65, "unit": "CELSIUS", "level": "critical"},
         "warning_count": 1,
         "critical_count": 1,
+        "ignored_count": 0,
     }
     assert out["checks"]["temperature"] == "ok"
 
@@ -2126,7 +2127,12 @@ async def test_temperature_health_no_sensors(mocked_client):
     async with mocked_client(_health_responses([])) as (c, _r):
         out = await misc.fetch_health(c)
     assert out["overall"] == "ok"
-    assert out["temperature"] == {"hottest": None, "warning_count": 0, "critical_count": 0}
+    assert out["temperature"] == {
+        "hottest": None,
+        "warning_count": 0,
+        "critical_count": 0,
+        "ignored_count": 0,
+    }
 
 
 async def test_temperature_health_ignores_non_temperature_lm_sensors(mocked_client):
@@ -2280,3 +2286,68 @@ async def test_temperature_health_failure_keeps_critical_signal(mocked_client):
         out = await misc.fetch_health(c)
     assert out["overall"] == "critical"
     assert out["checks"]["temperature"] == "failed"
+
+
+_PIN = "nct6779-isa-0290:AUXTIN1:temp4_input"
+
+
+@pytest.mark.parametrize(
+    "ignore",
+    [
+        ("auxtin1",),
+        ("nct6779-isa-0290 auxtin1",),
+        (_PIN.lower(),),
+        ("other", " AuxTin1 ".strip().lower()),
+    ],
+)
+async def test_temperature_health_ignore_list_matches(mocked_client, ignore):
+    sensors = [
+        _sensor("nct6779-isa-0290 AUXTIN1", 95, "CRITICAL", "CUSTOM", id_=_PIN),
+        _sensor(
+            "nct6779-isa-0290 CPUTIN",
+            42,
+            "NORMAL",
+            "CUSTOM",
+            id_="nct6779-isa-0290:CPUTIN:temp2_input",
+        ),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c, ignore_sensors=ignore)
+    assert out["overall"] == "ok"
+    assert out["reasons"] == []
+    assert out["temperature"] == {
+        "hottest": {
+            "name": "nct6779-isa-0290 CPUTIN",
+            "value": 42,
+            "unit": "CELSIUS",
+            "level": "normal",
+        },
+        "warning_count": 0,
+        "critical_count": 0,
+        "ignored_count": 1,
+    }
+
+
+async def test_temperature_health_empty_ignore_is_noop(mocked_client):
+    sensors = [_sensor("nct6779-isa-0290 AUXTIN1", 95, "CRITICAL", "CUSTOM", id_=_PIN)]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c, ignore_sensors=())
+    assert out["overall"] == "critical"
+    assert out["temperature"]["ignored_count"] == 0
+
+
+async def test_temperature_health_ignore_list_only_hides_named(mocked_client):
+    sensors = [
+        _sensor("nct6779-isa-0290 AUXTIN1", 95, "CRITICAL", "CUSTOM", id_=_PIN),
+        _sensor("hdd", 65, "CRITICAL", "DISK", id_="disk:h"),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c, ignore_sensors=("auxtin1",))
+    assert out["overall"] == "critical"
+    assert out["reasons"] == ["Temperature critical: hdd 65°C"]
+
+
+def test_settings_health_ignored_sensors_parsing(settings_factory):
+    assert settings_factory().health_ignored_sensors == ()
+    cfg = settings_factory(health_ignore_sensors=" AUXTIN0, nct6779-isa-0290 AUXTIN1 ,,")
+    assert cfg.health_ignored_sensors == ("auxtin0", "nct6779-isa-0290 auxtin1")

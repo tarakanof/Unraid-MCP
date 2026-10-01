@@ -195,7 +195,12 @@ async def fetch_plugins(
     return plugins + installed
 
 
-async def fetch_health(client: UnraidClient) -> HealthSummary:
+async def fetch_health(
+    client: UnraidClient, *, ignore_sensors: tuple[str, ...] = ()
+) -> HealthSummary:
+    """``ignore_sensors``: lower-cased temperature sensor ids/names/labels to leave
+    out of the verdict (``Settings.health_ignored_sensors``)."""
+
     # Health only needs the baseline selections. They are accepted by every
     # API build, so a newer-field validation error can't mark a check failed.
     async def ups_check() -> tuple[list[dict[str, Any]], bool, bool]:
@@ -235,7 +240,7 @@ async def fetch_health(client: UnraidClient) -> HealthSummary:
         safe_query_with_status(
             client,
             queries.HEALTH_TEMPERATURE,
-            shape_health_temperature,
+            lambda data: shape_health_temperature(data, ignore_sensors),
             [],
             required_field="metrics",
             tolerate_auth=True,
@@ -319,6 +324,8 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         voltages and energy counters are ignored) at critical raise critical, at
         warning raise attention; `temperature` gives the hottest sensor and the
         warning/critical counts (omitted when that query failed).
+        UNRAID_MCP_HEALTH_IGNORE_SENSORS excludes named sensors from the
+        verdict (counted in `ignored_count`).
         reasons explains each signal; checks marks array/ups/notifications/temperature
         queries as ok or failed; ups is not_configured only when its query fails with a
         non-permission, supported GraphQL error and the UPS service is not enabled.
@@ -327,7 +334,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         preserving usable data. Auth/connection/configuration errors propagate.
         Array state is informational. Also at unraid://health.
         """
-        return await guarded(ctx, fetch_health)
+        return await guarded(ctx, fetch_health, ignore_sensors=settings.health_ignored_sensors)
 
     @mcp.tool(title="List Log Files", annotations=READ_ONLY)
     async def list_log_files(ctx: Context) -> list[dict[str, Any]]:

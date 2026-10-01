@@ -77,7 +77,11 @@ def register_resources(mcp: MCPServer, settings: Settings, app_context: AppConte
         mime_type="application/json",
     )
     async def health_resource() -> dict[str, Any]:
-        return await _read(app_context, fetch_health, HEALTH_URI)
+        return await _read(
+            app_context,
+            lambda client: fetch_health(client, ignore_sensors=settings.health_ignored_sensors),
+            HEALTH_URI,
+        )
 
     @mcp.resource(
         SYSTEM_INFO_URI,

@@ -837,13 +837,31 @@ def _is_real_temperature(sensor: dict[str, Any]) -> bool:
     return sensor.get("type") != "CUSTOM" or "temp" in (sensor.get("name") or "").lower()
 
 
-def shape_health_temperature(data: dict | None) -> list[dict[str, Any]]:
+def _sensor_ignored(sensor: dict[str, Any], ignore: tuple[str, ...]) -> bool:
+    """Match an ignore-list entry (lower-cased) against the sensor's id, full
+    name, or label (the id's middle part, else the name minus its chip prefix)."""
+    sensor_id = str(sensor.get("id") or "")
+    name = str(sensor.get("name") or "")
+    candidates = {sensor_id, name}
+    parts = sensor_id.split(":")
+    if len(parts) >= 3:
+        candidates.add(parts[1])
+    if " " in name:
+        candidates.add(name.split(" ", 1)[1])
+    return any(c.lower() in ignore for c in candidates if c)
+
+
+def shape_health_temperature(
+    data: dict | None, ignore: tuple[str, ...] = ()
+) -> list[dict[str, Any]]:
     """Shape ``metrics.temperature.sensors`` down to trustworthy temperatures.
 
     Drops non-temperature lm_sensors readings (see ``_is_real_temperature``) and
     sentinel values from unconnected pins. Level prefers upstream
     ``current.status`` (see ``_shape_sensor``). ``nvme`` marks NVMe sensors, whose
-    upstream critical (60 C default) is routinely reached under load.
+    upstream critical (60 C default) is routinely reached under load. ``ignore``
+    (lower-cased entries) flags matching sensors ``ignored``: they stay in the
+    list so they can be counted, but never feed the verdict.
     """
     temperature = ((data or {}).get("metrics") or {}).get("temperature") or {}
     out = []
@@ -854,6 +872,7 @@ def shape_health_temperature(data: dict | None) -> list[dict[str, Any]]:
         if value is not None and not _TEMP_SENTINEL_MIN < value < _TEMP_SENTINEL_MAX:
             continue
         shaped = _shape_sensor(s)
+        shaped["ignored"] = _sensor_ignored(s, ignore) if ignore else False
         shaped["nvme"] = s.get("type") == "NVME" or "nvme" in str(s.get("id") or "").lower()
         out.append(shaped)
     return out
@@ -863,6 +882,8 @@ def _temperature_signals(
     sensors: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], list[str], bool, bool]:
     """(summary, reasons, any_critical, any_warning) for shaped sensors."""
+    ignored_count = sum(1 for s in sensors if s.get("ignored"))
+    sensors = [s for s in sensors if not s.get("ignored")]
 
     def reading(s: dict[str, Any]) -> str:
         current = s.get("current") or {}
@@ -895,6 +916,7 @@ def _temperature_signals(
         else None,
         "warning_count": len(warning),
         "critical_count": len(critical),
+        "ignored_count": ignored_count,
     }
     # NVMe drives routinely touch their 60 C default critical under load: that
     # alone is attention, not critical.

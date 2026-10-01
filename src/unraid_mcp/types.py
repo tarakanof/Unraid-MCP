@@ -165,6 +165,9 @@ class HealthTemperature(TypedDict):
     hottest: HealthTemperatureSensor | None
     warning_count: int
     critical_count: int
+    ignored_count: Annotated[
+        int, Field(description="Sensors skipped via UNRAID_MCP_HEALTH_IGNORE_SENSORS.")
+    ]
 
 
 class HealthSummary(TypedDict):

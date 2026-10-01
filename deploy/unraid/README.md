@@ -60,7 +60,7 @@ and Apply. An installed container is edited from
 new advanced fields to it. To get them, either add them as variables via **Add
 another Path, Port, Variable...** on the container's Edit page
 (`UNRAID_MCP_ALLOW_DANGEROUS`=`false`, `UNRAID_MCP_TIMEOUT`=`30`,
-`UNRAID_MCP_LONG_TIMEOUT`=`600`), or re-add the container from the refreshed
+`UNRAID_MCP_LONG_TIMEOUT`=`600`, optional `UNRAID_MCP_HEALTH_IGNORE_SENSORS`), or re-add the container from the refreshed
 template (existing values in `my-unraid-mcp.xml` are kept). See the repo README
 for the other 0.8 changes.
 
