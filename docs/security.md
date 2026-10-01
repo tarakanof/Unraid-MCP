@@ -126,11 +126,13 @@ as any other secret-bearing log stream.
 
 ## Log file access is restricted
 
-`read_log_file` only accepts paths under `/var/log` — the prefix the Unraid API
-serves system logs from — and rejects anything else with a `ToolError` before
-making any network call, pointing the caller back to `list_log_files` for a valid
-path. This is defense-in-depth on top of server-side validation, not a substitute
-for it. `lines` is capped at 500 per call to bound response size; page through
+`read_log_file` only accepts absolute paths that are `/var/log` or a descendant
+(checked after `posixpath.normpath`; `..` segments, NUL bytes, relative paths and
+siblings like `/var/logevil` are refused) — the prefix the Unraid API serves system
+logs from — and rejects anything else with a `ToolError` before making any network
+call, pointing the caller back to `list_log_files` for a valid path. This is defense-in-depth on top of server-side validation, not a substitute
+for it. `lines` is bounded 1..500 per call to bound response size, `start_line` is a
+0-based offset >= 0 (both bounds appear in the tool's input schema); page through
 larger files with `start_line`.
 
 ## No arbitrary execution

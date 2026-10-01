@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+import posixpath
+from typing import Annotated, Any
 
 from graphql import parse as graphql_parse
 from graphql.error import GraphQLError
 from graphql.language import OperationDefinitionNode, OperationType
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import Field
 
 from .. import queries
 from ..client import UnraidClient
@@ -46,6 +48,25 @@ MAX_LOG_LINES = 500
 # Only paths under this prefix are accepted (defense-in-depth on top of
 # server-side validation) — the API serves system logs from here.
 LOG_PATH_PREFIX = "/var/log"
+
+
+def _validate_log_path(path: str) -> None:
+    """Require an absolute, `..`-free path that is /var/log or a descendant."""
+    bad = (
+        not path
+        or "\x00" in path
+        or not path.startswith("/")
+        or ".." in path.split("/")
+        or not (
+            posixpath.normpath(path) == LOG_PATH_PREFIX
+            or posixpath.normpath(path).startswith(LOG_PATH_PREFIX + "/")
+        )
+    )
+    if bad:
+        raise ToolError(
+            f"path must be an absolute path under {LOG_PATH_PREFIX!r} with no '..' "
+            "segments or NUL bytes. Call list_log_files first to get a valid path."
+        )
 
 
 def _ensure_read_only(query: str) -> None:
@@ -113,11 +134,12 @@ async def fetch_log_file(
             f"lines={lines} exceeds the maximum of {MAX_LOG_LINES} per call; "
             "request a smaller window and page with start_line instead."
         )
-    if not path or not path.startswith(LOG_PATH_PREFIX):
-        raise ToolError(
-            f"path must start with {LOG_PATH_PREFIX!r}. Call list_log_files first "
-            "to get a valid path."
-        )
+    if lines < 1:
+        raise ToolError(f"lines={lines} must be at least 1.")
+    # startLine is 0-based upstream (an omitted start_line reports startLine 0).
+    if start_line is not None and start_line < 0:
+        raise ToolError(f"start_line={start_line} must be >= 0 (0-based line offset).")
+    _validate_log_path(path)
 
     variables: dict[str, Any] = {"path": path, "lines": lines}
     if start_line is not None:
@@ -278,13 +300,13 @@ def register(mcp: MCPServer, settings: Settings) -> None:
     async def read_log_file(
         ctx: Context,
         path: str,
-        lines: int = 100,
-        start_line: int | None = None,
+        lines: Annotated[int, Field(ge=1, le=MAX_LOG_LINES)] = 100,
+        start_line: Annotated[int | None, Field(ge=0)] = None,
     ) -> dict[str, Any]:
         """Read a slice of a system log file for triage (e.g. "why did my server do
         X last night"). `path` must be one listed by list_log_files (must start with
-        `/var/log`) — call that tool first if you don't have a path. `lines` is capped
-        at 500 per call.
+        `/var/log`, no `..`) — call that tool first if you don't have a path. `lines`
+        is 1..500 per call; `start_line` is a 0-based offset.
 
         The response includes `total_lines` (the file's total line count) and
         `start_line` (where this slice began) so you can page through a large file.

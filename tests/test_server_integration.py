@@ -221,3 +221,19 @@ async def test_failed_stop_array_returns_mcp_error(settings_factory, payload, mo
             assert "AttributeError" not in text
             assert "supersecretkey123" not in text
             assert text
+
+
+async def test_read_log_file_schema_exposes_bounds_and_rejects_no_http(settings_factory):
+    with respx.mock:
+        route = respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
+        mcp = build_server(settings_factory())
+        async with Client(mcp, raise_exceptions=True) as session:
+            tools = {t.name: t for t in (await session.list_tools()).tools}
+            props = tools["read_log_file"].input_schema["properties"]
+            assert (props["lines"]["minimum"], props["lines"]["maximum"]) == (1, 500)
+            assert props["start_line"]["anyOf"][0]["minimum"] == 0
+
+            before = route.call_count  # lifespan version probe
+            bad = await session.call_tool("read_log_file", {"path": "/var/log/syslog", "lines": 0})
+            assert bad.is_error is True
+            assert route.call_count == before
