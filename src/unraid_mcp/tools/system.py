@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from .. import queries
 from ..client import UnraidClient
 from ..config import Settings
 from ..errors import UnraidGraphQLError
 from ..formatting import (
+    HARDWARE_KINDS,
     shape_flash,
+    shape_hardware_inventory,
     shape_metrics,
     shape_services,
     shape_system_info,
@@ -77,6 +80,21 @@ async def fetch_services(
         raise
 
 
+async def fetch_hardware_inventory(
+    client: UnraidClient, kind: str | None = None, *, api_version: str | None = None
+) -> dict[str, list[dict[str, Any]]]:
+    if kind is not None and kind not in HARDWARE_KINDS:
+        raise ToolError(f"Unknown kind {kind!r}; expected one of: {', '.join(HARDWARE_KINDS)}.")
+    try:
+        return shape_hardware_inventory(await client.execute(queries.HARDWARE_INVENTORY), kind)
+    except UnraidGraphQLError as exc:
+        if unsupported_field_error(exc):
+            raise feature_unsupported(
+                "the hardware inventory (info.devices)", api_version=api_version
+            ) from None
+        raise
+
+
 def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def get_system_info(ctx: Context) -> dict[str, Any]:
@@ -113,3 +131,13 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         and spot NTP misconfig."""
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, fetch_system_time, api_version=api_version)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_hardware_inventory(
+        ctx: Context, kind: Literal["gpu", "pci", "usb", "network"] | None = None
+    ) -> dict[str, list[dict[str, Any]]]:
+        """List detected hardware: GPUs, PCI devices (incl. blacklisted/passthrough
+        status), USB devices, and network adapters. Optional `kind` returns only
+        one type. Answers "is my GPU visible / passed through?"."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(ctx, fetch_hardware_inventory, kind, api_version=api_version)

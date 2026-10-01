@@ -65,6 +65,7 @@ A typical stdio client config:
 | `get_system_metrics` | – | Live utilization: total/per-core CPU %, memory/swap usage, temperatures. Requires API 7.2+; older builds get a friendly error. |
 | `get_services` | – | Health of the Unraid services stack (API, dynamix, etc.): name, online, uptime, version. |
 | `get_system_time` | – | Server time, timezone, and NTP config — correlate log timestamps and spot NTP misconfig. Requires API 7.1+. |
+| `get_hardware_inventory` | `kind?` (`gpu`\|`pci`\|`usb`\|`network`) | Detected GPUs, PCI devices (with blacklisted/passthrough flag), USB devices, network adapters. `machineId` is intentionally omitted. |
 | `get_array_status` | – | Array state, total/used/free capacity, and every data/parity/cache disk with `health`, temp, and I/O counters. |
 | `list_disks` | – | Physical disks: model, size, interface, SMART status, temperature, spin state. |
 | `get_disk` | `disk_id` | Full detail for one physical disk (partitions, firmware, SMART). Get `disk_id` from `list_disks`. |
