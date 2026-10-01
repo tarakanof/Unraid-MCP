@@ -324,8 +324,11 @@ async def with_heartbeat(
         return await awaitable
     finally:
         task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        # wait() never raises the heartbeat's CancelledError, so only a cancel aimed at
+        # the caller can interrupt it (and that must propagate, not be suppressed).
+        await asyncio.wait({task})
+        if not task.cancelled():
+            task.exception()  # mark retrieved
 
 
 class Confirmation(BaseModel):

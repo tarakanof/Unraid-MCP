@@ -308,6 +308,55 @@ async def test_with_heartbeat_swallows_callback_errors_and_cancels_task():
     assert await with_heartbeat(work(), boom, interval_s=0.03) == "ok"
 
 
+class _SlowToDieClient:
+    """execute() returns once a heartbeat is mid-callback; that callback is slow to die."""
+
+    long_request_timeout = 5.0
+
+    def __init__(self, in_beat):
+        self.in_beat = in_beat
+
+    async def execute(self, query, variables=None, **kwargs):
+        await self.in_beat.wait()
+        return {"docker": {"updateContainers": [], "updateAllContainers": []}}
+
+
+@pytest.mark.parametrize("path", ["update_containers", "update_all_containers"])
+async def test_update_paths_propagate_caller_cancel_while_heartbeat_unwinds(path):
+    in_beat, unwinding, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def progress(message):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return  # the initial "Updating ..." message
+        in_beat.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            unwinding.set()
+            await release.wait()
+            raise
+
+    client = _SlowToDieClient(in_beat)
+    if path == "update_containers":
+        coro = docker.do_update_containers(
+            client, ["1:a"], confirm=True, progress=progress, heartbeat_s=0.01
+        )
+    else:
+        coro = docker.do_update_all_containers(
+            client, confirm=True, progress=progress, heartbeat_s=0.01
+        )
+    task = asyncio.ensure_future(coro)
+    await asyncio.wait_for(unwinding.wait(), timeout=3)
+    task.cancel()
+    release.set()
+    done, _ = await asyncio.wait({task}, timeout=3)  # a regression fails, never hangs
+    assert done
+    assert task.cancelled()
+
+
 async def test_with_heartbeat_without_callback_just_awaits():
     async def work():
         return 7
