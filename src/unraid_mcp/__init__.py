@@ -1,3 +1,3 @@
 """unraid-mcp — an MCP server for the Unraid GraphQL API."""
 
-__version__ = "0.8.1"
+__version__ = "0.9.0"
