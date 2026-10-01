@@ -2392,3 +2392,22 @@ async def test_temperature_health_hot_readings_above_125_count(mocked_client, va
         out = await misc.fetch_health(c)
     assert out["overall"] == "critical"
     assert out["temperature"]["hottest"]["value"] == value
+
+
+@pytest.mark.parametrize(
+    ("value", "id_"),
+    [(127, "ipmi:CPU Temp"), (115.5, "amdgpu-pci-0800:edge:temp1_input"), (255, "disk:abc")],
+)
+async def test_temperature_health_sentinel_values_kept_off_super_io(mocked_client, value, id_):
+    sensor = _sensor("hot", value, "CRITICAL", "CPU_PACKAGE", id_=id_)
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+
+
+@pytest.mark.parametrize("chip", ["nct6779-isa-0290", "IT8628-isa-0a40", "w83795g-i2c-0-2f"])
+async def test_temperature_health_sentinel_dropped_on_super_io(mocked_client, chip):
+    sensor = _sensor("pin", 127, "CRITICAL", "CUSTOM", id_=f"srv:{chip}:AUXTIN:temp5_input")
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "ok"

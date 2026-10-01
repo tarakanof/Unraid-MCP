@@ -816,12 +816,25 @@ _TEMP_REASONS_MAX = 5
 
 _LM_KEY = re.compile(r"^[a-z]+\d*_input$")
 _LM_TEMP_KEY = re.compile(r"^temp\d+_input$")
-# Unconnected nct/it87 pins read 115.5 / 127 / 128 / 255 (or <= -40): not real
-# temperatures. Anything else counts; other bogus pins go in the ignore list.
+# Unconnected Super-I/O (nct/it8xxx/w83/f71) pins read 115.5 / 127 / 128 / 255 (or
+# <= -40): not real temperatures. Only those chips are filtered (IPMI, GPU, disk,
+# CPU sensors can genuinely read 127); other bogus pins go in the ignore list.
 _TEMP_FLOOR = -40
 _TEMP_SENTINELS = (115.5, 127.0, 128.0, 255.0)
 # NVMe at upstream critical below this stays attention (see _temperature_signals).
 _NVME_CRITICAL_C = 75
+
+
+_SUPER_IO_CHIPS = ("nct", "it8", "w83", "f71")
+
+
+def _is_super_io(sensor: dict[str, Any]) -> bool:
+    """lm_sensors sensor on a Super-I/O hwmon chip (nct/it8xxx/w83/f71), the only
+    source of disconnected-pin garbage; the id is ``...:<chip>:<label>:<key>``."""
+    parts = str(sensor.get("id") or "").split(":")
+    if len(parts) < 3 or not _LM_KEY.match(parts[-1]):
+        return False
+    return parts[-3].lower().startswith(_SUPER_IO_CHIPS)
 
 
 def _to_celsius(value: float, unit: Any) -> float:
@@ -887,8 +900,10 @@ def shape_health_temperature(
         current = s.get("current") or {}
         value = current.get("value")
         celsius = _to_celsius(value, current.get("unit")) if value is not None else None
-        if celsius is not None and (
-            celsius <= _TEMP_FLOOR or any(abs(celsius - x) < 0.05 for x in _TEMP_SENTINELS)
+        if (
+            celsius is not None
+            and _is_super_io(s)
+            and (celsius <= _TEMP_FLOOR or any(abs(celsius - x) < 0.05 for x in _TEMP_SENTINELS))
         ):
             continue
         shaped = _shape_sensor(s)
