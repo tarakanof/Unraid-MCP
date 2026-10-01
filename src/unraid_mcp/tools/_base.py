@@ -120,8 +120,10 @@ async def safe_query(
     """Run an optional query; on any Unraid error fall back to ``default`` so a
     composed fetch degrades gracefully when a feature/field isn't available on
     this API build (e.g. an older server missing a root query entirely)."""
-    value, _ = await safe_query_with_status(client, query, shaper, default)
-    return value
+    try:
+        return shaper(await client.execute(query))
+    except UnraidError:
+        return default
 
 
 async def safe_query_with_status(
@@ -129,11 +131,18 @@ async def safe_query_with_status(
     query: str,
     shaper: Callable[[dict[str, Any] | None], Any],
     default: Any,
+    *,
+    required_field: str | None = None,
 ) -> tuple[Any, bool]:
-    """Run an optional query, returning its shaped value and whether it succeeded."""
+    """Keep usable data but flag GraphQL errors or a missing required root field.
+
+    Transport, configuration, authentication, and server errors propagate.
+    """
     try:
-        return shaper(await client.execute(query)), True
-    except UnraidError:
+        data, errors = await client.execute_with_errors(query)
+        ok = not errors and (required_field is None or data.get(required_field) is not None)
+        return shaper(data), ok
+    except UnraidGraphQLError:
         return default, False
 
 

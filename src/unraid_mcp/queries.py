@@ -491,3 +491,5 @@ mutation UpdateAllContainers {
   docker { updateAllContainers { id names state status } }
 }
 """
+
+UPS_CONFIGURATION = """query { upsConfiguration { service } }"""

@@ -18,6 +18,7 @@ from mcp.shared.exceptions import MCPError
 
 from unraid_mcp import resources
 from unraid_mcp.client import UnraidClient
+from unraid_mcp.errors import UnraidConfigError
 from unraid_mcp.server import build_server
 from unraid_mcp.tools.misc import fetch_health
 from unraid_mcp.tools.system import fetch_system_info
@@ -129,14 +130,12 @@ async def test_triage_prompt_renders_without_focus():
 
 
 async def test_health_resource_when_box_unreachable():
-    """Failed health queries remain visible in the resource verdict."""
+    """Connection failures retain their actionable message at the resource boundary."""
     async with _session(httpx.ConnectError("connection refused")) as (session, _route):
-        result = await session.read_resource(resources.HEALTH_URI)
-    out = json.loads(result.contents[0].text)
-    assert out["overall"] == "degraded"
-    assert out["checks"] == dict.fromkeys(("array", "ups", "notifications"), "failed")
-    assert len(out["reasons"]) == 3
-    assert KEY not in result.contents[0].text
+        with pytest.raises(MCPError) as excinfo:
+            await session.read_resource(resources.HEALTH_URI)
+    assert "connect" in str(excinfo.value).lower()
+    assert KEY not in str(excinfo.value)
 
 
 @pytest.mark.parametrize("mode", ["auto", "legacy"])
@@ -145,13 +144,13 @@ async def test_health_tool_and_resource_match(mode, expected):
     def respond(request):
         query = json.loads(request.content)["query"]
         if "upsDevices" in query and expected == "degraded":
-            return httpx.Response(403)
+            return httpx.Response(200, json={"errors": [{"message": "FORBIDDEN"}]})
         data = {
             "array": {"state": "STARTED", "disks": [{"status": "DISK_OK"}]},
             "upsDevices": [
                 {
                     "name": "ups0",
-                    "status": "Online" if expected in ("ok", "degraded") else "On Battery",
+                    "status": "ONLINE" if expected in ("ok", "degraded") else "ONBATT",
                     "battery": {"chargeLevel": 1 if expected == "critical" else 80},
                 }
             ],
@@ -170,3 +169,28 @@ async def test_health_tool_and_resource_match(mode, expected):
     assert out["overall"] == expected
     assert out["checks"]["ups"] == ("failed" if expected == "degraded" else "ok")
     assert bool(out["reasons"]) == (expected != "ok")
+
+
+@pytest.mark.parametrize("failure", ["auth", "connection", "configuration"])
+async def test_health_tool_and_resource_actionable_errors(failure, monkeypatch):
+    response = httpx.Response(401) if failure == "auth" else httpx.ConnectError("refused")
+    if failure == "configuration":
+        execute = UnraidClient.execute_with_errors
+
+        async def bad_config(self, query, variables=None):
+            if "parityCheckStatus" in query:
+                raise UnraidConfigError("Check UNRAID_API_URL configuration")
+            return await execute(self, query, variables)
+
+        monkeypatch.setattr(UnraidClient, "execute_with_errors", bad_config)
+        response = httpx.Response(200, json=_CANNED)
+    async with _session(response) as (session, _route):
+        result = await session.call_tool("get_health_summary", {})
+        assert result.is_error
+        text = " ".join(item.text for item in result.content if item.type == "text")
+        assert "UNRAID_API_" in text
+        assert KEY not in text
+        with pytest.raises(MCPError) as excinfo:
+            await session.read_resource(resources.HEALTH_URI)
+        assert "UNRAID_API_" in str(excinfo.value)
+        assert KEY not in str(excinfo.value)

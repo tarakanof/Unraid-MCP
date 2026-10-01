@@ -63,6 +63,13 @@ class UnraidClient:
         Raises an :class:`~unraid_mcp.errors.UnraidError` subclass on failure.
         Configured secrets are scrubbed from data and errors.
         """
+        data, _ = await self.execute_with_errors(query, variables)
+        return data
+
+    async def execute_with_errors(
+        self, query: str, variables: dict[str, Any] | None = None
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Return data and redacted partial errors; raise on total query failure."""
         try:
             return await self._execute(query, variables)
         except UnraidError as exc:
@@ -73,7 +80,9 @@ class UnraidClient:
                 ) from None
             raise type(exc)(message) from None
 
-    async def _execute(self, query: str, variables: dict[str, Any] | None) -> dict[str, Any]:
+    async def _execute(
+        self, query: str, variables: dict[str, Any] | None
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         try:
             response = await self._http.post(
                 self._url,
@@ -143,6 +152,7 @@ class UnraidClient:
             raise UnraidServerError(
                 f"Invalid GraphQL envelope: errors must be a list. {envelope_hint}"
             )
+        errors: list[dict[str, Any]] = []
         if raw_errors:
             # The whole response was scrubbed above, including structured error
             # details; coercion runs on that scrubbed payload.
@@ -155,4 +165,4 @@ class UnraidClient:
             # warning and return what we got.
             log.warning("GraphQL returned partial errors: %s", messages)
 
-        return data or {}
+        return data or {}, errors

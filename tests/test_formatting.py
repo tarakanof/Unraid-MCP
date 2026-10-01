@@ -300,8 +300,8 @@ def test_shape_mutation_result_keeps_multifield_overview():
     "status,warning,critical,expected",
     [
         ("DISK_OK", 0, 0, "healthy"),
-        ("DISK_OK", 1, 0, "warning"),
-        ("DISK_OK", 0, 1, "critical"),
+        ("DISK_OK", 80, 0, "healthy"),
+        ("DISK_OK", 80, 90, "healthy"),
         ("DISK_DSBL", 0, 0, "failed"),
         ("DISK_INVALID", 0, 0, "failed"),
         ("DISK_NP", 0, 0, "empty"),

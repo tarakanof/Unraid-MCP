@@ -162,7 +162,7 @@ async def fetch_plugins(
 
 async def fetch_health(client: UnraidClient) -> dict[str, Any]:
     array, array_ok = await safe_query_with_status(
-        client, queries.ARRAY_STATUS, shape_array_status, {}
+        client, queries.ARRAY_STATUS, shape_array_status, {}, required_field="array"
     )
     ups, ups_ok = await safe_query_with_status(client, queries.UPS_DEVICES, shape_ups, [])
     overview, notifications_ok = await safe_query_with_status(
@@ -172,6 +172,17 @@ async def fetch_health(client: UnraidClient) -> dict[str, Any]:
         name: "ok" if ok else "failed"
         for name, ok in (("array", array_ok), ("ups", ups_ok), ("notifications", notifications_ok))
     }
+    if not ups_ok:
+        config, config_ok = await safe_query_with_status(
+            client,
+            queries.UPS_CONFIGURATION,
+            lambda data: data.get("upsConfiguration") or {},
+            {},
+            required_field="upsConfiguration",
+        )
+        # Real boxes with no UPS report service=null, not "disable".
+        if config_ok and (config.get("service") or "").lower() != "enable":
+            checks["ups"] = "not_configured"
     return summarize_health(array, ups, overview, checks)
 
 
@@ -217,12 +228,15 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         """Compact health roll-up for triage: array state, capacity, any unhealthy disks,
         parity-check status, UPS state, and unread notification counts.
 
-        overall is critical for red/failed/disabled/critical disks or a UPS on battery with
+        overall is critical for red/failed/missing disks, UPS LOWBATT, or ONBATT with
         charge <20% or runtime <300 seconds; attention for other unhealthy disks,
         unread alerts/warnings, UPS on battery, or parity errors. Failed queries
         yield degraded when no critical/attention signal exists; otherwise ok.
         reasons explains each signal; checks marks array/ups/notifications queries
-        as ok or failed. Array state is informational. Also at unraid://health.
+        as ok or failed; ups is not_configured when its query fails and the UPS
+        service is not enabled. Partial GraphQL errors mark a check failed while
+        preserving usable data. Auth/connection/configuration errors propagate.
+        Array state is informational. Also at unraid://health.
         """
         return await guarded(ctx, fetch_health)
 

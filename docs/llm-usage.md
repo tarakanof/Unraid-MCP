@@ -160,8 +160,8 @@ opted in — do not try to work around it.
   - **List-returning ops** — `update_docker_containers` / `update_all_docker_containers`
     return a **list** of the recreated containers (`{id, names, state, status}` each);
     an empty list means nothing had an update to apply.
-- **Disk health words** (on array disks): `healthy`, `warning`, `critical`, `failed`,
-  `missing`, `new`, `unknown`.
+- **Disk health words** (on array disks): `healthy`, `failed`, `missing`, `new`,
+  `unknown`, `empty`. Disk space warning/critical thresholds are not alarm flags.
 - **Enums you'll see:** array `state` `STARTED|STOPPED|...`; container `state`
   `RUNNING|PAUSED|EXITED`; VM `state` `RUNNING|SHUTOFF|PAUSED|...`; notification
   `importance` `INFO|WARNING|ALERT`, `type` `UNREAD|ARCHIVE`.
@@ -180,21 +180,31 @@ opted in — do not try to work around it.
 `get_health_summary` and `unraid://health` return the same structure. Existing
 fields remain available, with two additions: `reasons` lists human-readable
 signals and failed checks, and `checks` reports `ok` or `failed` for each of
-`array`, `ups`, and `notifications`. A successful empty response is `ok` for that
-check; a query error, including permission denial or an unsupported query, is
-`failed`. Check status describes query success, not component health.
+`array`, `ups`, and `notifications`. UPS also reports `not_configured` when its
+query fails and `upsConfiguration.service` is not `enable` (null or `disable`). This adds no reason
+and does not cause a degraded verdict. If the service is enabled or its
+configuration query fails, the UPS check stays `failed`.
+
+An empty UPS or notification response is `ok`; a null or missing array is
+`failed`. GraphQL errors, including partial errors, per-field permission denial,
+and unsupported queries, mark a check `failed` while preserving usable data.
+Authentication, connection, and configuration failures return actionable errors.
+Check status describes query success, not component health.
 
 The `overall` verdict uses this precedence:
 
-- `critical`: a red disk indicator, failed/disabled disk, critical disk health,
-  or a UPS on battery with charge below 20% or runtime below 300 seconds.
+- `critical`: a red disk indicator, failed/disabled or missing assigned disk,
+  UPS `LOWBATT`, or UPS `ONBATT` with charge below 20% or runtime below 300 seconds.
 - `attention`: other unhealthy disks, unread alerts or warnings, a UPS on
   battery at any charge, or parity-check errors greater than zero.
 - `degraded`: at least one failed check and no critical or attention signal.
 - `ok`: no health signals or failed checks, with `reasons == []`.
 
-UPS statuses `On Battery` and `Low Battery` count as battery operation.
-Missing charge or runtime values do not trigger their numeric thresholds.
+UPS status is split on whitespace and uppercased. `ONBATT` signals battery
+operation; `LOWBATT` is critical regardless of charge or runtime. The documented
+`On Battery` and `Low Battery` wording is also accepted. Missing charge or
+runtime values do not trigger their numeric thresholds. Parity errors from the
+last completed check keep the verdict at attention until the next check.
 Array state remains informational; a stopped array alone does not raise the
 verdict. Failed checks remain visible even when a health signal takes precedence.
 

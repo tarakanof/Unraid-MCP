@@ -296,3 +296,29 @@ async def test_execute_redacts_secrets_in_all_mapped_error_messages(response):
     assert KEY not in str(exc.value)
     assert token not in str(exc.value)
     assert "***REDACTED***" in str(exc.value)
+
+
+@pytest.mark.parametrize("partial", [False, True])
+async def test_execute_with_errors_returns_redacted_errors(partial):
+    payload = {"data": {"x": 5}}
+    if partial:
+        payload["errors"] = [
+            {"message": f"rejected key {KEY}", "path": ["y"], "extensions": {"detail": KEY}}
+        ]
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(200, json=payload))
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            data, errors = await client.execute_with_errors("query { x y }", {"a": 1})
+    assert data == {"x": 5}
+    assert KEY not in str(errors)
+    if partial:
+        assert errors == [
+            {
+                "message": "rejected key ***REDACTED***",
+                "path": ["y"],
+                "extensions": {"detail": "***REDACTED***"},
+            }
+        ]
+    else:
+        assert errors == []

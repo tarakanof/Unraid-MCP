@@ -64,14 +64,13 @@ def _size_from_bytes(value: Any) -> dict[str, Any]:
 
 
 def array_disk_health(status: str | None, warning: Any = 0, critical: Any = 0) -> str:
-    """Map an ``ArrayDiskStatus`` (+ warning/critical flags) to a coarse health word."""
+    """Map disk status to health. Space thresholds are not alarm flags.
+
+    The warning/critical arguments are retained for compatibility and ignored.
+    """
     if not status:
         return "unknown"
     if status == "DISK_OK":
-        if critical:
-            return "critical"
-        if warning:
-            return "warning"
         return "healthy"
     if status in _FAILED_STATUSES:
         return "failed"
@@ -598,7 +597,7 @@ def summarize_health(
         d
         for d in disks
         if d.get("health") not in ("healthy", None)
-        or (d.get("color") or "").lower().split("-")[0] == "red"
+        or (d.get("color") or "").lower().startswith(("red", "yellow"))
     ]
     unread = (notifications_overview or {}).get("unread") or {}
     checks = (
@@ -607,9 +606,10 @@ def summarize_health(
     reasons = []
     critical = False
     for disk in unhealthy:
-        red = (disk.get("color") or "").lower().split("-")[0] == "red"
-        critical |= red or disk.get("health") in ("red", "failed", "critical", "disabled")
-        health = "red" if red else disk.get("health")
+        red = (disk.get("color") or "").lower().startswith("red")
+        critical |= red or disk.get("health") in ("red", "failed", "critical", "missing")
+        yellow = (disk.get("color") or "").lower().startswith("yellow")
+        health = "red" if red else "yellow" if yellow else disk.get("health")
         reasons.append(f"Disk {disk.get('name') or 'unnamed'} is {health}")
     for severity in ("alert", "warning"):
         if unread.get(severity):
@@ -618,10 +618,17 @@ def summarize_health(
     if (parity.get("errors") or 0) > 0:
         reasons.append(f"Parity check reported {parity['errors']} errors")
     for ups in ups_list or []:
-        status = (ups.get("status") or "").strip().lower()
-        if status not in ("on battery", "low battery"):
+        status = (ups.get("status") or "").upper().split()
+        on_battery = "ONBATT" in status or status == ["ON", "BATTERY"]
+        low_battery = "LOWBATT" in status or status == ["LOW", "BATTERY"]
+        if not on_battery and not low_battery:
             continue
         name = ups.get("name") or "unnamed"
+        if low_battery:
+            critical = True
+            reasons.append(f"UPS {name} reports low battery")
+        if not on_battery:
+            continue
         reasons.append(f"UPS {name} is on battery")
         battery = ups.get("battery") or {}
         charge = battery.get("chargeLevel")
