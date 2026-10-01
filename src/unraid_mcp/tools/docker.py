@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -197,19 +198,26 @@ async def fetch_container_stats(
     open_conn = connect or subscriptions.open_ws
     api_key = settings.api_key.get_secret_value()
     bearer_token = settings.bearer_token.get_secret_value() if settings.bearer_token else None
+    deadline_ts = asyncio.get_running_loop().time() + timeout_s
     try:
-        async with open_conn(
-            settings.ws_url(), settings.ssl_context(), open_timeout=timeout_s
-        ) as transport:
-            events, deadline_hit = await subscriptions.sample_subscription(
-                transport,
-                api_key=api_key,
-                bearer_token=bearer_token,
-                query=queries.DOCKER_CONTAINER_STATS,
-                deadline_s=timeout_s,
-                key=_stats_key,
-                is_complete=_stats_complete,
-            )
+        async with asyncio.timeout_at(deadline_ts + subscriptions.CLEANUP_GRACE_S):
+            async with open_conn(
+                settings.ws_url(), settings.ssl_context(), open_timeout=timeout_s
+            ) as transport:
+                events, deadline_hit = await subscriptions.sample_subscription(
+                    transport,
+                    api_key=api_key,
+                    bearer_token=bearer_token,
+                    query=queries.DOCKER_CONTAINER_STATS,
+                    deadline_s=timeout_s,
+                    deadline_ts=deadline_ts,
+                    key=_stats_key,
+                    is_complete=_stats_complete,
+                )
+    except TimeoutError:
+        raise UnraidConnectionError(
+            "The Unraid stats subscription exceeded its operation deadline. Retry the request."
+        ) from None
     except UnraidConnectionError as exc:
         raise UnraidConnectionError(redact(str(exc), (api_key, bearer_token))) from None
     except UnraidGraphQLError as exc:

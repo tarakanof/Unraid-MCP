@@ -8,15 +8,22 @@ websocket is touched. The graphql-transport-ws state machine itself is covered i
 
 from __future__ import annotations
 
+import asyncio
 import json
 import ssl
+import time
 from contextlib import asynccontextmanager
 
+import httpx
 import pytest
+import respx
+from mcp.client import Client
 from mcp.server.mcpserver.exceptions import ToolError
 
+from unraid_mcp import subscriptions
 from unraid_mcp.config import Settings
 from unraid_mcp.errors import UnraidConnectionError
+from unraid_mcp.server import build_server
 from unraid_mcp.subscriptions import WSClosed
 from unraid_mcp.tools import docker
 from unraid_mcp.tools._base import feature_unsupported  # noqa: F401  (documents the path)
@@ -39,9 +46,10 @@ class _FakeTransport:
     async def send(self, message):
         self.sent.append(message)
 
-    async def recv(self):
-        import asyncio
+    async def close(self):
+        pass
 
+    async def recv(self):
         if not self._script:
             raise WSClosed()
         item = self._script.pop(0)
@@ -231,3 +239,100 @@ async def test_stats_connection_error_redacts_configured_secrets():
     assert KEY not in str(exc.value)
     assert token not in str(exc.value)
     assert "***REDACTED***" in str(exc.value)
+
+
+async def test_overall_deadline_bounds_blocked_connection_setup(monkeypatch):
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+
+    @asynccontextmanager
+    async def connect(*args, **kwargs):
+        await asyncio.Event().wait()
+        yield  # pragma: no cover
+
+    start = time.monotonic()
+    with pytest.raises(UnraidConnectionError, match="operation deadline") as exc:
+        await asyncio.wait_for(
+            docker.fetch_container_stats(
+                None, settings=_settings(), connect=connect, timeout_s=0.05
+            ),
+            timeout=0.3,
+        )
+    assert time.monotonic() - start < 0.25
+    assert KEY not in str(exc.value)
+
+
+async def test_connection_setup_uses_sampling_window(monkeypatch):
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+    transport = _FakeTransport([_ack(), _next("a"), _BLOCK])
+
+    @asynccontextmanager
+    async def connect(*args, **kwargs):
+        await asyncio.sleep(0.06)
+        yield transport
+
+    start = time.monotonic()
+    result = await docker.fetch_container_stats(
+        None, settings=_settings(), connect=connect, timeout_s=0.1
+    )
+    assert result["partial"] is True
+    assert time.monotonic() - start < 0.14
+
+
+@pytest.mark.parametrize("blocked_send", [False, True])
+async def test_stats_tool_through_in_memory_client(monkeypatch, blocked_send):
+    class Transport(_FakeTransport):
+        async def send(self, message):
+            if blocked_send:
+                await asyncio.Event().wait()
+            await super().send(message)
+
+    transport = Transport([_ack(), _next("docker:a"), _next("docker:a")])
+    monkeypatch.setattr(subscriptions, "open_ws", _fake_connect(transport))
+    # The tool wrapper uses fetch_container_stats's default timeout argument.
+    monkeypatch.setattr(
+        docker.fetch_container_stats,
+        "__kwdefaults__",
+        {**docker.fetch_container_stats.__kwdefaults__, "timeout_s": 0.05},
+    )
+    with respx.mock:
+        respx.post("https://tower.local/graphql").mock(
+            return_value=httpx.Response(200, json={"data": None})
+        )
+        async with Client(build_server(_settings()), raise_exceptions=True) as session:
+            result = await session.call_tool("get_docker_container_stats", {})
+    assert result.is_error is blocked_send
+    if blocked_send:
+        assert "connection_ack" in result.content[0].text
+        assert KEY not in result.content[0].text
+    else:
+        assert result.structured_content["sampled"] == 1
+        assert result.structured_content["partial"] is False
+
+
+@pytest.mark.parametrize("primary_error", [False, True])
+async def test_tool_deadline_during_close_preserves_primary_outcome(monkeypatch, primary_error):
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+
+    class Transport(_FakeTransport):
+        async def close(self):
+            await asyncio.Event().wait()
+
+    ending = (
+        json.dumps({"type": "error", "payload": [{"message": "Cannot query field stats"}]})
+        if primary_error
+        else _BLOCK
+    )
+    transport = Transport([_ack(), _next("a"), ending])
+    start = time.monotonic()
+    if primary_error:
+        with pytest.raises(ToolError, match="does not support"):
+            await docker.fetch_container_stats(
+                None, settings=_settings(), connect=_fake_connect(transport), timeout_s=0.05
+            )
+    else:
+        result = await docker.fetch_container_stats(
+            None, settings=_settings(), connect=_fake_connect(transport), timeout_s=0.05
+        )
+        assert result["partial"] is True
+        assert result["sampled"] == 1
+    assert time.monotonic() - start < 0.25

@@ -11,9 +11,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+from unittest.mock import Mock
 
 import pytest
 
+from unraid_mcp import subscriptions
 from unraid_mcp.errors import UnraidAuthError, UnraidConnectionError, UnraidGraphQLError
 from unraid_mcp.subscriptions import WSClosed, sample_subscription
 
@@ -47,6 +50,9 @@ class FakeTransport:
 
     async def send(self, message: str) -> None:
         self.sent.append(message)
+
+    async def close(self) -> None:
+        pass
 
     async def recv(self) -> str:
         if not self._script:
@@ -302,3 +308,150 @@ async def test_numeric_frame_type_redacts_all_digit_secret():
         await _sample([json.dumps({"type": int(secret)})], bearer_token=secret)
     assert secret not in str(exc.value)
     assert "***REDACTED***" in str(exc.value)
+
+
+class BlockingTransport(FakeTransport):
+    def __init__(self, script, *, blocked_send=None, blocked_close=False):
+        super().__init__(script)
+        self.blocked_send = blocked_send
+        self.blocked_close = blocked_close
+        self.close_started = False
+
+    async def send(self, message):
+        await super().send(message)
+        if self.blocked_send == "*" or json.loads(message)["type"] == self.blocked_send:
+            await asyncio.Event().wait()
+
+    async def close(self):
+        self.close_started = True
+        if self.blocked_close:
+            await asyncio.Event().wait()
+
+
+async def _sample_transport(transport, *, deadline_s=0.05):
+    return await sample_subscription(
+        transport,
+        api_key=KEY,
+        query="subscription { dockerContainerStats { id } }",
+        deadline_s=deadline_s,
+        key=_key,
+        is_complete=_complete,
+    )
+
+
+@pytest.mark.parametrize("blocked_send", ["connection_init", "subscribe", "*"])
+async def test_blocked_send_obeys_deadline(blocked_send):
+    transport = BlockingTransport([_ack()], blocked_send=blocked_send)
+    start = time.monotonic()
+    # The watchdog makes the old unbounded send fail instead of hanging pytest.
+    with pytest.raises(UnraidConnectionError) as exc:
+        await asyncio.wait_for(_sample_transport(transport), timeout=2.3)
+    assert time.monotonic() - start < 2.2
+    assert KEY not in str(exc.value)
+    assert transport.close_started
+
+
+async def test_blocked_pong_returns_partial_at_deadline():
+    transport = BlockingTransport(
+        [_ack(), _next("a"), json.dumps({"type": "ping"})], blocked_send="pong"
+    )
+    events, deadline_hit = await asyncio.wait_for(_sample_transport(transport), timeout=2.3)
+    assert events == [json.loads(_next("a"))["payload"]["data"]]
+    assert deadline_hit is True
+
+
+@pytest.mark.parametrize(
+    "blocked_send,blocked_close", [("complete", False), (None, True), ("complete", True)]
+)
+@pytest.mark.parametrize("outcome", ["success", "partial", "error"])
+async def test_blocked_cleanup_preserves_primary_outcome(
+    monkeypatch, caplog, blocked_send, blocked_close, outcome
+):
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+    endings = {
+        "success": [_next("a"), _next("a")],
+        "partial": [_next("a"), _BLOCK],
+        "error": [json.dumps({"type": "error", "payload": [{"message": "primary error"}]})],
+    }
+    transport = BlockingTransport(
+        [_ack(), *endings[outcome]], blocked_send=blocked_send, blocked_close=blocked_close
+    )
+    start = time.monotonic()
+    with caplog.at_level(logging.DEBUG, logger="unraid_mcp.subscriptions"):
+        if outcome == "error":
+            with pytest.raises(UnraidGraphQLError, match="primary error"):
+                await asyncio.wait_for(_sample_transport(transport), timeout=0.3)
+        else:
+            events, deadline_hit = await asyncio.wait_for(_sample_transport(transport), timeout=0.3)
+            assert len(events) == 1
+            assert deadline_hit is (outcome == "partial")
+    assert time.monotonic() - start < 0.25
+    assert "cleanup" in caplog.text
+    assert KEY not in caplog.text
+
+
+async def test_cleanup_exceptions_are_logged_without_secrets(caplog):
+    class FailingCleanupTransport(FakeTransport):
+        async def send(self, message):
+            if json.loads(message)["type"] == "complete":
+                raise RuntimeError(KEY)
+            await super().send(message)
+
+        async def close(self):
+            raise RuntimeError(KEY)
+
+    with caplog.at_level(logging.DEBUG, logger="unraid_mcp.subscriptions"):
+        events, deadline_hit = await _sample_transport(
+            FailingCleanupTransport([_ack(), _next("a"), _next("a")])
+        )
+    assert len(events) == 1
+    assert deadline_hit is False
+    assert "unsubscribe failed" in caplog.text
+    assert "close failed" in caplog.text
+    assert KEY not in caplog.text
+
+
+async def test_caller_cancellation_during_cleanup_propagates():
+    close_started = asyncio.Event()
+
+    class CancelledTransport(FakeTransport):
+        async def close(self):
+            close_started.set()
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(
+        _sample_transport(CancelledTransport([_ack(), _next("a"), _next("a")]))
+    )
+    await asyncio.wait_for(close_started.wait(), timeout=0.3)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.parametrize("primary_error", [False, True])
+async def test_open_ws_stalled_close_aborts_socket_without_masking_outcome(
+    monkeypatch, primary_error
+):
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+    socket = BlockingTransport([_ack(), _next("a"), _next("a")], blocked_close=True)
+    socket.transport = Mock()
+
+    async def connect(*args, **kwargs):
+        return socket
+
+    monkeypatch.setattr("websockets.asyncio.client.connect", connect)
+
+    async def run():
+        async with subscriptions.open_ws("ws://tower.local/graphql", None, open_timeout=0.05) as ws:
+            if primary_error:
+                raise UnraidConnectionError("primary error")
+            return await _sample_transport(ws)
+
+    if primary_error:
+        with pytest.raises(UnraidConnectionError, match="primary error"):
+            await asyncio.wait_for(run(), timeout=0.3)
+    else:
+        events, deadline_hit = await asyncio.wait_for(run(), timeout=0.3)
+        assert len(events) == 1
+        assert deadline_hit is False
+    socket.transport.abort.assert_called_once()

@@ -18,10 +18,8 @@ message or log line (server-supplied error text is redacted defensively).
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import ssl
-import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, Protocol
@@ -33,6 +31,7 @@ log = get_logger(__name__)
 
 SUBPROTOCOL = "graphql-transport-ws"
 _SUB_ID = "1"
+CLEANUP_GRACE_S = 2.0
 # graphql-transport-ws close codes that mean "auth rejected" (vs. a generic drop).
 _AUTH_CLOSE_CODES = {4401, 4403}
 
@@ -46,6 +45,8 @@ class WSTransport(Protocol):
     async def send(self, message: str) -> None: ...
 
     async def recv(self) -> str: ...
+
+    async def close(self) -> None: ...
 
 
 class WSClosed(Exception):
@@ -68,13 +69,16 @@ async def sample_subscription(
     bearer_token: str | None = None,
     query: str,
     deadline_s: float,
+    deadline_ts: float | None = None,
     key: Callable[[dict[str, Any]], str | None],
     is_complete: Callable[[dict[str, dict[str, Any]], bool], bool],
 ) -> tuple[list[dict[str, Any]], bool]:
     """Drive one graphql-transport-ws sample and return ``(payloads, deadline_hit)``.
 
-    Every ``recv`` is bounded by the overall ``deadline_s`` (wall clock), so this
-    never hangs. ``next`` payloads (the GraphQL ``data`` object) are deduped into an
+    Every send and receive shares ``deadline_s``. Unsubscribe and close share a
+    fixed cleanup grace budget, including when the sample deadline is spent.
+    ``deadline_ts`` lets the caller include connection setup in the same deadline.
+    ``next`` payloads (the GraphQL ``data`` object) are deduped into an
     insertion-ordered dict keyed by ``key(data)``; ``is_complete(collected, was_new)``
     decides when a full cycle has been captured. Returns the collected payloads and
     whether collection stopped because the deadline was hit (a partial result).
@@ -89,102 +93,152 @@ async def sample_subscription(
       upstream to detect an unsupported field on old API builds).
     """
     secrets = (api_key, bearer_token)
-    deadline_ts = time.monotonic() + deadline_s
+    loop = asyncio.get_running_loop()
+    deadline_ts = (
+        min(deadline_ts, loop.time() + deadline_s)
+        if deadline_ts is not None
+        else (loop.time() + deadline_s)
+    )
+    operation_deadline = deadline_ts + CLEANUP_GRACE_S
+    subscribed = False
+
+    async def _send(message: str) -> None:
+        await asyncio.wait_for(transport.send(message), timeout=max(0, deadline_ts - loop.time()))
 
     async def _recv() -> dict[str, Any]:
-        remaining = deadline_ts - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError
-        raw = await asyncio.wait_for(transport.recv(), timeout=remaining)
+        raw = await asyncio.wait_for(transport.recv(), timeout=max(0, deadline_ts - loop.time()))
         try:
             return redact(json.loads(raw), secrets)
         except ValueError:
             raise UnraidConnectionError("Unraid sent an invalid JSON subscription frame.") from None
 
-    # 1. connection_init — the ONLY place the API key is sent.
-    await transport.send(json.dumps({"type": "connection_init", "payload": {"x-api-key": api_key}}))
-    try:
-        ack = await _recv()
-    except TimeoutError:
-        raise UnraidConnectionError(
-            f"No connection_ack from the Unraid stats subscription within {deadline_s:.0f}s."
-        ) from None
-    except WSClosed as exc:
-        if exc.code in _AUTH_CLOSE_CODES:
+    async def _sample() -> tuple[list[dict[str, Any]], bool]:
+        nonlocal subscribed
+
+        # 1. connection_init — the ONLY place the API key is sent.
+        try:
+            await _send(json.dumps({"type": "connection_init", "payload": {"x-api-key": api_key}}))
+            ack = await _recv()
+        except TimeoutError:
+            raise UnraidConnectionError(
+                f"No connection_ack from the Unraid stats subscription within {deadline_s:.0f}s."
+            ) from None
+        except WSClosed as exc:
+            if exc.code in _AUTH_CLOSE_CODES:
+                raise UnraidAuthError(
+                    "Websocket subscription auth failed. Check UNRAID_API_KEY and its roles."
+                ) from None
+            raise UnraidConnectionError(
+                "Unraid closed the stats subscription before acknowledging the connection."
+            ) from None
+
+        ack_type = ack.get("type")
+        if ack_type in ("connection_error", "error"):
             raise UnraidAuthError(
                 "Websocket subscription auth failed. Check UNRAID_API_KEY and its roles."
-            ) from None
-        raise UnraidConnectionError(
-            "Unraid closed the stats subscription before acknowledging the connection."
-        ) from None
+            )
+        if ack_type != "connection_ack":
+            raise UnraidConnectionError(
+                f"Unexpected first frame from the stats subscription (type={ack_type!r})."
+            )
 
-    ack_type = ack.get("type")
-    if ack_type in ("connection_error", "error"):
-        raise UnraidAuthError(
-            "Websocket subscription auth failed. Check UNRAID_API_KEY and its roles."
-        )
-    if ack_type != "connection_ack":
-        raise UnraidConnectionError(
-            f"Unexpected first frame from the stats subscription (type={ack_type!r})."
-        )
+        # 2. subscribe.
+        subscribed = True
+        await _send(json.dumps({"id": _SUB_ID, "type": "subscribe", "payload": {"query": query}}))
 
-    # 2. subscribe.
-    await transport.send(
-        json.dumps({"id": _SUB_ID, "type": "subscribe", "payload": {"query": query}})
-    )
-
-    collected: dict[str, dict[str, Any]] = {}
-    deadline_hit = False
-    try:
-        while True:
-            try:
-                msg = await _recv()
-            except TimeoutError:
-                deadline_hit = True
-                break
-            except WSClosed:
-                if collected:
+        collected: dict[str, dict[str, Any]] = {}
+        deadline_hit = False
+        try:
+            while True:
+                try:
+                    msg = await _recv()
+                except TimeoutError:
                     deadline_hit = True
                     break
-                raise UnraidConnectionError(
-                    "Unraid closed the stats subscription before sending any data."
-                ) from None
+                except WSClosed:
+                    if collected:
+                        deadline_hit = True
+                        break
+                    raise UnraidConnectionError(
+                        "Unraid closed the stats subscription before sending any data."
+                    ) from None
 
-            mtype = msg.get("type")
-            if mtype == "next":
-                data = (msg.get("payload") or {}).get("data") or {}
-                k = key(data)
-                if k is None:
-                    # Keyless frame: neither a new reading nor a cycle-repeat
-                    # signal. It must not reach is_complete, where was_new=False
-                    # would masquerade as a repeat and truncate the sample.
-                    continue
-                was_new = k not in collected
-                if was_new:
-                    # Keep the first reading per key; a later repeat (the next
-                    # cycle starting) signals completeness but must not overwrite it.
-                    collected[k] = data
-                if is_complete(collected, was_new):
+                mtype = msg.get("type")
+                if mtype == "next":
+                    data = (msg.get("payload") or {}).get("data") or {}
+                    k = key(data)
+                    if k is None:
+                        # Keyless frame: neither a new reading nor a cycle-repeat
+                        # signal. It must not reach is_complete, where was_new=False
+                        # would masquerade as a repeat and truncate the sample.
+                        continue
+                    was_new = k not in collected
+                    if was_new:
+                        # Keep the first reading per key; a later repeat (the next
+                        # cycle starting) signals completeness but must not overwrite it.
+                        collected[k] = data
+                    if is_complete(collected, was_new):
+                        break
+                elif mtype == "error":
+                    payload = msg.get("payload")
+                    errors = payload if isinstance(payload, list) else [{"message": str(payload)}]
+                    messages = "; ".join(
+                        redact(str(e.get("message", "unknown error")), secrets) for e in errors
+                    )
+                    raise UnraidGraphQLError(f"Subscription error: {messages}", errors=errors)
+                elif mtype == "complete":
                     break
-            elif mtype == "error":
-                payload = msg.get("payload")
-                errors = payload if isinstance(payload, list) else [{"message": str(payload)}]
-                messages = "; ".join(
-                    redact(str(e.get("message", "unknown error")), secrets) for e in errors
-                )
-                raise UnraidGraphQLError(f"Subscription error: {messages}", errors=errors)
-            elif mtype == "complete":
-                break
-            elif mtype == "ping":
-                await transport.send(json.dumps({"type": "pong"}))
-            # connection_ack duplicates / unknown frames are ignored.
-    finally:
-        # Best-effort unsubscribe; the socket is closed by the caller's context.
-        with contextlib.suppress(WSClosed, OSError):
-            await transport.send(json.dumps({"id": _SUB_ID, "type": "complete"}))
+                elif mtype == "ping":
+                    await _send(json.dumps({"type": "pong"}))
+                # connection_ack duplicates / unknown frames are ignored.
+        except TimeoutError:
+            # A blocked pong consumes the same sampling window as a blocked recv.
+            deadline_hit = True
 
-    log.debug("subscription sample: %d payload(s), deadline_hit=%s", len(collected), deadline_hit)
-    return list(collected.values()), deadline_hit
+        log.debug(
+            "subscription sample: %d payload(s), deadline_hit=%s", len(collected), deadline_hit
+        )
+        return list(collected.values()), deadline_hit
+
+    async def _cleanup() -> None:
+        cleanup_deadline = min(operation_deadline, loop.time() + CLEANUP_GRACE_S)
+        if subscribed:
+            try:
+                # Reserve half the grace for closing even if unsubscribe blocks.
+                await asyncio.wait_for(
+                    transport.send(json.dumps({"id": _SUB_ID, "type": "complete"})),
+                    timeout=max(0, (cleanup_deadline - loop.time()) / 2),
+                )
+            except Exception:
+                log.debug("subscription cleanup: unsubscribe failed")
+        try:
+            await asyncio.wait_for(
+                transport.close(), timeout=max(0, cleanup_deadline - loop.time())
+            )
+        except Exception:
+            log.debug("subscription cleanup: close failed")
+
+    try:
+        async with asyncio.timeout_at(operation_deadline):
+            try:
+                return await _sample()
+            finally:
+                try:
+                    await _cleanup()
+                except asyncio.CancelledError:
+                    # The operation timeout may fire while cleanup is awaiting close.
+                    # Preserve the primary result/error, but propagate caller cancellation.
+                    if loop.time() < operation_deadline:
+                        raise
+                    log.debug("subscription cleanup: operation deadline reached")
+    except TimeoutError:
+        raise UnraidConnectionError(
+            "The Unraid stats subscription exceeded its sampling deadline. Retry the request."
+        ) from None
+    except WSClosed:
+        raise UnraidConnectionError(
+            "Unraid closed the stats subscription while sending a protocol frame."
+        ) from None
 
 
 class _WebsocketsTransport:
@@ -192,6 +246,7 @@ class _WebsocketsTransport:
 
     def __init__(self, ws: Any) -> None:
         self._ws = ws
+        self._close_started = False
 
     async def send(self, message: str) -> None:
         import websockets
@@ -200,6 +255,17 @@ class _WebsocketsTransport:
             await self._ws.send(message)
         except websockets.ConnectionClosed as exc:
             raise WSClosed(code=getattr(exc, "code", None)) from exc
+
+    async def close(self) -> None:
+        # The sampler owns cleanup; open_ws only closes if sampling never did.
+        if self._close_started:
+            return
+        self._close_started = True
+        try:
+            await self._ws.close()
+        finally:
+            # Release the socket even if a stalled close handshake is cancelled.
+            self._ws.transport.abort()
 
     async def recv(self) -> str:
         import websockets
@@ -228,14 +294,21 @@ async def open_ws(
     from websockets.asyncio.client import connect
 
     try:
-        async with connect(
+        ws = await connect(
             ws_url,
             subprotocols=[SUBPROTOCOL],  # type: ignore[list-item]
             ssl=ssl_context,
             open_timeout=open_timeout,
             proxy=None,  # parity with httpx trust_env=False: ignore proxy env vars
-        ) as ws:
-            yield _WebsocketsTransport(ws)
+        )
+        transport = _WebsocketsTransport(ws)
+        try:
+            yield transport
+        finally:
+            try:
+                await asyncio.wait_for(transport.close(), timeout=CLEANUP_GRACE_S)
+            except Exception:
+                log.debug("subscription cleanup: close failed")
     except (OSError, websockets.WebSocketException) as exc:
         # Never include ``exc`` text verbatim — keep the message static and secret-free.
         raise UnraidConnectionError(
