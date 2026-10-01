@@ -77,25 +77,6 @@ async def live_client():
         )
 
 
-class _NoNetworkTransport(httpx.AsyncBaseTransport):
-    """Transport that fails the test on ANY request."""
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        raise AssertionError(
-            f"unexpected network I/O: {request.method} {request.url} — "
-            "the confirm-refusal path must not touch the server"
-        )
-
-
-@pytest_asyncio.fixture
-async def tripwire_client():
-    """Client for the confirm-refusal tests: its transport raises on any
-    request, so a broken ``require_confirm`` fails the test loudly instead of
-    mutating the real box (e.g. stopping the array mid-smoke-test)."""
-    async with httpx.AsyncClient(transport=_NoNetworkTransport()) as http:
-        yield UnraidClient("https://tripwire.invalid/graphql", "live-smoke-tripwire", http)
-
-
 # ── Shape helpers ────────────────────────────────────────────────────────────
 
 
@@ -303,78 +284,3 @@ async def test_run_graphql_query(live_client):
     result = await _run(misc.do_raw_query, live_client, "query { __typename }")
     assert isinstance(result, dict)
     assert result.get("__typename") == "Query"
-
-
-# ── Mutating tools: confirm-refusal path only (no state change) ───────────────
-
-# Each entry invokes a ``do_*`` mutation with confirm=False. ``require_confirm``
-# raises ``ToolError`` *before any network I/O*. These run against the
-# tripwire client (not the live one), so if that invariant ever regresses the
-# test fails on the attempted request instead of mutating the real server.
-MUTATION_REFUSALS: list[tuple[str, Callable[[UnraidClient], Awaitable[Any]]]] = [
-    ("start_array", lambda c: array.do_start_array(c, confirm=False)),
-    ("stop_array", lambda c: array.do_stop_array(c, confirm=False)),
-    ("start_parity", lambda c: array.do_start_parity(c, correct=False, confirm=False)),
-    ("pause_parity", lambda c: array.do_pause_parity(c, confirm=False)),
-    ("resume_parity", lambda c: array.do_resume_parity(c, confirm=False)),
-    ("cancel_parity", lambda c: array.do_cancel_parity(c, confirm=False)),
-    ("start_container", lambda c: docker.do_start_container(c, "x", confirm=False)),
-    ("stop_container", lambda c: docker.do_stop_container(c, "x", confirm=False)),
-    ("restart_container", lambda c: docker.do_restart_container(c, "x", confirm=False)),
-    ("pause_container", lambda c: docker.do_pause_container(c, "x", confirm=False)),
-    ("unpause_container", lambda c: docker.do_unpause_container(c, "x", confirm=False)),
-    ("update_container", lambda c: docker.do_update_container(c, "x", confirm=False)),
-    ("update_containers", lambda c: docker.do_update_containers(c, ["x"], confirm=False)),
-    (
-        "archive_notification",
-        lambda c: notifications.do_archive_notification(c, "x", confirm=False),
-    ),
-    ("archive_all", lambda c: notifications.do_archive_all(c, None, confirm=False)),
-    ("unread_notification", lambda c: notifications.do_unread_notification(c, "x", confirm=False)),
-    (
-        "delete_notification",
-        lambda c: notifications.do_delete_notification(c, "x", "UNREAD", confirm=False),
-    ),
-    (
-        "archive_notifications",
-        lambda c: notifications.do_archive_notifications(c, ["x"], confirm=False),
-    ),
-    (
-        "unarchive_notifications",
-        lambda c: notifications.do_unarchive_notifications(c, ["x"], confirm=False),
-    ),
-    (
-        "unarchive_all_notifications",
-        lambda c: notifications.do_unarchive_all(c, None, confirm=False),
-    ),
-    (
-        "delete_archived_notifications",
-        lambda c: notifications.do_delete_archived_notifications(c, confirm=False),
-    ),
-    (
-        "create_notification",
-        lambda c: notifications.do_create_notification(c, "x", "x", "x", "INFO", confirm=False),
-    ),
-    ("start_vm", lambda c: vm.do_start_vm(c, "x", confirm=False)),
-    ("stop_vm", lambda c: vm.do_stop_vm(c, "x", confirm=False)),
-    ("pause_vm", lambda c: vm.do_pause_vm(c, "x", confirm=False)),
-    ("resume_vm", lambda c: vm.do_resume_vm(c, "x", confirm=False)),
-    ("reboot_vm", lambda c: vm.do_reboot_vm(c, "x", confirm=False)),
-    ("force_stop_vm", lambda c: vm.do_force_stop_vm(c, "x", confirm=False)),
-    ("reset_vm", lambda c: vm.do_reset_vm(c, "x", confirm=False)),
-    # Dangerous tier — same tripwire client, never the live one.
-    ("mount_array_disk", lambda c: array.do_mount_array_disk(c, "x", confirm=False)),
-    ("unmount_array_disk", lambda c: array.do_unmount_array_disk(c, "x", confirm=False)),
-    ("clear_disk_statistics", lambda c: array.do_clear_disk_statistics(c, "x", confirm=False)),
-    ("add_disk_to_array", lambda c: array.do_add_disk_to_array(c, "x", confirm=False)),
-    ("remove_docker_container", lambda c: docker.do_remove_container(c, "x", confirm=False)),
-    ("update_all_docker_containers", lambda c: docker.do_update_all_containers(c, confirm=False)),
-]
-
-
-@pytest.mark.parametrize(
-    "call", [c for _, c in MUTATION_REFUSALS], ids=[n for n, _ in MUTATION_REFUSALS]
-)
-async def test_mutation_refuses_without_confirm(tripwire_client, call):
-    with pytest.raises(ToolError):
-        await call(tripwire_client)

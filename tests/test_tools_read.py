@@ -6,10 +6,14 @@ import json
 
 import httpx
 import pytest
+import respx
+from mcp.client import Client
 from mcp.server.mcpserver.exceptions import ToolError
 
+from tests.conftest import URL
 from unraid_mcp import queries
 from unraid_mcp.errors import UnraidAuthError, UnraidConnectionError, UnraidGraphQLError
+from unraid_mcp.server import build_server
 from unraid_mcp.tools import array, docker, misc, notifications, shares, system, vm
 
 from .test_formatting import assert_sizes_shaped
@@ -362,6 +366,45 @@ async def test_parity_status_and_history(mocked_client):
         assert (await array.fetch_parity_status(c))["status"] == "COMPLETED"
     async with mocked_client(_resp({"parityHistory": [{"status": "OK"}]})) as (c, r):
         assert await array.fetch_parity_history(c) == [{"status": "OK"}]
+
+
+@pytest.mark.parametrize(
+    "data",
+    [{}, {"array": None}, {"array": {}}, {"array": {"parityCheckStatus": None}}],
+    ids=["empty-data", "null-array", "empty-array", "null-status"],
+)
+async def test_parity_status_empty_or_null_fields(mocked_client, data):
+    async with mocked_client(_resp(data)) as (c, r):
+        assert await array.fetch_parity_status(c) == {}
+
+
+@pytest.mark.parametrize(
+    "data", [{}, {"parityHistory": None}, {"parityHistory": []}], ids=["empty", "null", "list"]
+)
+async def test_parity_history_empty_or_null(mocked_client, data):
+    async with mocked_client(_resp(data)) as (c, r):
+        assert await array.fetch_parity_history(c) == []
+
+
+_GQL_ERROR = httpx.Response(200, json={"errors": [{"message": "boom"}], "data": None})
+
+
+@pytest.mark.parametrize("fetch", [array.fetch_parity_status, array.fetch_parity_history])
+async def test_parity_graphql_error_raises(mocked_client, fetch):
+    async with mocked_client(_GQL_ERROR) as (c, r):
+        with pytest.raises(UnraidGraphQLError):
+            await fetch(c)
+
+
+@pytest.mark.parametrize("tool", ["get_parity_status", "get_parity_history"])
+async def test_parity_tool_maps_graphql_error_to_tool_error(settings_factory, tool):
+    with respx.mock(assert_all_called=False) as router:
+        router.post(URL).mock(return_value=_GQL_ERROR)
+        mcp = build_server(settings_factory())
+        async with Client(mcp, raise_exceptions=False) as session:
+            result = await session.call_tool(tool, {})
+    assert result.is_error is True
+    assert "boom" in result.content[0].text
 
 
 async def test_disks_and_disk_details(mocked_client):
