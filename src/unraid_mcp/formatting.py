@@ -957,7 +957,7 @@ def _temperature_signals(
     # NVMe drives routinely touch their 60 C default critical under load: below
     # 75 C that alone is attention, not critical.
     hard_critical = any(
-        not s.get("nvme") or (s.get("celsius") or 0) >= _NVME_CRITICAL_C for s in critical
+        not s.get("nvme") or round(s.get("celsius") or 0, 6) >= _NVME_CRITICAL_C for s in critical
     )
     return summary, reasons, hard_critical, bool(warning or critical)
 

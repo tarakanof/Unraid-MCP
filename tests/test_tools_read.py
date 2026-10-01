@@ -2411,3 +2411,23 @@ async def test_temperature_health_sentinel_dropped_on_super_io(mocked_client, ch
     async with mocked_client(_health_responses([sensor])) as (c, _r):
         out = await misc.fetch_health(c)
     assert out["overall"] == "ok"
+
+
+@pytest.mark.parametrize(
+    ("value", "unit", "expected"),
+    [
+        (75, "CELSIUS", "critical"),
+        (167, "FAHRENHEIT", "critical"),
+        (348.15, "KELVIN", "critical"),
+        (626.67, "RANKINE", "critical"),
+        (74.9, "CELSIUS", "attention"),
+        (166.8, "FAHRENHEIT", "attention"),
+        (348.05, "KELVIN", "attention"),
+        (626.49, "RANKINE", "attention"),
+    ],
+)
+async def test_temperature_health_nvme_75c_boundary_all_units(mocked_client, value, unit, expected):
+    sensor = _sensor("WD SN570", value, "CRITICAL", "NVME", unit=unit, id_="disk:22392R")
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == expected
