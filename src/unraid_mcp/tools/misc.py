@@ -30,6 +30,7 @@ from ..formatting import (
 from ._base import (
     READ_ONLY,
     feature_unsupported,
+    gather_all,
     get_app_context,
     guarded,
     is_permission_error,
@@ -145,42 +146,51 @@ async def fetch_plugins(
     degrades gracefully (older builds without it just contribute nothing extra);
     if ``plugins`` itself is unsupported, the whole tool raises a friendly error.
     """
+    # The two root queries are independent; the installed-plugins shaper only
+    # needs the first result *after* both have arrived, so fetch concurrently.
     try:
-        plugins = shape_plugins(await client.execute(queries.PLUGINS))
+        plugins_data, installed_raw = await gather_all(
+            client.execute(queries.PLUGINS),
+            safe_query(client, queries.INSTALLED_UNRAID_PLUGINS, lambda data: data, None),
+        )
     except UnraidGraphQLError as exc:
         if unsupported_field_error(exc):
             raise feature_unsupported("plugin list", api_version=api_version) from None
         raise
+    plugins = shape_plugins(plugins_data)
     known_names = {p["name"] for p in plugins if p.get("name")}
-    installed = await safe_query(
-        client,
-        queries.INSTALLED_UNRAID_PLUGINS,
-        lambda data: shape_installed_unraid_plugins(data, known_names),
-        [],
+    installed = (
+        shape_installed_unraid_plugins(installed_raw, known_names)
+        if installed_raw is not None
+        else []
     )
     return plugins + installed
 
 
 async def fetch_health(client: UnraidClient) -> dict[str, Any]:
-    array, array_ok = await safe_query_with_status(
-        client, queries.ARRAY_STATUS, shape_array_status, {}, required_field="array"
-    )
-    ups: list[dict[str, Any]] = []
-    ups_ok = False
-    ups_eligible = False  # failed with a plain (non-permission, supported) GraphQL error
-    try:
-        ups_data, ups_errors = await client.execute_with_errors(queries.UPS_DEVICES)
-        ups, ups_ok = shape_ups(ups_data), not ups_errors
-    except UnraidGraphQLError as exc:
-        ups_eligible = not is_permission_error(exc) and not unsupported_field_error(exc)
-    except UnraidAuthError:
-        pass
-    overview, notifications_ok = await safe_query_with_status(
-        client,
-        queries.NOTIFICATIONS_OVERVIEW,
-        shape_notifications_overview,
-        {},
-        tolerate_auth=True,
+    async def ups_check() -> tuple[list[dict[str, Any]], bool, bool]:
+        # (devices, ok, eligible) — eligible: failed with a plain (non-permission,
+        # supported) GraphQL error, so UPS may simply be unconfigured.
+        try:
+            ups_data, ups_errors = await client.execute_with_errors(queries.UPS_DEVICES)
+            return shape_ups(ups_data), not ups_errors, False
+        except UnraidGraphQLError as exc:
+            return [], False, not is_permission_error(exc) and not unsupported_field_error(exc)
+        except UnraidAuthError:
+            return [], False, False
+
+    (array, array_ok), (ups, ups_ok, ups_eligible), (overview, notifications_ok) = await gather_all(
+        safe_query_with_status(
+            client, queries.ARRAY_STATUS, shape_array_status, {}, required_field="array"
+        ),
+        ups_check(),
+        safe_query_with_status(
+            client,
+            queries.NOTIFICATIONS_OVERVIEW,
+            shape_notifications_overview,
+            {},
+            tolerate_auth=True,
+        ),
     )
     checks = {
         name: "ok" if ok else "failed"

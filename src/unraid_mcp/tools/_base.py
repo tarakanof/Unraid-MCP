@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -159,6 +160,24 @@ def is_permission_error(exc: UnraidGraphQLError) -> bool:
         (e.get("extensions") or {}).get("code") in ("FORBIDDEN", "UNAUTHENTICATED")
         for e in exc.errors
     )
+
+
+async def gather_all(*aws: Awaitable[Any]) -> list[Any]:
+    """Run independent awaitables concurrently and return results in order.
+
+    If any raises, the siblings are cancelled and awaited before the exception
+    propagates, so no task is left running or logs "exception was never
+    retrieved". The original exception is re-raised unwrapped (unlike
+    ``TaskGroup``'s ``ExceptionGroup``), preserving ``guarded``'s mapping.
+    """
+    tasks = [asyncio.ensure_future(a) for a in aws]
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 def require_confirm(confirm: bool, action: str) -> None:

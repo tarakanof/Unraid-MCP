@@ -997,7 +997,8 @@ async def test_health_actionable_errors_propagate(mocked_client, check, failure)
     async with mocked_client(responses) as (client, route):
         with pytest.raises(UnraidAuthError if failure == "auth" else UnraidConnectionError):
             await misc.fetch_health(client)
-    assert route.call_count == index + 1
+    # The three checks run concurrently, so all were issued before the error surfaced.
+    assert route.call_count == 3
 
 
 @pytest.mark.parametrize(

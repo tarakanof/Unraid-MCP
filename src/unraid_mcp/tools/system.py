@@ -20,6 +20,7 @@ from ..formatting import (
 from ._base import (
     READ_ONLY,
     feature_unsupported,
+    gather_all,
     get_app_context,
     guarded,
     safe_query,
@@ -28,11 +29,14 @@ from ._base import (
 
 
 async def fetch_system_info(client: UnraidClient) -> dict[str, Any]:
-    info = shape_system_info(await client.execute(queries.SYSTEM_INFO))
+    info_data, flash = await gather_all(
+        client.execute(queries.SYSTEM_INFO),
+        safe_query(client, queries.FLASH, shape_flash, None),
+    )
+    info = shape_system_info(info_data)
     # `flash` is a separate root query (not nested under `info`), fetched here
     # as a second, independently-degrading call so older API builds without
     # this field still return system info — just without flash device identity.
-    flash = await safe_query(client, queries.FLASH, shape_flash, None)
     if flash is not None:
         info = {**info, "flash": flash}
     return info
