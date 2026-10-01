@@ -32,6 +32,8 @@ MUTATION_TOOLS = {
     "unpause_docker_container",
     "update_docker_container",
     "update_docker_containers",
+    "refresh_docker_digests",
+    "set_docker_autostart",
     "start_vm",
     "stop_vm",
     "pause_vm",
@@ -1023,3 +1025,255 @@ async def test_quick_mutation_keeps_default_timeout(mocked_client):
     async with mocked_client(ok) as (client, route):
         await docker.do_start_container(client, "1:abc", confirm=True)
         assert _read_timeout(route) == 5.0  # the shared httpx client default
+
+
+# ── #120: flash backup, docker digests, docker autostart ────────────────────
+
+_NO_FIELD = {"errors": [{"message": 'Cannot query field "x" on type "Docker".'}], "data": None}
+_GQL_ERR = {"errors": [{"message": "boom"}], "data": None}
+
+
+async def test_refresh_digests_requires_confirm_no_request(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_refresh_docker_digests(client, confirm=False)
+        assert route.call_count == 0
+
+
+async def test_refresh_digests_happy(mocked_client):
+    resp = httpx.Response(200, json={"data": {"refreshDockerDigests": True}})
+    async with mocked_client(resp) as (client, route):
+        assert await docker.do_refresh_docker_digests(client, confirm=True) == {"ok": True}
+        body = json.loads(route.calls.last.request.content)
+        assert body["query"] == queries.REFRESH_DOCKER_DIGESTS
+
+
+@pytest.mark.parametrize(
+    "data", [None, {}, {"refreshDockerDigests": None}, {"refreshDockerDigests": False}]
+)
+async def test_refresh_digests_false_or_null_is_error(mocked_client, data):
+    async with mocked_client(httpx.Response(200, json={"data": data})) as (client, _):
+        with pytest.raises(ToolError):
+            await docker.do_refresh_docker_digests(client, confirm=True)
+
+
+async def test_refresh_digests_graphql_error_mapped(mocked_client):
+    async with mocked_client(httpx.Response(200, json=_GQL_ERR)) as (client, _):
+        with pytest.raises(UnraidGraphQLError):
+            await docker.do_refresh_docker_digests(client, confirm=True)
+    async with mocked_client(httpx.Response(200, json=_NO_FIELD)) as (client, _):
+        with pytest.raises(ToolError, match="ENABLE_NEXT_DOCKER_RELEASE"):
+            await docker.do_refresh_docker_digests(client, confirm=True)
+
+
+_ENTRIES = [{"id": "1:a", "auto_start": True, "wait": 5}, {"id": "1:b", "autoStart": False}]
+_STATE = {
+    "data": {
+        "docker": {
+            "containers": [
+                {
+                    "id": "1:a",
+                    "names": ["/a"],
+                    "autoStart": False,
+                    "autoStartOrder": None,
+                    "autoStartWait": None,
+                },
+                {
+                    "id": "1:b",
+                    "names": ["/b"],
+                    "autoStart": True,
+                    "autoStartOrder": 2,
+                    "autoStartWait": 10,
+                },
+                {
+                    "id": "1:c",
+                    "names": ["/c"],
+                    "autoStart": True,
+                    "autoStartOrder": 1,
+                    "autoStartWait": None,
+                },
+                {
+                    "id": "1:d",
+                    "names": ["/d"],
+                    "autoStart": False,
+                    "autoStartOrder": None,
+                    "autoStartWait": None,
+                },
+            ]
+        }
+    }
+}
+_OK = {"data": {"docker": {"updateAutostartConfiguration": True}}}
+
+
+async def test_set_autostart_requires_confirm_no_request(mocked_client):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_set_docker_autostart(client, _ENTRIES, confirm=False)
+        assert route.call_count == 0
+
+
+async def test_set_autostart_merges_into_existing_list(mocked_client):
+    async with mocked_client([httpx.Response(200, json=_STATE), httpx.Response(200, json=_OK)]) as (
+        client,
+        route,
+    ):
+        out = await docker.do_set_docker_autostart(client, _ENTRIES, True, confirm=True)
+        assert route.call_count == 2
+        sent = json.loads(route.calls.last.request.content)
+        # c (order 1) untouched and first; b removed; a appended with wait.
+        expected = [{"id": "1:c", "autoStart": True}, {"id": "1:a", "autoStart": True, "wait": 5}]
+        assert sent["variables"] == {"entries": expected, "persist": True}
+        assert out == {"ok": True, "autostart": expected}
+
+
+async def test_set_autostart_unknown_id_rejected_before_mutation(mocked_client):
+    async with mocked_client([httpx.Response(200, json=_STATE), httpx.Response(200, json=_OK)]) as (
+        client,
+        route,
+    ):
+        with pytest.raises(ToolError, match="Unknown container"):
+            await docker.do_set_docker_autostart(
+                client, [{"id": "1:zzz", "auto_start": True}], confirm=True
+            )
+        assert route.call_count == 1  # only the read
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        [],
+        ["x"],
+        [{"id": "", "auto_start": True}],
+        [{"id": "1:a"}],
+        [{"id": "1:a", "auto_start": "yes"}],
+        [{"id": "1:a", "auto_start": True, "wait": -1}],
+        [{"id": "1:a", "auto_start": True, "wait": 2147483648}],
+        [{"id": "1:a", "auto_start": True}, {"id": "1:a", "auto_start": False}],
+        [{"id": "1:a", "auto_start": True, "wait": True}],
+        [{"id": "1:a", "auto_start": True, "bogus": 1}],
+    ],
+)
+async def test_set_autostart_invalid_entries_no_request(mocked_client, entries):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_set_docker_autostart(client, entries, confirm=True)
+        assert route.call_count == 0
+
+
+@pytest.mark.parametrize(
+    "data", [None, {}, {"docker": None}, {"docker": {"updateAutostartConfiguration": False}}]
+)
+async def test_set_autostart_false_or_null_is_error(mocked_client, data):
+    async with mocked_client(
+        [httpx.Response(200, json=_STATE), httpx.Response(200, json={"data": data})]
+    ) as (client, _):
+        with pytest.raises(ToolError):
+            await docker.do_set_docker_autostart(client, _ENTRIES, confirm=True)
+
+
+async def test_set_autostart_graphql_error_mapped(mocked_client):
+    async with mocked_client(
+        [httpx.Response(200, json=_STATE), httpx.Response(200, json=_GQL_ERR)]
+    ) as (client, _):
+        with pytest.raises(UnraidGraphQLError):
+            await docker.do_set_docker_autostart(client, _ENTRIES, confirm=True)
+    async with mocked_client(httpx.Response(200, json=_NO_FIELD)) as (client, _):
+        with pytest.raises(ToolError, match="does not support"):
+            await docker.do_set_docker_autostart(client, _ENTRIES, confirm=True)
+
+
+async def test_set_autostart_order_reorders_existing(mocked_client):
+    # current enabled order: c(1), b(2). Put b first, enable a (appended).
+    async with mocked_client([httpx.Response(200, json=_STATE), httpx.Response(200, json=_OK)]) as (
+        client,
+        route,
+    ):
+        out = await docker.do_set_docker_autostart(
+            client, [{"id": "1:a", "auto_start": True}], order=["1:b", "1:a"], confirm=True
+        )
+        assert [e["id"] for e in out["autostart"]] == ["1:b", "1:a", "1:c"]
+        assert out["autostart"][0]["wait"] == 10
+
+
+@pytest.mark.parametrize("order", [[], ["1:a", "1:a"], [""]])
+async def test_set_autostart_bad_order_no_request(mocked_client, order):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError):
+            await docker.do_set_docker_autostart(
+                client, [{"id": "1:a", "auto_start": True}], order=order, confirm=True
+            )
+        assert route.call_count == 0
+
+
+async def test_set_autostart_order_not_enabled_rejected_before_mutation(mocked_client):
+    async with mocked_client([httpx.Response(200, json=_STATE), httpx.Response(200, json=_OK)]) as (
+        client,
+        route,
+    ):
+        with pytest.raises(ToolError, match="not be autostart-enabled"):
+            await docker.do_set_docker_autostart(
+                client, [{"id": "1:a", "auto_start": True}], order=["1:d"], confirm=True
+            )
+        assert route.call_count == 1
+
+
+async def test_set_autostart_concurrent_calls_do_not_lose_updates():
+    import asyncio
+
+    import respx
+
+    from tests.conftest import URL
+    from unraid_mcp.client import UnraidClient
+
+    enabled: list[str] = []  # server-side state, mutated by the mutation handler
+
+    async def handler(request):
+        body = json.loads(request.content)
+        if body["query"] == queries.DOCKER_AUTOSTART_STATE:
+            cs = [
+                {
+                    "id": cid,
+                    "names": [cid],
+                    "autoStart": cid in enabled,
+                    "autoStartOrder": enabled.index(cid) if cid in enabled else None,
+                    "autoStartWait": None,
+                }
+                for cid in ("1:a", "1:b")
+            ]
+            await asyncio.sleep(0.05)  # yield after the snapshot so reads overlap
+            return httpx.Response(200, json={"data": {"docker": {"containers": cs}}})
+        enabled[:] = [e["id"] for e in body["variables"]["entries"]]
+        return httpx.Response(200, json=_OK)
+
+    with respx.mock:
+        respx.post(URL).mock(side_effect=handler)
+        async with httpx.AsyncClient() as http:
+            client = UnraidClient(URL, "supersecretkey123", http, host_label="t")
+            await asyncio.gather(
+                docker.do_set_docker_autostart(
+                    client, [{"id": "1:a", "auto_start": True}], confirm=True
+                ),
+                docker.do_set_docker_autostart(
+                    client, [{"id": "1:b", "auto_start": True}], confirm=True
+                ),
+            )
+    assert sorted(enabled) == ["1:a", "1:b"]
+
+
+async def test_set_autostart_partial_read_errors_abort_before_mutation(mocked_client):
+    partial = {
+        "data": _STATE["data"],
+        "errors": [{"message": "autoStartWait unavailable", "path": ["docker"]}],
+    }
+    async with mocked_client(
+        [httpx.Response(200, json=partial), httpx.Response(200, json=_OK)]
+    ) as (
+        client,
+        route,
+    ):
+        with pytest.raises(UnraidGraphQLError):
+            await docker.do_set_docker_autostart(
+                client, [{"id": "1:a", "auto_start": True}], confirm=True
+            )
+        assert route.call_count == 1  # only the read

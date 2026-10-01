@@ -22,6 +22,8 @@ from unraid_mcp.server import build_server
 
 # Free-form string params the tool validates against a fixed vocabulary.
 _VALID_STRINGS = {"importance": "INFO", "type": "UNREAD"}
+# Required args whose schema needs a structured value (e.g. arrays of objects).
+_VALID_VALUES: dict[str, Any] = {"entries": [{"id": "1:a", "auto_start": True}]}
 
 
 def _dummy_args(schema: dict[str, Any]) -> dict[str, Any]:
@@ -32,7 +34,9 @@ def _dummy_args(schema: dict[str, Any]) -> dict[str, Any]:
         if name == "confirm":
             continue
         prop = props[name]
-        if name in _VALID_STRINGS:
+        if name in _VALID_VALUES:
+            args[name] = _VALID_VALUES[name]
+        elif name in _VALID_STRINGS:
             args[name] = _VALID_STRINGS[name]
         elif "enum" in prop:
             args[name] = prop["enum"][0]
@@ -87,6 +91,7 @@ MUTATING_TOOLS = [t for t in _TOOLS if not _is_read_only(t)]
 # Hard-coded so a mutation mis-annotated READ_ONLY (and thus dropped from the
 # discovered set) fails the test instead of silently losing refusal coverage.
 EXPECTED_MUTATING = {
+    "refresh_docker_digests", "set_docker_autostart",
     "start_array", "stop_array", "start_parity_check", "pause_parity_check",
     "resume_parity_check", "cancel_parity_check", "start_docker_container",
     "stop_docker_container", "restart_docker_container", "pause_docker_container",

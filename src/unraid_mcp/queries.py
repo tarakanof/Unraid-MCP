@@ -499,6 +499,30 @@ mutation UpdateContainers($ids: [PrefixedID!]!) {
 }
 """
 
+# Force a fresh image-digest check (feeds `check_docker_updates`). Returns Boolean!.
+REFRESH_DOCKER_DIGESTS = """
+mutation RefreshDockerDigests {
+  refreshDockerDigests
+}
+"""
+
+# Current autostart state (list order = boot order via autoStartOrder).
+DOCKER_AUTOSTART_STATE = """
+query DockerAutostartState {
+  docker { containers { id names autoStart autoStartOrder autoStartWait } }
+}
+"""
+
+# REPLACES the whole autostart config with `entries` (list order = boot order).
+# Returns Boolean!.
+UPDATE_DOCKER_AUTOSTART = """
+mutation UpdateDockerAutostart(
+  $entries: [DockerAutostartEntryInput!]!, $persist: Boolean
+) {
+  docker { updateAutostartConfiguration(entries: $entries, persistUserPreferences: $persist) }
+}
+"""
+
 VM_START = "mutation StartVM($id: PrefixedID!) { vm { start(id: $id) } }"
 VM_STOP = "mutation StopVM($id: PrefixedID!) { vm { stop(id: $id) } }"
 VM_PAUSE = "mutation PauseVM($id: PrefixedID!) { vm { pause(id: $id) } }"
