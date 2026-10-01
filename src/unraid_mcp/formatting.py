@@ -425,11 +425,21 @@ def shape_hardware_inventory(data: dict | None, kind: str | None = None) -> dict
     """Pick ``info.devices`` lists; a null/missing list becomes ``[]``.
 
     ``kind`` restricts the result to one device type. Device dicts pass through
-    unchanged (the query already selects a curated field subset).
+    (the query already selects a curated field subset), except PCI
+    ``blacklisted``, which upstream types as a String and is coerced to bool
+    to match ``InfoGpu.blacklisted``.
     """
     devices = ((data or {}).get("info") or {}).get("devices") or {}
     kinds = (kind,) if kind else HARDWARE_KINDS
-    return {k: list(devices.get(k) or []) for k in kinds}
+    out = {k: list(devices.get(k) or []) for k in kinds}
+    if "pci" in out:
+        out["pci"] = [
+            {**d, "blacklisted": str(d["blacklisted"]).lower() == "true"}
+            if d.get("blacklisted") is not None
+            else d
+            for d in out["pci"]
+        ]
+    return out
 
 
 def shape_flash(data: dict | None) -> dict[str, Any]:

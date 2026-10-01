@@ -103,8 +103,17 @@ async def test_hardware_inventory_all(mocked_client):
         out = await system.fetch_hardware_inventory(client)
     assert set(out) == {"gpu", "pci", "usb", "network"}
     assert out["gpu"][0]["id"] == "g1"
+    assert out["pci"][0]["blacklisted"] is False
     assert _sent_query(route) == queries.HARDWARE_INVENTORY
     assert "machineId" not in _sent_query(route)
+
+
+async def test_hardware_inventory_pci_blacklisted_string_to_bool(mocked_client):
+    data = {"info": {"devices": {"pci": [{"id": "a", "blacklisted": "true"}, {"id": "b"}]}}}
+    async with mocked_client(_resp(data)) as (client, route):
+        out = await system.fetch_hardware_inventory(client, "pci")
+    assert out["pci"][0]["blacklisted"] is True
+    assert "blacklisted" not in out["pci"][1]
 
 
 async def test_hardware_inventory_kind_filter(mocked_client):
