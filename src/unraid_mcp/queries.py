@@ -200,6 +200,21 @@ query GetSystemTime {
 }
 """
 
+# ``info.devices`` hardware inventory. ``machineId`` / ``primaryNetwork`` are
+# deliberately not selected (stable host identifier; see issue #118).
+HARDWARE_INVENTORY = """
+query GetHardwareInventory {
+  info {
+    devices {
+      gpu { id type typeid blacklisted class productid vendorname }
+      pci { id type typeid vendorname vendorid productname productid blacklisted class }
+      usb { id name bus device }
+      network { id iface model vendor mac virtual speed dhcp }
+    }
+  }
+}
+"""
+
 # Root ``flash`` — a separate root query, NOT nested under ``info``. Fetched as
 # a second, independently-degrading call in ``fetch_system_info`` so older API
 # builds without this field still return system info (see tools/system.py).

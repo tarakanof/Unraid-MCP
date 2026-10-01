@@ -86,6 +86,73 @@ async def test_system_time_unsupported_raises_friendly_error(mocked_client):
             await system.fetch_system_time(client, api_version="7.0.0")
 
 
+_DEVICES = {
+    "info": {
+        "devices": {
+            "gpu": [{"id": "g1", "type": "Nvidia", "blacklisted": False}],
+            "pci": [{"id": "p1", "vendorname": "Intel", "blacklisted": "false"}],
+            "usb": [{"id": "u1", "name": "Flash", "bus": "001", "device": "002"}],
+            "network": [{"id": "n1", "iface": "eth0", "mac": "aa:bb"}],
+        }
+    }
+}
+
+
+async def test_hardware_inventory_all(mocked_client):
+    async with mocked_client(_resp(_DEVICES)) as (client, route):
+        out = await system.fetch_hardware_inventory(client)
+    assert set(out) == {"gpu", "pci", "usb", "network"}
+    assert out["gpu"][0]["id"] == "g1"
+    assert _sent_query(route) == queries.HARDWARE_INVENTORY
+    assert "machineId" not in _sent_query(route)
+
+
+async def test_hardware_inventory_kind_filter(mocked_client):
+    async with mocked_client(_resp(_DEVICES)) as (client, route):
+        out = await system.fetch_hardware_inventory(client, "usb")
+    assert out == {"usb": _DEVICES["info"]["devices"]["usb"]}
+
+
+async def test_hardware_inventory_invalid_kind_makes_no_request(mocked_client):
+    async with mocked_client(_resp(_DEVICES)) as (client, route):
+        with pytest.raises(ToolError, match="Unknown kind"):
+            await system.fetch_hardware_inventory(client, "sata")
+    assert route.call_count == 0
+
+
+async def test_hardware_inventory_null_lists(mocked_client):
+    data = {"info": {"devices": {"gpu": None, "pci": [], "usb": None, "network": None}}}
+    async with mocked_client(_resp(data)) as (client, route):
+        out = await system.fetch_hardware_inventory(client)
+    assert out == {"gpu": [], "pci": [], "usb": [], "network": []}
+
+
+async def test_hardware_inventory_empty_response(mocked_client):
+    async with mocked_client(_resp({"info": None})) as (client, route):
+        out = await system.fetch_hardware_inventory(client, "gpu")
+    assert out == {"gpu": []}
+
+
+async def test_hardware_inventory_unsupported_raises_friendly_error(mocked_client):
+    resp = httpx.Response(
+        200,
+        json={
+            "errors": [{"message": 'Cannot query field "devices" on type "Info".'}],
+            "data": None,
+        },
+    )
+    async with mocked_client(resp) as (client, route):
+        with pytest.raises(ToolError, match="does not support"):
+            await system.fetch_hardware_inventory(client, api_version="7.0.0")
+
+
+async def test_hardware_inventory_other_error_propagates(mocked_client):
+    resp = httpx.Response(200, json={"errors": [{"message": "boom"}], "data": None})
+    async with mocked_client(resp) as (client, route):
+        with pytest.raises(UnraidGraphQLError):
+            await system.fetch_hardware_inventory(client)
+
+
 async def test_system_metrics(mocked_client):
     data = {
         "metrics": {
