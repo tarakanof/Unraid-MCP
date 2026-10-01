@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -51,17 +53,25 @@ async def test_graphql_errors_raise():
         assert exc.value.errors == [{"message": "boom"}]
 
 
-async def test_partial_response_returns_data():
+async def test_partial_response_returns_data(caplog):
     with respx.mock:
         respx.post(URL).mock(
             return_value=httpx.Response(
-                200, json={"data": {"x": 5}, "errors": [{"message": "field y unavailable"}]}
+                200,
+                json={
+                    "data": {"x": 5, "y": None},
+                    "errors": [{"message": f"field y unavailable {KEY}"}],
+                },
             )
         )
         async with httpx.AsyncClient() as http:
             client = await _client(http)
             data = await client.execute("query { x y }")
-        assert data == {"x": 5}
+        assert data == {"x": 5, "y": None}
+        assert "GraphQL returned partial errors" in caplog.text
+        assert "field y unavailable" in caplog.text
+        assert any(record.levelname == "WARNING" for record in caplog.records)
+        assert KEY not in caplog.text
 
 
 @pytest.mark.parametrize("status,exc_type", [(401, UnraidAuthError), (403, UnraidAuthError)])
@@ -158,3 +168,48 @@ async def test_graphql_error_message_redacts_api_key():
         # The structured .errors payload must also be scrubbed, not just the message.
         assert KEY not in str(exc.value.errors)
         assert "***REDACTED***" in exc.value.errors[0]["message"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [[], "str", None, {"data": []}, {"data": "str"}, {"errors": {}}, {"errors": None}],
+)
+async def test_invalid_graphql_envelope_raises_server_error(payload):
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(200, content=json.dumps(payload)))
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            with pytest.raises(UnraidServerError, match="Invalid GraphQL envelope") as exc:
+                await client.execute("query { x }")
+        assert KEY not in str(exc.value)
+        assert "server logs" in str(exc.value)
+
+
+@pytest.mark.parametrize("data", [None, {}, {"array": None}, {"x": None, "y": None}])
+async def test_graphql_errors_without_populated_fields_are_fatal(data):
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(200, json={"data": data, "errors": [{"message": "boom"}]})
+        )
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            with pytest.raises(UnraidGraphQLError, match="boom"):
+                await client.execute("query { x }")
+
+
+async def test_non_dict_graphql_errors_are_coerced_and_redacted():
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(200, json={"errors": ["x", f"rejected {KEY}", 42, None]})
+        )
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            with pytest.raises(UnraidGraphQLError) as exc:
+                await client.execute("query { x }")
+        assert exc.value.errors == [
+            {"message": "x"},
+            {"message": "rejected ***REDACTED***"},
+            {"message": "42"},
+            {"message": "None"},
+        ]
+        assert KEY not in str(exc.value)

@@ -25,7 +25,7 @@ class UnraidAuthError(UnraidError):
 
 
 class UnraidServerError(UnraidError):
-    """The Unraid server returned a non-success HTTP status (5xx/4xx)."""
+    """The Unraid server returned an HTTP error or an invalid GraphQL response."""
 
 
 class UnraidGraphQLError(UnraidError):

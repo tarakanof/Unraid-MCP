@@ -240,7 +240,7 @@ async def do_start_container(
 ) -> dict[str, Any]:
     require_confirm(confirm, f"start container '{container_id}'")
     result = await client.execute(queries.START_CONTAINER, {"id": container_id})
-    return shape_mutation_result(result)
+    return shape_mutation_result(result, ("docker", "start"))
 
 
 async def do_stop_container(
@@ -248,7 +248,7 @@ async def do_stop_container(
 ) -> dict[str, Any]:
     require_confirm(confirm, f"stop container '{container_id}'")
     result = await client.execute(queries.STOP_CONTAINER, {"id": container_id})
-    return shape_mutation_result(result)
+    return shape_mutation_result(result, ("docker", "stop"))
 
 
 async def do_restart_container(
@@ -267,9 +267,9 @@ async def do_restart_container(
     except UnraidGraphQLError as exc:
         if not unsupported_field_error(exc):
             raise
-        await client.execute(queries.STOP_CONTAINER, {"id": container_id})
-        result = await client.execute(queries.START_CONTAINER, {"id": container_id})
-    return shape_mutation_result(result)
+        await do_stop_container(client, container_id, confirm=True)
+        return await do_start_container(client, container_id, confirm=True)
+    return shape_mutation_result(result, ("docker", "restart"))
 
 
 async def do_pause_container(
@@ -284,7 +284,7 @@ async def do_pause_container(
                 "pausing Docker containers", api_version=api_version
             ) from None
         raise
-    return shape_mutation_result(result)
+    return shape_mutation_result(result, ("docker", "pause"))
 
 
 async def do_unpause_container(
@@ -299,7 +299,7 @@ async def do_unpause_container(
                 "unpausing Docker containers", api_version=api_version
             ) from None
         raise
-    return shape_mutation_result(result)
+    return shape_mutation_result(result, ("docker", "unpause"))
 
 
 async def do_update_container(
@@ -321,7 +321,7 @@ async def do_update_container(
         if unsupported_field_error(exc):
             raise feature_unsupported("Docker container updates", api_version=api_version) from None
         raise
-    return shape_mutation_result(result)
+    return shape_mutation_result(result, ("docker", "updateContainer"))
 
 
 async def do_update_containers(
@@ -350,7 +350,7 @@ async def do_update_containers(
         if unsupported_field_error(exc):
             raise feature_unsupported("Docker container updates", api_version=api_version) from None
         raise
-    return shape_mutation_result_list(result)
+    return shape_mutation_result_list(result, ("docker", "updateContainers"))
 
 
 # ── Dangerous-tier logic ────────────────────────────────────────────────────
@@ -370,7 +370,7 @@ async def do_update_all_containers(
         if unsupported_field_error(exc):
             raise feature_unsupported("Docker container updates", api_version=api_version) from None
         raise
-    return shape_mutation_result_list(result)
+    return shape_mutation_result_list(result, ("docker", "updateAllContainers"))
 
 
 async def do_remove_container(
@@ -392,7 +392,7 @@ async def do_remove_container(
     result = await client.execute(
         queries.REMOVE_DOCKER_CONTAINER, {"id": container_id, "withImage": with_image}
     )
-    return shape_mutation_result(result)
+    return shape_mutation_result(result, ("docker", "removeContainer"))
 
 
 def register(mcp: MCPServer, settings: Settings) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from unraid_mcp.errors import UnraidServerError
 from unraid_mcp.formatting import (
     array_disk_health,
     human_size,
@@ -14,6 +15,7 @@ from unraid_mcp.formatting import (
     shape_flash,
     shape_metrics,
     shape_mutation_result,
+    shape_mutation_result_list,
     shape_physical_disk,
     shape_shares,
     shape_system_time,
@@ -227,34 +229,30 @@ def test_shape_physical_disk_size_is_bytes():
 
 
 @pytest.mark.parametrize(
-    "raw,expected",
+    "raw,path,expected",
     [
         # VM and parity mutations resolve to a bare Boolean payload.
-        ({"vm": {"start": True}}, {"ok": True}),
-        ({"vm": {"forceStop": False}}, {"ok": False}),
-        ({"parityCheck": {"start": True}}, {"ok": True}),
-        ({"parityCheck": {"pause": True}}, {"ok": True}),
-        # Empty / missing envelopes degrade to a success flag, not a bare {}.
-        ({"docker": {}}, {"ok": True}),
-        (None, {"ok": True}),
-        ({}, {"ok": True}),
+        ({"vm": {"start": True}}, ("vm", "start"), {"ok": True}),
+        ({"vm": {"forceStop": False}}, ("vm", "forceStop"), {"ok": False}),
+        ({"parityCheck": {"start": True}}, ("parityCheck", "start"), {"ok": True}),
+        ({"parityCheck": {"pause": True}}, ("parityCheck", "pause"), {"ok": True}),
     ],
 )
-def test_shape_mutation_result_flattens_to_ok(raw, expected):
-    assert shape_mutation_result(raw) == expected
+def test_shape_mutation_result_flattens_to_ok(raw, path, expected):
+    assert shape_mutation_result(raw, path) == expected
 
 
 def test_shape_mutation_result_keeps_object_payload():
-    # Docker start/stop and notification archive/unread return an object — the
-    # GraphQL wrapper keys are peeled but the payload fields are preserved.
+    # Docker start/stop and notification archive/unread return an object.
+    # The expected result is extracted and its payload fields are preserved.
     raw = {"docker": {"start": {"id": "1:a", "names": ["/plex"], "state": "RUNNING"}}}
-    assert shape_mutation_result(raw) == {
+    assert shape_mutation_result(raw, ("docker", "start")) == {
         "id": "1:a",
         "names": ["/plex"],
         "state": "RUNNING",
     }
     note = {"archiveNotification": {"id": "n1", "title": "Disk hot", "importance": "ALERT"}}
-    assert shape_mutation_result(note) == {
+    assert shape_mutation_result(note, ("archiveNotification",)) == {
         "id": "n1",
         "title": "Disk hot",
         "importance": "ALERT",
@@ -272,30 +270,29 @@ def test_shape_mutation_result_normalizes_array_capacity():
             }
         }
     }
-    out = shape_mutation_result(raw)
+    out = shape_mutation_result(raw, ("array", "setState"))
     assert out["state"] == "STARTED"
     assert out["capacity"]["total"] == {"bytes": 1048576 * 1024, "human": "1.0 GiB"}
     assert out["capacity"]["free"]["bytes"] == 524288 * 1024
 
 
 def test_shape_mutation_result_array_stop_state_only():
-    # stop_array returns just {state}; peeling stops at the scalar value, so the
-    # single state field survives unwrapped (and there's no capacity to normalize).
-    assert shape_mutation_result({"array": {"setState": {"state": "STOPPED"}}}) == {
-        "state": "STOPPED"
-    }
+    # stop_array returns just {state}; the result keeps this single field.
+    assert shape_mutation_result(
+        {"array": {"setState": {"state": "STOPPED"}}}, ("array", "setState")
+    ) == {"state": "STOPPED"}
 
 
 def test_shape_mutation_result_keeps_multifield_overview():
-    # archive_all / delete_notification return {unread, archive} counts — a
-    # two-key dict, so peeling stops there and both buckets survive.
+    # archive_all / delete_notification return {unread, archive} counts.
+    # Both buckets survive result extraction.
     raw = {
         "archiveAll": {
             "unread": {"info": 0, "warning": 0, "alert": 0, "total": 0},
             "archive": {"info": 1, "warning": 2, "alert": 0, "total": 3},
         }
     }
-    out = shape_mutation_result(raw)
+    out = shape_mutation_result(raw, ("archiveAll",))
     assert out["unread"]["total"] == 0
     assert out["archive"]["total"] == 3
 
@@ -388,3 +385,44 @@ def test_shape_container_stats_cleans_id_and_passes_strings():
 def test_shape_container_stats_empty():
     assert shape_container_stats([]) == []
     assert shape_container_stats(None) == []
+
+
+@pytest.mark.parametrize("shaper", [shape_mutation_result, shape_mutation_result_list])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,
+        {},
+        {"docker": None},
+        {"docker": {}},
+        {"docker": {"start": None}},
+        {"docker": {"start": {}}},
+    ],
+)
+def test_mutation_shapers_reject_missing_or_empty_result(shaper, raw):
+    with pytest.raises(UnraidServerError):
+        shaper(raw, ("docker", "start"))
+
+
+@pytest.mark.parametrize("raw", [{"docker": {"start": "str"}}, {"docker": {"start": []}}])
+def test_mutation_object_shaper_rejects_invalid_result_type(raw):
+    with pytest.raises(UnraidServerError, match="expected an object or Boolean"):
+        shape_mutation_result(raw, ("docker", "start"))
+
+
+@pytest.mark.parametrize("payload", [False, "str", {"id": "1:a"}])
+def test_mutation_list_shaper_rejects_invalid_result_type(payload):
+    with pytest.raises(UnraidServerError, match="expected a list"):
+        shape_mutation_result_list(
+            {"docker": {"updateContainers": payload}}, ("docker", "updateContainers")
+        )
+
+
+@pytest.mark.parametrize("payload", [[], [{"id": "1:a", "state": "RUNNING"}]])
+def test_mutation_list_shaper_preserves_explicit_list(payload):
+    assert (
+        shape_mutation_result_list(
+            {"docker": {"updateContainers": payload}}, ("docker", "updateContainers")
+        )
+        == payload
+    )

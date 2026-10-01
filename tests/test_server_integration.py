@@ -191,3 +191,33 @@ async def test_legacy_sessions_silently_drop_cache_hints(settings_factory):
     assert tools.ttl_ms == 0
     assert tools.cache_scope == "private"
     assert "ttl_ms" not in tools.model_fields_set
+
+
+@pytest.mark.parametrize("mode", ["auto", "legacy"])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"data": {"array": None}, "errors": [{"message": "cannot stop array"}]},
+        {"data": {}},
+        {"data": None},
+        {},
+        {"data": {"array": {"setState": None}}},
+        {"data": {"array": {}}},
+        [],
+        "str",
+        {"errors": ["x"]},
+    ],
+)
+async def test_failed_stop_array_returns_mcp_error(settings_factory, payload, mode):
+    with respx.mock:
+        route = respx.post(URL).mock(return_value=httpx.Response(200, json=payload))
+        mcp = build_server(settings_factory(allow_mutations=True))
+        async with Client(mcp, raise_exceptions=True, mode=mode) as session:
+            before = route.call_count  # exclude the startup version probe
+            result = await session.call_tool("stop_array", {"confirm": True})
+            assert result.is_error is True
+            assert route.call_count == before + 1
+            text = " ".join(block.text for block in result.content if block.type == "text")
+            assert "AttributeError" not in text
+            assert "supersecretkey123" not in text
+            assert text

@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .errors import UnraidServerError
+
 _FAILED_STATUSES = {"DISK_DSBL", "DISK_INVALID", "DISK_WRONG", "DISK_DSBL_NEW", "DISK_NP_DSBL"}
 # DISK_NP means "no device present" - an empty/unassigned array slot, which is a
 # normal, healthy state when the array has spare slots. DISK_NP_MISSING means a
@@ -512,51 +514,48 @@ def _normalize_capacity(obj: dict[str, Any]) -> dict[str, Any]:
     return obj
 
 
-def shape_mutation_result(data: dict | None) -> dict[str, Any]:
-    """Flatten a GraphQL mutation response into a concise, agent-friendly result.
+def _mutation_payload(data: dict | None, result_path: tuple[str, ...]) -> Any:
+    """Require the operation's result, without echoing upstream response values."""
+    payload: Any = data
+    for field in result_path:
+        if not isinstance(payload, dict) or field not in payload or payload[field] is None:
+            raise UnraidServerError(
+                f"Mutation response is missing a non-null result for {'.'.join(result_path)}. "
+                "Check the Unraid server logs and current state before retrying."
+            )
+        payload = payload[field]
+    if payload is None or payload == {}:
+        raise UnraidServerError(
+            "Mutation returned an empty result. "
+            "Check the Unraid server logs and current state before retrying."
+        )
+    return payload
 
-    Unraid nests mutation payloads under the operation's root field (and often a
-    sub-field), e.g. ``{"docker": {"start": {...}}}`` or ``{"vm": {"start": true}}``.
-    Those wrapper keys are pure noise to an agent and inflate its context window, so
-    we peel them down to the payload and normalise it — matching the read path:
 
-      * a Boolean payload        → ``{"ok": <bool>}`` (clear success/failure flag)
-      * an empty object          → ``{"ok": true}``
-      * an object with capacity  → capacity normalised to ``{bytes, human}``
-      * any other object         → returned as-is (already field-filtered by the query)
-    """
-    payload: Any = data or {}
-    # Peel single-key wrapper dicts (GraphQL root + mutation field) until we reach a
-    # Boolean, an empty/multi-field object, or a non-dict/bool leaf.
-    while isinstance(payload, dict) and len(payload) == 1:
-        inner = next(iter(payload.values()))
-        if not isinstance(inner, (dict, bool)):
-            break
-        payload = inner
+def shape_mutation_result(data: dict | None, result_path: tuple[str, ...]) -> dict[str, Any]:
+    """Extract a required mutation result and normalise Boolean/object payloads."""
+    payload = _mutation_payload(data, result_path)
     if isinstance(payload, bool):
         return {"ok": payload}
     if isinstance(payload, dict):
-        return {"ok": True} if not payload else _normalize_capacity(payload)
-    return {"ok": True, "result": payload}
+        return _normalize_capacity(payload)
+    raise UnraidServerError(
+        "Mutation returned an invalid result: expected an object or Boolean. "
+        "Check the Unraid server logs and current state before retrying."
+    )
 
 
-def shape_mutation_result_list(data: dict | None) -> list[dict[str, Any]]:
-    """Flatten a GraphQL mutation response whose payload is a LIST.
-
-    Some Docker mutations (``updateContainers`` / ``updateAllContainers``)
-    return ``[DockerContainer!]!``. This mirrors :func:`shape_mutation_result`
-    but for the list case: peel the single-key wrapper dicts (GraphQL root +
-    mutation field) down to the list, then return each element as-is (already
-    field-filtered by the query selection, e.g. ``{id, names, state, status}``).
-    A non-list payload (or an errored/empty response) yields ``[]``.
-    """
-    payload: Any = data or {}
-    while isinstance(payload, dict) and len(payload) == 1:
-        inner = next(iter(payload.values()))
-        if not isinstance(inner, (dict, list)):
-            break
-        payload = inner
-    return list(payload) if isinstance(payload, list) else []
+def shape_mutation_result_list(
+    data: dict | None, result_path: tuple[str, ...]
+) -> list[dict[str, Any]]:
+    """Extract a required list result; an explicit empty list is valid."""
+    payload = _mutation_payload(data, result_path)
+    if not isinstance(payload, list):
+        raise UnraidServerError(
+            "Mutation returned an invalid result: expected a list. "
+            "Check the Unraid server logs and current state before retrying."
+        )
+    return list(payload)
 
 
 def summarize_health(

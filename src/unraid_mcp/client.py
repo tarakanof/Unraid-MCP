@@ -104,15 +104,30 @@ class UnraidClient:
                 f"from {self._host}."
             ) from exc
 
+        envelope_hint = "Check the Unraid API response and server logs."
+        if not isinstance(payload, dict):
+            raise UnraidServerError(
+                f"Invalid GraphQL envelope: expected a JSON object. {envelope_hint}"
+            )
         data = payload.get("data")
-        raw_errors = payload.get("errors")
+        if data is not None and not isinstance(data, dict):
+            raise UnraidServerError(
+                f"Invalid GraphQL envelope: data must be an object or null. {envelope_hint}"
+            )
+        raw_errors = payload.get("errors", [])
+        if not isinstance(raw_errors, list):
+            raise UnraidServerError(
+                f"Invalid GraphQL envelope: errors must be a list. {envelope_hint}"
+            )
         if raw_errors:
             # Defence in depth: never echo the API key even if a misconfigured
             # upstream reflected it into an error. Redact the whole errors
             # structure so the exception's .errors attribute is also safe.
-            errors = self._redact_obj(raw_errors)
+            errors = self._redact_obj(
+                [e if isinstance(e, dict) else {"message": str(e)} for e in raw_errors]
+            )
             messages = "; ".join(str(e.get("message", "unknown error")) for e in errors)
-            if data is None:
+            if data is None or all(value is None for value in data.values()):
                 raise UnraidGraphQLError(f"GraphQL error: {messages}", errors=errors)
             # Partial success — Unraid returned some data plus non-fatal errors
             # (e.g. an optional field unavailable on this build). Surface a

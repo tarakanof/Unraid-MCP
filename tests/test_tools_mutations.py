@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import httpx
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
 from unraid_mcp import queries
-from unraid_mcp.errors import UnraidGraphQLError
+from unraid_mcp.errors import UnraidGraphQLError, UnraidServerError
 from unraid_mcp.server import build_server
 from unraid_mcp.tools import array, docker, notifications, vm
+from unraid_mcp.tools._base import guarded
 
 READ_TOOLS = {"get_system_info", "get_array_status", "list_docker_containers", "get_health_summary"}
 # The complete set of mutating tools — kept exhaustive so the registration
@@ -484,10 +486,9 @@ async def test_delete_notification_requires_confirm(mocked_client):
 
 
 async def test_delete_notification_with_confirm_sends_type(mocked_client):
-    async with mocked_client(httpx.Response(200, json={"data": {"deleteNotification": {}}})) as (
-        client,
-        route,
-    ):
+    async with mocked_client(
+        httpx.Response(200, json={"data": {"deleteNotification": _OVERVIEW_PAYLOAD}})
+    ) as (client, route):
         await notifications.do_delete_notification(client, "n1", "ARCHIVE", confirm=True)
         body = json.loads(route.calls.last.request.content)
         assert body["variables"] == {"id": "n1", "type": "ARCHIVE"}
@@ -829,3 +830,124 @@ async def test_remove_container_propagates_graphql_error(mocked_client):
     ) as (client, route):
         with pytest.raises(UnraidGraphQLError):
             await docker.do_remove_container(client, "1:abc", confirm=True)
+
+
+# Each operation must validate its own field, even when another field is populated.
+MUTATION_CASES = [
+    (array.do_start_array, {}, ("array", "setState")),
+    (array.do_stop_array, {}, ("array", "setState")),
+    (array.do_start_parity, {"correct": False}, ("parityCheck", "start")),
+    (array.do_pause_parity, {}, ("parityCheck", "pause")),
+    (array.do_resume_parity, {}, ("parityCheck", "resume")),
+    (array.do_cancel_parity, {}, ("parityCheck", "cancel")),
+    (array.do_mount_array_disk, {"disk_id": "1:sdb"}, ("array", "mountArrayDisk")),
+    (array.do_unmount_array_disk, {"disk_id": "1:sdb"}, ("array", "unmountArrayDisk")),
+    (array.do_clear_disk_statistics, {"disk_id": "1:sdb"}, ("array", "clearArrayDiskStatistics")),
+    (array.do_add_disk_to_array, {"disk_id": "1:sdb"}, ("array", "addDiskToArray")),
+    (array.do_remove_disk_from_array, {"disk_id": "1:sdb"}, ("array", "removeDiskFromArray")),
+    (docker.do_start_container, {"container_id": "1:a"}, ("docker", "start")),
+    (docker.do_stop_container, {"container_id": "1:a"}, ("docker", "stop")),
+    (docker.do_restart_container, {"container_id": "1:a"}, ("docker", "restart")),
+    (docker.do_pause_container, {"container_id": "1:a"}, ("docker", "pause")),
+    (docker.do_unpause_container, {"container_id": "1:a"}, ("docker", "unpause")),
+    (docker.do_update_container, {"container_id": "1:a"}, ("docker", "updateContainer")),
+    (docker.do_update_containers, {"container_ids": ["1:a"]}, ("docker", "updateContainers")),
+    (docker.do_update_all_containers, {}, ("docker", "updateAllContainers")),
+    (docker.do_remove_container, {"container_id": "1:a"}, ("docker", "removeContainer")),
+    (vm.do_start_vm, {"vm_id": "1:a"}, ("vm", "start")),
+    (vm.do_stop_vm, {"vm_id": "1:a"}, ("vm", "stop")),
+    (vm.do_pause_vm, {"vm_id": "1:a"}, ("vm", "pause")),
+    (vm.do_resume_vm, {"vm_id": "1:a"}, ("vm", "resume")),
+    (vm.do_reboot_vm, {"vm_id": "1:a"}, ("vm", "reboot")),
+    (vm.do_force_stop_vm, {"vm_id": "1:a"}, ("vm", "forceStop")),
+    (vm.do_reset_vm, {"vm_id": "1:a"}, ("vm", "reset")),
+    (notifications.do_archive_notification, {"notification_id": "n1"}, ("archiveNotification",)),
+    (notifications.do_archive_all, {"importance": None}, ("archiveAll",)),
+    (notifications.do_unread_notification, {"notification_id": "n1"}, ("unreadNotification",)),
+    (
+        notifications.do_delete_notification,
+        {"notification_id": "n1", "notification_type": "UNREAD"},
+        ("deleteNotification",),
+    ),
+    (notifications.do_archive_notifications, {"ids": ["n1"]}, ("archiveNotifications",)),
+    (notifications.do_unarchive_notifications, {"ids": ["n1"]}, ("unarchiveNotifications",)),
+    (notifications.do_unarchive_all, {"importance": None}, ("unarchiveAll",)),
+    (notifications.do_delete_archived_notifications, {}, ("deleteArchivedNotifications",)),
+    (
+        notifications.do_create_notification,
+        {"title": "Test", "subject": "Test", "description": "Test", "importance": "INFO"},
+        ("createNotification",),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "fn,kwargs,path", MUTATION_CASES, ids=[c[0].__name__ for c in MUTATION_CASES]
+)
+@pytest.mark.parametrize(
+    "response_kind",
+    [
+        "missing_data",
+        "empty_data",
+        "null_data",
+        "missing_root",
+        "null_root",
+        "missing_result",
+        "null_result",
+    ],
+)
+async def test_mutations_reject_missing_results_at_tool_boundary(
+    mocked_client, fn, kwargs, path, response_kind
+):
+    payload = {}
+    if response_kind == "empty_data":
+        payload = {"data": {}}
+    elif response_kind == "null_data":
+        payload = {"data": None}
+    elif response_kind == "missing_root":
+        payload = {"data": {"other": True}}
+    elif response_kind == "null_root":
+        payload = {"data": {path[0]: None, "other": True}}
+    elif response_kind in ("missing_result", "null_result"):
+        result = {} if response_kind == "missing_result" else {path[-1]: None}
+        payload = {"data": {path[0]: result}} if len(path) == 2 else {"data": result}
+    async with mocked_client(httpx.Response(200, json=payload)) as (client, route):
+        ctx = SimpleNamespace(
+            request_context=SimpleNamespace(lifespan_context=SimpleNamespace(client=client))
+        )
+        with pytest.raises(ToolError, match="Mutation"):
+            await guarded(ctx, fn, confirm=True, **kwargs)
+        assert route.call_count == 1
+
+
+async def test_stop_array_null_result_with_errors_maps_to_tool_error(mocked_client):
+    response = {"data": {"array": None}, "errors": [{"message": "cannot stop array"}]}
+    async with mocked_client(httpx.Response(200, json=response)) as (client, route):
+        ctx = SimpleNamespace(
+            request_context=SimpleNamespace(lifespan_context=SimpleNamespace(client=client))
+        )
+        with pytest.raises(ToolError, match="cannot stop array"):
+            await guarded(ctx, array.do_stop_array, confirm=True)
+        assert route.call_count == 1
+
+
+async def test_restart_fallback_rejects_empty_stop_before_start(mocked_client):
+    unsupported = httpx.Response(
+        200,
+        json={"errors": [{"message": 'Cannot query field "restart" on type "DockerMutations".'}]},
+    )
+    empty_stop = httpx.Response(200, json={"data": {"docker": {"stop": None}}})
+    async with mocked_client([unsupported, empty_stop]) as (client, route):
+        with pytest.raises(UnraidServerError, match="docker.stop"):
+            await docker.do_restart_container(client, "1:a", confirm=True)
+        assert route.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "fn,kwargs,path", MUTATION_CASES, ids=[c[0].__name__ for c in MUTATION_CASES]
+)
+async def test_all_mutations_refuse_without_confirm_before_network(mocked_client, fn, kwargs, path):
+    async with mocked_client(httpx.Response(200, json={"data": {}})) as (client, route):
+        with pytest.raises(ToolError, match="confirm"):
+            await fn(client, confirm=False, **kwargs)
+        assert route.call_count == 0

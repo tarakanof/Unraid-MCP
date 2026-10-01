@@ -46,7 +46,8 @@ async def do_archive_notification(
 ) -> dict[str, Any]:
     require_confirm(confirm, f"archive notification '{notification_id}'")
     return shape_mutation_result(
-        await client.execute(queries.ARCHIVE_NOTIFICATION, {"id": notification_id})
+        await client.execute(queries.ARCHIVE_NOTIFICATION, {"id": notification_id}),
+        ("archiveNotification",),
     )
 
 
@@ -55,7 +56,8 @@ async def do_archive_all(
 ) -> dict[str, Any]:
     require_confirm(confirm, "archive all notifications")
     return shape_mutation_result(
-        await client.execute(queries.ARCHIVE_ALL_NOTIFICATIONS, {"importance": importance})
+        await client.execute(queries.ARCHIVE_ALL_NOTIFICATIONS, {"importance": importance}),
+        ("archiveAll",),
     )
 
 
@@ -64,7 +66,8 @@ async def do_unread_notification(
 ) -> dict[str, Any]:
     require_confirm(confirm, f"mark notification '{notification_id}' unread")
     return shape_mutation_result(
-        await client.execute(queries.UNREAD_NOTIFICATION, {"id": notification_id})
+        await client.execute(queries.UNREAD_NOTIFICATION, {"id": notification_id}),
+        ("unreadNotification",),
     )
 
 
@@ -75,7 +78,8 @@ async def do_delete_notification(
     return shape_mutation_result(
         await client.execute(
             queries.DELETE_NOTIFICATION, {"id": notification_id, "type": notification_type}
-        )
+        ),
+        ("deleteNotification",),
     )
 
 
@@ -85,7 +89,9 @@ async def do_archive_notifications(
     if not ids:
         raise ToolError("ids must be a non-empty list of notification ids.")
     require_confirm(confirm, f"archive {len(ids)} notification(s)")
-    return shape_mutation_result(await client.execute(queries.ARCHIVE_NOTIFICATIONS, {"ids": ids}))
+    return shape_mutation_result(
+        await client.execute(queries.ARCHIVE_NOTIFICATIONS, {"ids": ids}), ("archiveNotifications",)
+    )
 
 
 async def do_unarchive_notifications(
@@ -95,7 +101,8 @@ async def do_unarchive_notifications(
         raise ToolError("ids must be a non-empty list of notification ids.")
     require_confirm(confirm, f"unarchive {len(ids)} notification(s)")
     return shape_mutation_result(
-        await client.execute(queries.UNARCHIVE_NOTIFICATIONS, {"ids": ids})
+        await client.execute(queries.UNARCHIVE_NOTIFICATIONS, {"ids": ids}),
+        ("unarchiveNotifications",),
     )
 
 
@@ -105,13 +112,17 @@ async def do_unarchive_all(
     _validate_importance(importance)
     require_confirm(confirm, "unarchive all notifications")
     return shape_mutation_result(
-        await client.execute(queries.UNARCHIVE_ALL_NOTIFICATIONS, {"importance": importance})
+        await client.execute(queries.UNARCHIVE_ALL_NOTIFICATIONS, {"importance": importance}),
+        ("unarchiveAll",),
     )
 
 
 async def do_delete_archived_notifications(client: UnraidClient, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, "permanently delete ALL archived notifications (irreversible)")
-    return shape_mutation_result(await client.execute(queries.DELETE_ARCHIVED_NOTIFICATIONS))
+    return shape_mutation_result(
+        await client.execute(queries.DELETE_ARCHIVED_NOTIFICATIONS),
+        ("deleteArchivedNotifications",),
+    )
 
 
 async def do_create_notification(
@@ -138,7 +149,8 @@ async def do_create_notification(
     if link is not None:
         input_data["link"] = link
     return shape_mutation_result(
-        await client.execute(queries.CREATE_NOTIFICATION, {"input": input_data})
+        await client.execute(queries.CREATE_NOTIFICATION, {"input": input_data}),
+        ("createNotification",),
     )
 
 
