@@ -120,10 +120,21 @@ async def safe_query(
     """Run an optional query; on any Unraid error fall back to ``default`` so a
     composed fetch degrades gracefully when a feature/field isn't available on
     this API build (e.g. an older server missing a root query entirely)."""
+    value, _ = await safe_query_with_status(client, query, shaper, default)
+    return value
+
+
+async def safe_query_with_status(
+    client: UnraidClient,
+    query: str,
+    shaper: Callable[[dict[str, Any] | None], Any],
+    default: Any,
+) -> tuple[Any, bool]:
+    """Run an optional query, returning its shaped value and whether it succeeded."""
     try:
-        return shaper(await client.execute(query))
+        return shaper(await client.execute(query)), True
     except UnraidError:
-        return default
+        return default, False
 
 
 def require_confirm(confirm: bool, action: str) -> None:

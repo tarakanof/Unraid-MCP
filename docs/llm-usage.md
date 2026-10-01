@@ -172,8 +172,31 @@ opted in — do not try to work around it.
 
 **Triage "is my server healthy?"**
 1. `get_health_summary`. If `overall == "ok"`, report and stop.
-2. If `overall == "attention"`: inspect `unhealthy_disks`, then `get_array_status`
-   for detail and `list_notifications(notification_type="UNREAD")` for the alerts.
+2. For `critical` or `attention`, read `reasons` and inspect the relevant disks,
+   UPS, parity check, or unread notifications with the detailed tools.
+3. For `degraded`, inspect `checks` and resolve the failed queries before
+   concluding that the server is healthy.
+
+`get_health_summary` and `unraid://health` return the same structure. Existing
+fields remain available, with two additions: `reasons` lists human-readable
+signals and failed checks, and `checks` reports `ok` or `failed` for each of
+`array`, `ups`, and `notifications`. A successful empty response is `ok` for that
+check; a query error, including permission denial or an unsupported query, is
+`failed`. Check status describes query success, not component health.
+
+The `overall` verdict uses this precedence:
+
+- `critical`: a red disk indicator, failed/disabled disk, critical disk health,
+  or a UPS on battery with charge below 20% or runtime below 300 seconds.
+- `attention`: other unhealthy disks, unread alerts or warnings, a UPS on
+  battery at any charge, or parity-check errors greater than zero.
+- `degraded`: at least one failed check and no critical or attention signal.
+- `ok`: no health signals or failed checks, with `reasons == []`.
+
+UPS statuses `On Battery` and `Low Battery` count as battery operation.
+Missing charge or runtime values do not trigger their numeric thresholds.
+Array state remains informational; a stopped array alone does not raise the
+verdict. Failed checks remain visible even when a health signal takes precedence.
 
 **Restart a container the user named "plex"** (mutations enabled)
 1. `get_docker_container("plex")` → read its `id`.

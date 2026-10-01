@@ -33,6 +33,7 @@ from ._base import (
     get_app_context,
     guarded,
     safe_query,
+    safe_query_with_status,
     unsupported_field_error,
 )
 
@@ -160,12 +161,18 @@ async def fetch_plugins(
 
 
 async def fetch_health(client: UnraidClient) -> dict[str, Any]:
-    array = shape_array_status(await client.execute(queries.ARRAY_STATUS))
-    ups = await safe_query(client, queries.UPS_DEVICES, shape_ups, [])
-    overview = await safe_query(
+    array, array_ok = await safe_query_with_status(
+        client, queries.ARRAY_STATUS, shape_array_status, {}
+    )
+    ups, ups_ok = await safe_query_with_status(client, queries.UPS_DEVICES, shape_ups, [])
+    overview, notifications_ok = await safe_query_with_status(
         client, queries.NOTIFICATIONS_OVERVIEW, shape_notifications_overview, {}
     )
-    return summarize_health(array, ups, overview)
+    checks = {
+        name: "ok" if ok else "failed"
+        for name, ok in (("array", array_ok), ("ups", ups_ok), ("notifications", notifications_ok))
+    }
+    return summarize_health(array, ups, overview, checks)
 
 
 async def do_raw_query(
@@ -208,7 +215,15 @@ def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def get_health_summary(ctx: Context) -> dict[str, Any]:
         """Compact health roll-up for triage: array state, capacity, any unhealthy disks,
-        parity-check status, UPS state, and unread notification counts."""
+        parity-check status, UPS state, and unread notification counts.
+
+        overall is critical for red/failed/disabled/critical disks or a UPS on battery with
+        charge <20% or runtime <300 seconds; attention for other unhealthy disks,
+        unread alerts/warnings, UPS on battery, or parity errors. Failed queries
+        yield degraded when no critical/attention signal exists; otherwise ok.
+        reasons explains each signal; checks marks array/ups/notifications queries
+        as ok or failed. Array state is informational. Also at unraid://health.
+        """
         return await guarded(ctx, fetch_health)
 
     @mcp.tool(annotations=READ_ONLY)

@@ -93,9 +93,9 @@ async def test_resource_error_when_box_unreachable():
     down = httpx.ConnectError("connection refused")
     async with _session(down) as (session, _route):
         with pytest.raises(MCPError) as excinfo:
-            await session.read_resource(resources.HEALTH_URI)
+            await session.read_resource(resources.SYSTEM_INFO_URI)
     msg = str(excinfo.value)
-    assert "unraid://health" in msg
+    assert resources.SYSTEM_INFO_URI in msg
     # The secret-free connection hint from UnraidConnectionError is surfaced.
     assert "connect" in msg.lower()
     assert KEY not in msg
@@ -126,3 +126,47 @@ async def test_triage_prompt_renders_without_focus():
         m.content.text for m in result.messages if getattr(m.content, "type", None) == "text"
     )
     assert "get_health_summary" in text
+
+
+async def test_health_resource_when_box_unreachable():
+    """Failed health queries remain visible in the resource verdict."""
+    async with _session(httpx.ConnectError("connection refused")) as (session, _route):
+        result = await session.read_resource(resources.HEALTH_URI)
+    out = json.loads(result.contents[0].text)
+    assert out["overall"] == "degraded"
+    assert out["checks"] == dict.fromkeys(("array", "ups", "notifications"), "failed")
+    assert len(out["reasons"]) == 3
+    assert KEY not in result.contents[0].text
+
+
+@pytest.mark.parametrize("mode", ["auto", "legacy"])
+@pytest.mark.parametrize("expected", ["ok", "attention", "critical", "degraded"])
+async def test_health_tool_and_resource_match(mode, expected):
+    def respond(request):
+        query = json.loads(request.content)["query"]
+        if "upsDevices" in query and expected == "degraded":
+            return httpx.Response(403)
+        data = {
+            "array": {"state": "STARTED", "disks": [{"status": "DISK_OK"}]},
+            "upsDevices": [
+                {
+                    "name": "ups0",
+                    "status": "Online" if expected in ("ok", "degraded") else "On Battery",
+                    "battery": {"chargeLevel": 1 if expected == "critical" else 80},
+                }
+            ],
+            "notifications": {"overview": {"unread": {"alert": 0, "warning": 0}}},
+        }
+        return httpx.Response(200, json={"data": data})
+
+    with respx.mock:
+        respx.post(URL).mock(side_effect=respond)
+        async with Client(build_server(make_settings()), mode=mode) as session:
+            tool = await session.call_tool("get_health_summary", {})
+            resource = await session.read_resource(resources.HEALTH_URI)
+    assert tool.is_error is False
+    out = tool.structured_content
+    assert out == json.loads(resource.contents[0].text)
+    assert out["overall"] == expected
+    assert out["checks"]["ups"] == ("failed" if expected == "degraded" else "ok")
+    assert bool(out["reasons"]) == (expected != "ok")
