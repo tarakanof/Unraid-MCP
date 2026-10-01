@@ -161,7 +161,7 @@ async def test_ping_is_answered_with_pong():
 
 async def test_no_ack_times_out_as_connection_error():
     with pytest.raises(UnraidConnectionError):
-        await _sample([_BLOCK], deadline_s=0.1)
+        await _sample([_BLOCK], deadline_s=0.05)
 
 
 async def test_close_before_ack_is_connection_error():
@@ -209,7 +209,7 @@ async def test_premature_close_without_data_is_connection_error():
 
 async def test_deadline_hit_mid_cycle_returns_partial():
     _, (events, deadline_hit) = await _sample(
-        [_ack(), _next("a"), _next("b"), _BLOCK], deadline_s=0.1
+        [_ack(), _next("a"), _next("b"), _BLOCK], deadline_s=0.05
     )
     assert [e["dockerContainerStats"]["id"] for e in events] == ["a", "b"]
     assert deadline_hit is True
@@ -231,7 +231,7 @@ async def test_deadline_hit_mid_cycle_returns_partial():
 )
 async def test_api_key_never_in_raised_error(script):
     with pytest.raises((UnraidConnectionError, UnraidAuthError, UnraidGraphQLError)) as exc:
-        await _sample(script, deadline_s=0.1)
+        await _sample(script, deadline_s=0.05)
     assert KEY not in str(exc.value)
 
 
@@ -411,7 +411,7 @@ async def test_operation_timeout_during_cleanup_detected_despite_early_clock(mon
 async def test_blocked_cleanup_preserves_primary_outcome(
     monkeypatch, caplog, blocked_send, blocked_close, outcome
 ):
-    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.1)
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
     endings = {
         "success": [_next("a"), _next("a")],
         "partial": [_next("a"), _BLOCK],
@@ -420,23 +420,41 @@ async def test_blocked_cleanup_preserves_primary_outcome(
     transport = BlockingTransport(
         [_ack(), *endings[outcome]], blocked_send=blocked_send, blocked_close=blocked_close
     )
-    # Wall-clock bounds are only a hang guard (a blocked cleanup waits forever); they
-    # are ~10x the expected ~0.2s so scheduler jitter under full-suite load can't trip
-    # them. The deadline is wide enough that "success" finishes before it on a loaded box.
     start = time.monotonic()
     with caplog.at_level(logging.DEBUG, logger="unraid_mcp.subscriptions"):
         if outcome == "error":
             with pytest.raises(UnraidGraphQLError, match="primary error"):
-                await asyncio.wait_for(_sample_transport(transport, deadline_s=0.1), timeout=3)
+                await asyncio.wait_for(_sample_transport(transport, deadline_s=0.05), timeout=3)
         else:
             events, deadline_hit = await asyncio.wait_for(
-                _sample_transport(transport, deadline_s=0.1), timeout=3
+                _sample_transport(transport, deadline_s=0.05), timeout=3
             )
             assert len(events) == 1
             assert deadline_hit is (outcome == "partial")
-    assert time.monotonic() - start < 2.0
+    # Bounded relative to the budget (deadline + grace) so ignoring the grace is caught,
+    # with 1s of slack for scheduler jitter.
+    assert time.monotonic() - start < 0.05 + 0.05 + 1.0
     assert "cleanup" in caplog.text
     assert KEY not in caplog.text
+
+
+async def test_loop_stall_past_operation_deadline_keeps_partial_result(monkeypatch):
+    # A loop stall beyond deadline + grace makes recv's wait_for timer and the outer
+    # timeout_at fire in one iteration (double cancel). The partial result must survive.
+    monkeypatch.setattr(subscriptions, "CLEANUP_GRACE_S", 0.05)
+    transport = BlockingTransport([_ack(), _next("a"), _BLOCK], blocked_close=True)
+
+    async def staller():
+        await asyncio.sleep(0.025)
+        time.sleep(0.2)  # blocks the loop well past deadline + grace
+
+    stall = asyncio.create_task(staller())
+    events, deadline_hit = await asyncio.wait_for(
+        _sample_transport(transport, deadline_s=0.05), timeout=3
+    )
+    await stall
+    assert len(events) == 1
+    assert deadline_hit is True
 
 
 async def test_cleanup_exceptions_are_logged_without_secrets(caplog):

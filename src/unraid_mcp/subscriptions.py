@@ -103,11 +103,24 @@ async def sample_subscription(
     operation_deadline = deadline_ts + CLEANUP_GRACE_S
     subscribed = False
 
+    async def _bounded(awaitable: Any) -> Any:
+        # If the loop stalls past the operation deadline, this wait_for's timer and the
+        # outer timeout_at fire together: the task is cancelled twice and wait_for
+        # re-raises CancelledError instead of TimeoutError. Normalise that back to a
+        # plain deadline timeout so the sampler keeps its partial result; the outer
+        # timeout still uncancels on exit. Genuine caller cancellation re-raises.
+        try:
+            return await asyncio.wait_for(awaitable, timeout=max(0, deadline_ts - loop.time()))
+        except asyncio.CancelledError:
+            if op_timeout.expired():
+                raise TimeoutError from None
+            raise
+
     async def _send(message: str) -> None:
-        await asyncio.wait_for(transport.send(message), timeout=max(0, deadline_ts - loop.time()))
+        await _bounded(transport.send(message))
 
     async def _recv() -> dict[str, Any]:
-        raw = await asyncio.wait_for(transport.recv(), timeout=max(0, deadline_ts - loop.time()))
+        raw = await _bounded(transport.recv())
         try:
             return redact(json.loads(raw), secrets)
         except ValueError:
