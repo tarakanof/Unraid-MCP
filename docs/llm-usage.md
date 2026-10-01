@@ -60,7 +60,7 @@ A typical stdio client config:
 
 | Tool | Args | Use it to |
 |------|------|-----------|
-| `get_health_summary` | – | One-call triage: array state, capacity, unhealthy disks, parity status, UPS, unread alert counts, `top_alerts` (up to 5). **Start here.** |
+| `get_health_summary` | – | One-call triage: array state, capacity, unhealthy disks, parity status, UPS, unread alert counts, `top_alerts` (up to 5), hottest temperature sensor. **Start here.** |
 | `get_system_info` | – | OS/kernel, CPU, memory, motherboard, Unraid + API versions, uptime, and (when supported) flash boot-device identity. |
 | `get_system_metrics` | – | Live utilization: total/per-core CPU %, memory/swap usage, temperatures (per-sensor `warning`/`critical` thresholds, a `level` flag, and a `hottest` summary on newer APIs), per-interface network throughput (`network`, omitted on API < 4.35). Requires API 7.2+; older builds get a friendly error. |
 | `get_services` | – | Health of the Unraid services stack (API, dynamix, etc.): name, online, uptime, version. |
@@ -186,7 +186,7 @@ opted in — do not try to work around it.
 `get_health_summary` and `unraid://health` return the same structure. Existing
 fields remain available, with two additions: `reasons` lists human-readable
 signals and failed checks, and `checks` reports `ok` or `failed` for each of
-`array`, `ups`, and `notifications`. UPS also reports `not_configured` only when its
+`array`, `ups`, `notifications`, and `temperature`. UPS also reports `not_configured` only when its
 query fails with a plain GraphQL error (not a `FORBIDDEN`/`UNAUTHENTICATED` code, HTTP 403,
 or unsupported field) and `upsConfiguration.service` is not `enable` (null or
 `disable`). This adds no reason and does not cause a degraded verdict. Otherwise
@@ -203,9 +203,11 @@ Check status describes query success, not component health.
 The `overall` verdict uses this precedence:
 
 - `critical`: a red disk indicator, failed/disabled or missing assigned disk,
-  UPS `LOWBATT`, or UPS `ONBATT` with charge below 20% or runtime below 300 seconds.
+  UPS `LOWBATT`, UPS `ONBATT` with charge below 20% or runtime below 300 seconds,
+  or a temperature sensor at `critical`.
 - `attention`: other unhealthy disks, unread alerts or warnings, a UPS on
-  battery at any charge, or parity-check errors greater than zero.
+  battery at any charge, parity-check errors greater than zero, or a temperature
+  sensor at `warning`.
 - `degraded`: at least one failed check and no critical or attention signal.
 - `ok`: no health signals or failed checks, with `reasons == []`.
 
@@ -214,6 +216,28 @@ operation; `LOWBATT` is critical regardless of charge or runtime. The documented
 `On Battery` and `Low Battery` wording is also accepted. Missing charge or
 runtime values do not trigger their numeric thresholds. Parity errors from the
 last completed check keep the verdict at attention until the next check.
+Temperature: the `temperature` section (`hottest` sensor name/value/unit/level plus
+`warning_count` and `critical_count`) is omitted when the temperature check failed
+(older API builds without per-sensor status/thresholds, or a permission error)
+and no usable partial data came back; the check is still `failed` then.
+The level is upstream's `current.status`, derived from the thresholds only when
+that is absent; thresholds come from the upstream API's own configuration.
+Upstream `type` is guessed from the sensor name and lm_sensors reports fans,
+voltages, power and energy in CELSIUS (with spurious `CRITICAL` status), so
+sensors are selected by id instead: lm_sensors ids (`<chip>:<label>:<key>`) count
+only when the key is `temp<N>_input`; other ids (`disk:...`, `ipmi:...`) count.
+Without an id, non-`CUSTOM` types or names containing "temp" count. On Super-I/O
+hwmon chips only (lm_sensors chip name starting `nct`, `it8`, `w83` or `f71`),
+readings (converted to C) at or below -40, or exactly 115.5, 127, 128 or 255, are
+ignored as disconnected pins; every other source (IPMI, GPU, CPU, disk, NVMe) is
+never filtered this way. Any other bogus pin belongs in the ignore list below. An NVMe sensor at upstream `critical` raises `attention` below 75 C and
+`critical` at or above it: the upstream default NVMe critical is 60 C, which NVMe
+drives routinely reach under load, so a lower reading would flap. CPU, HDD and
+other sensors at `critical` raise `critical`.
+Sensors listed in `UNRAID_MCP_HEALTH_IGNORE_SENSORS` (label, name or id) are left out
+of the verdict and counted in `temperature.ignored_count`. Each warning or
+critical sensor adds a reason such as `Temperature critical: disk1 65°C` (hottest
+first, at most 5 per level).
 Array state remains informational; a stopped array alone does not raise the
 verdict. Failed checks remain visible even when a health signal takes precedence.
 

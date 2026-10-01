@@ -810,17 +810,172 @@ def shape_mutation_result_list(
 _TOP_ALERTS_MAX = 5
 
 
+_TEMP_UNIT_SYMBOLS = {"CELSIUS": "°C", "FAHRENHEIT": "°F", "KELVIN": "K", "RANKINE": "°R"}
+_TEMP_REASONS_MAX = 5
+
+
+_LM_KEY = re.compile(r"^[a-z]+\d*_input$")
+_LM_TEMP_KEY = re.compile(r"^temp\d+_input$")
+# Unconnected Super-I/O (nct/it8xxx/w83/f71) pins read 115.5 / 127 / 128 / 255 (or
+# <= -40): not real temperatures. Only those chips are filtered (IPMI, GPU, disk,
+# CPU sensors can genuinely read 127); other bogus pins go in the ignore list.
+_TEMP_FLOOR = -40
+_TEMP_SENTINELS = (115.5, 127.0, 128.0, 255.0)
+# NVMe at upstream critical below this stays attention (see _temperature_signals).
+_NVME_CRITICAL_C = 75
+
+
+_SUPER_IO_CHIPS = ("nct", "it8", "w83", "f71")
+
+
+def _is_super_io(sensor: dict[str, Any]) -> bool:
+    """lm_sensors sensor on a Super-I/O hwmon chip (nct/it8xxx/w83/f71), the only
+    source of disconnected-pin garbage; the id is ``...:<chip>:<label>:<key>``."""
+    parts = str(sensor.get("id") or "").split(":")
+    if len(parts) < 3 or not _LM_KEY.match(parts[-1]):
+        return False
+    return parts[-3].lower().startswith(_SUPER_IO_CHIPS)
+
+
+def _to_celsius(value: float, unit: Any) -> float:
+    """Upstream converts readings to the configured default unit; normalise for the guard."""
+    if unit == "FAHRENHEIT":
+        return (value - 32) * 5 / 9
+    if unit == "KELVIN":
+        return value - 273.15
+    if unit == "RANKINE":
+        return (value - 491.67) * 5 / 9
+    return value
+
+
+def _is_real_temperature(sensor: dict[str, Any]) -> bool:
+    """True when the upstream sensor is a temperature reading.
+
+    Upstream ``type`` is derived from the sensor *name* and lm_sensors reports
+    every ``*_input`` (fan RPM, volts, watts, energy) in CELSIUS, so ``type`` is
+    unreliable both ways. The id (``<chip>:<label>:<key>`` for lm_sensors,
+    ``disk:<serial>``, ``ipmi:...``) is not: lm-shaped keys must be
+    ``temp<N>_input``; other ids (disks, IPMI temperature SDRs) are kept. Without
+    an id, fall back to ``type != CUSTOM`` or a "temp" in the name.
+    """
+    sensor_id = sensor.get("id")
+    if sensor_id:
+        key = str(sensor_id).rsplit(":", 1)[-1]
+        return bool(_LM_TEMP_KEY.match(key)) if _LM_KEY.match(key) else True
+    return sensor.get("type") != "CUSTOM" or "temp" in (sensor.get("name") or "").lower()
+
+
+def _sensor_ignored(sensor: dict[str, Any], ignore: tuple[str, ...]) -> bool:
+    """Match an ignore-list entry (lower-cased) against the sensor's id, full
+    name, or label (the id's middle part, else the name minus its chip prefix)."""
+    sensor_id = str(sensor.get("id") or "")
+    name = str(sensor.get("name") or "")
+    candidates = {sensor_id, name}
+    # lm_sensors ids end ...:<chip>:<label>:<key>; the label is second to last.
+    parts = sensor_id.split(":")
+    if len(parts) >= 3 and _LM_KEY.match(parts[-1]):
+        candidates.add(parts[-2])
+    if " " in name:
+        candidates.add(name.split(" ", 1)[1])
+    return any(c.lower() in ignore for c in candidates if c)
+
+
+def shape_health_temperature(
+    data: dict | None, ignore: tuple[str, ...] = ()
+) -> list[dict[str, Any]]:
+    """Shape ``metrics.temperature.sensors`` down to trustworthy temperatures.
+
+    Drops non-temperature lm_sensors readings (see ``_is_real_temperature``) and
+    sentinel values from unconnected pins. Level prefers upstream
+    ``current.status`` (see ``_shape_sensor``). ``nvme`` marks NVMe sensors, whose
+    upstream critical (60 C default) is routinely reached under load. ``ignore``
+    (lower-cased entries) flags matching sensors ``ignored``: they stay in the
+    list so they can be counted, but never feed the verdict.
+    """
+    temperature = ((data or {}).get("metrics") or {}).get("temperature") or {}
+    out = []
+    for s in temperature.get("sensors") or []:
+        if not s or not _is_real_temperature(s):
+            continue
+        current = s.get("current") or {}
+        value = current.get("value")
+        celsius = _to_celsius(value, current.get("unit")) if value is not None else None
+        if (
+            celsius is not None
+            and _is_super_io(s)
+            and (celsius <= _TEMP_FLOOR or any(abs(celsius - x) < 0.05 for x in _TEMP_SENTINELS))
+        ):
+            continue
+        shaped = _shape_sensor(s)
+        shaped["ignored"] = _sensor_ignored(s, ignore) if ignore else False
+        shaped["celsius"] = celsius
+        shaped["nvme"] = s.get("type") == "NVME" or "nvme" in str(s.get("id") or "").lower()
+        out.append(shaped)
+    return out
+
+
+def _temperature_signals(
+    sensors: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[str], bool, bool]:
+    """(summary, reasons, any_critical, any_warning) for shaped sensors."""
+    ignored_count = sum(1 for s in sensors if s.get("ignored"))
+    sensors = [s for s in sensors if not s.get("ignored")]
+
+    def reading(s: dict[str, Any]) -> str:
+        current = s.get("current") or {}
+        unit = _TEMP_UNIT_SYMBOLS.get(current.get("unit"), current.get("unit") or "")
+        return f"{s.get('name') or 'unnamed'} {current.get('value')}{unit}"
+
+    def hottest_first(level: str) -> list[dict[str, Any]]:
+        found = [s for s in sensors if s.get("level") == level]
+        return sorted(
+            found,
+            key=lambda s: (s["current"].get("value") is None, -(s["current"].get("value") or 0)),
+        )
+
+    critical, warning = hottest_first("critical"), hottest_first("warning")
+    reasons: list[str] = []
+    for label, found in (("critical", critical), ("warning", warning)):
+        reasons.extend(f"Temperature {label}: {reading(s)}" for s in found[:_TEMP_REASONS_MAX])
+        if len(found) > _TEMP_REASONS_MAX:
+            reasons.append(f"Temperature {label}: {len(found) - _TEMP_REASONS_MAX} more sensors")
+    readable = [s for s in sensors if (s.get("current") or {}).get("value") is not None]
+    hot = max(readable, key=lambda s: s["current"]["value"], default=None)
+    summary = {
+        "hottest": {
+            "name": hot.get("name"),
+            "value": hot["current"]["value"],
+            "unit": hot["current"].get("unit"),
+            "level": hot.get("level"),
+        }
+        if hot
+        else None,
+        "warning_count": len(warning),
+        "critical_count": len(critical),
+        "ignored_count": ignored_count,
+    }
+    # NVMe drives routinely touch their 60 C default critical under load: below
+    # 75 C that alone is attention, not critical.
+    hard_critical = any(
+        not s.get("nvme") or round(s.get("celsius") or 0, 6) >= _NVME_CRITICAL_C for s in critical
+    )
+    return summary, reasons, hard_critical, bool(warning or critical)
+
+
 def summarize_health(
     array_out: dict[str, Any],
     ups_list: list[dict[str, Any]],
     notifications_overview: dict[str, Any],
     checks: dict[str, str] | None = None,
     top_alerts: list[dict[str, Any]] | None = None,
+    temperature_sensors: list[dict[str, Any]] | None = None,
 ) -> HealthSummary:
     """Compose a compact, triage-friendly health roll-up from the shaped parts.
 
     ``top_alerts`` is the shaped ``warningsAndAlerts`` list, or None when the API
     build lacks that query (the key is then omitted from the result).
+    ``temperature_sensors`` is ``shape_health_temperature`` output, or None when
+    the temperature check failed without usable data (the key is then omitted).
     """
     disks = [
         d
@@ -879,6 +1034,11 @@ def summarize_health(
         if runtime is not None and runtime < 300:
             critical = True
             reasons.append(f"UPS {name} runtime is {runtime} seconds (<5 minutes)")
+    temperature = None
+    if temperature_sensors is not None:
+        temperature, temp_reasons, temp_critical, _ = _temperature_signals(temperature_sensors)
+        critical |= temp_critical
+        reasons.extend(temp_reasons)
     if top_alerts and not (unread.get("alert") or unread.get("warning")):
         # The overview query may have failed while warningsAndAlerts succeeded.
         reasons.append(f"Unread warning/alert notifications: {len(top_alerts)}")
@@ -916,6 +1076,8 @@ def summarize_health(
         ],
         "notifications_unread": unread,
     }
+    if temperature is not None:
+        result["temperature"] = temperature
     if top_alerts is not None:
         result["top_alerts"] = [
             {"title": a.get("title"), "importance": a.get("importance")}

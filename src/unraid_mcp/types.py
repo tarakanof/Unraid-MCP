@@ -154,19 +154,37 @@ class TopAlert(TypedDict):
     importance: str | None
 
 
+class HealthTemperatureSensor(TypedDict):
+    name: str | None
+    value: float | None
+    unit: str | None
+    level: Literal["normal", "warning", "critical"] | None
+
+
+class HealthTemperature(TypedDict):
+    hottest: HealthTemperatureSensor | None
+    warning_count: int
+    critical_count: int
+    ignored_count: Annotated[
+        int, Field(description="Sensors skipped via UNRAID_MCP_HEALTH_IGNORE_SENSORS.")
+    ]
+
+
 class HealthSummary(TypedDict):
     overall: Annotated[
         Literal["ok", "attention", "critical", "degraded"],
         Field(
-            description="Critical: failed disks or UPS low/depleting battery. Attention: other "
-            "unhealthy disks, unread alerts/warnings, UPS on battery, parity errors. Degraded: "
-            "only failed sub-queries."
+            description="Critical: failed disks, UPS low/depleting battery or a critical "
+            "temperature (NVMe only from 75 C). Attention: other unhealthy disks, unread "
+            "alerts/warnings, UPS on battery, parity errors, a warning temperature or an NVMe "
+            "critical below 75 C. "
+            "Degraded: only failed sub-queries."
         ),
     ]
     reasons: Annotated[list[str], Field(description="One entry per signal behind overall.")]
     checks: Annotated[
         dict[str, Literal["ok", "failed", "not_configured"]],
-        Field(description="Status of the array, ups and notifications queries."),
+        Field(description="Status of the array, ups, notifications and temperature queries."),
     ]
     array_state: str | None
     capacity: Capacity | None
@@ -176,3 +194,9 @@ class HealthSummary(TypedDict):
     ups: list[HealthUPS]
     notifications_unread: NotificationCounts
     top_alerts: NotRequired[list[TopAlert]]
+    temperature: NotRequired[
+        Annotated[
+            HealthTemperature,
+            Field(description="Hottest real temperature sensor; omitted if its query failed."),
+        ]
+    ]

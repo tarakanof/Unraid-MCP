@@ -51,7 +51,7 @@ DISK = {
 HEALTH = {
     "overall": "critical",
     "reasons": ["Disk disk1 is failed", "Unread warning notifications: 1"],
-    "checks": {"array": "ok", "ups": "ok", "notifications": "ok"},
+    "checks": {"array": "ok", "ups": "ok", "notifications": "ok", "temperature": "ok"},
     "array_state": "STARTED",
     "capacity": {
         "total": {"bytes": 4096, "human": "4.0 KiB"},
@@ -72,6 +72,12 @@ HEALTH = {
     "ups": [{"name": "ups", "status": "ONLINE", "battery_pct": 100}],
     "notifications_unread": {"info": 0, "warning": 1, "alert": 0, "total": 1},
     "top_alerts": [{"title": "Disk warning", "importance": "WARNING"}],
+    "temperature": {
+        "hottest": {"name": "CPU", "value": 55.0, "unit": "CELSIUS", "level": "normal"},
+        "warning_count": 0,
+        "critical_count": 0,
+        "ignored_count": 0,
+    },
 }
 
 
@@ -86,6 +92,17 @@ def _fixture(kind):
                 "parityCheckStatus": HEALTH["parity_check"],
             },
             "upsDevices": [{"name": "ups", "status": "ONLINE", "battery": {"chargeLevel": 100}}],
+            "metrics": {
+                "temperature": {
+                    "sensors": [
+                        {
+                            "name": "CPU",
+                            "type": "CPU_PACKAGE",
+                            "current": {"value": 55.0, "unit": "CELSIUS", "status": "NORMAL"},
+                        }
+                    ]
+                }
+            },
             "notifications": {
                 "overview": {"unread": HEALTH["notifications_unread"]},
                 "warningsAndAlerts": [
@@ -112,8 +129,16 @@ def _fixture(kind):
         if kind == "full"
         else {
             "overall": "degraded",
-            "reasons": ["Array check failed or is unsupported"],
-            "checks": {"array": "failed", "ups": "ok", "notifications": "ok"},
+            "reasons": [
+                "Array check failed or is unsupported",
+                "Temperature check failed or is unsupported",
+            ],
+            "checks": {
+                "array": "failed",
+                "ups": "ok",
+                "notifications": "ok",
+                "temperature": "failed",
+            },
             "array_state": None,
             "capacity": {key: {"bytes": None, "human": None} for key in ("total", "used", "free")},
             "disk_count": 0,

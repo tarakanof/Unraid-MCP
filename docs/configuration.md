@@ -41,6 +41,7 @@ fix a hostname/IP mismatch.
 | `UNRAID_MCP_ALLOW_RAW_QUERY` | `false` | Register the read-only raw GraphQL passthrough tool. |
 | `UNRAID_MCP_TIMEOUT` | `30` | HTTP timeout to the Unraid API (seconds). |
 | `UNRAID_MCP_LONG_TIMEOUT` | `600` | HTTP timeout (seconds) for slow, synchronous mutations: Docker container updates (single/batch/all) and array start/stop. On timeout the operation may still be running on the server; check status before retrying. |
+| `UNRAID_MCP_HEALTH_IGNORE_SENSORS` | – | Comma-separated temperature sensors that `get_health_summary` / `unraid://health` leave out of levels, counts, hottest and reasons (they appear in `temperature.ignored_count`). Each entry matches case-insensitively an exact label (`AUXTIN1`), full name (`nct6779-isa-0290 AUXTIN1`) or id. Use for unconnected motherboard pins that read as critical. `get_system_metrics` still reports them. |
 | `UNRAID_MCP_LOG_LEVEL` | `INFO` | Log level (logs go to stderr): `DEBUG`/`INFO`/`WARNING`/`ERROR`. |
 
 ## Transports

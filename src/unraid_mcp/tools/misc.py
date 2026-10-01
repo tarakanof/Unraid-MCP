@@ -19,6 +19,7 @@ from ..errors import UnraidAuthError, UnraidGraphQLError
 from ..formatting import (
     shape_array_status,
     shape_connect_status,
+    shape_health_temperature,
     shape_installed_unraid_plugins,
     shape_log_file,
     shape_log_files,
@@ -194,7 +195,12 @@ async def fetch_plugins(
     return plugins + installed
 
 
-async def fetch_health(client: UnraidClient) -> HealthSummary:
+async def fetch_health(
+    client: UnraidClient, *, ignore_sensors: tuple[str, ...] = ()
+) -> HealthSummary:
+    """``ignore_sensors``: lower-cased temperature sensor ids/names/labels to leave
+    out of the verdict (``Settings.health_ignored_sensors``)."""
+
     # Health only needs the baseline selections. They are accepted by every
     # API build, so a newer-field validation error can't mark a check failed.
     async def ups_check() -> tuple[list[dict[str, Any]], bool, bool]:
@@ -213,6 +219,7 @@ async def fetch_health(client: UnraidClient) -> HealthSummary:
         (ups, ups_ok, ups_eligible),
         (overview, notifications_ok),
         (alerts, alerts_ok),
+        (sensors, temperature_ok),
     ) = await gather_all(
         safe_query_with_status(
             client, queries.ARRAY_STATUS_LEGACY, shape_array_status, {}, required_field="array"
@@ -229,10 +236,24 @@ async def fetch_health(client: UnraidClient) -> HealthSummary:
         safe_query_with_status(
             client, queries.WARNINGS_AND_ALERTS, shape_warnings_and_alerts, [], tolerate_auth=True
         ),
+        # Needs the newer per-sensor status/thresholds: older builds -> failed.
+        safe_query_with_status(
+            client,
+            queries.HEALTH_TEMPERATURE,
+            lambda data: shape_health_temperature(data, ignore_sensors),
+            [],
+            required_field="metrics",
+            tolerate_auth=True,
+        ),
     )
     checks = {
         name: "ok" if ok else "failed"
-        for name, ok in (("array", array_ok), ("ups", ups_ok), ("notifications", notifications_ok))
+        for name, ok in (
+            ("array", array_ok),
+            ("ups", ups_ok),
+            ("notifications", notifications_ok),
+            ("temperature", temperature_ok),
+        )
     }
     if ups_eligible:
         config, config_ok = await safe_query_with_status(
@@ -247,7 +268,9 @@ async def fetch_health(client: UnraidClient) -> HealthSummary:
         if config_ok and (config.get("service") or "").lower() != "enable":
             checks["ups"] = "not_configured"
     top_alerts = alerts if alerts_ok or alerts else None
-    return summarize_health(array, ups, overview, checks, top_alerts)
+    return summarize_health(
+        array, ups, overview, checks, top_alerts, sensors if temperature_ok or sensors else None
+    )
 
 
 async def do_raw_query(
@@ -297,15 +320,22 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         charge <20% or runtime <300 seconds; attention for other unhealthy disks,
         unread alerts/warnings, UPS on battery, or parity errors. Failed queries
         yield degraded when no critical/attention signal exists; otherwise ok.
-        reasons explains each signal; checks marks array/ups/notifications queries
-        as ok or failed; ups is not_configured only when its query fails with a
+        Temperature sensors are picked by id (lm_sensors temp<N>_input, disk, IPMI;
+        fans/voltages/power and sentinel readings are ignored). A sensor at critical
+        raises critical (an NVMe at critical below 75 C only raises attention), at warning
+        raises attention; `temperature` gives the hottest sensor and the
+        warning/critical counts (omitted when that query failed).
+        UNRAID_MCP_HEALTH_IGNORE_SENSORS excludes named sensors from the
+        verdict (counted in `ignored_count`).
+        reasons explains each signal; checks marks array/ups/notifications/temperature
+        queries as ok or failed; ups is not_configured only when its query fails with a
         non-permission, supported GraphQL error and the UPS service is not enabled.
         HTTP 403 on the ups/notifications sub-checks marks them failed; connection errors
         propagate. Partial GraphQL errors mark a check failed while
         preserving usable data. Auth/connection/configuration errors propagate.
         Array state is informational. Also at unraid://health.
         """
-        return await guarded(ctx, fetch_health)
+        return await guarded(ctx, fetch_health, ignore_sensors=settings.health_ignored_sensors)
 
     @mcp.tool(title="List Log Files", annotations=READ_ONLY)
     async def list_log_files(ctx: Context) -> list[dict[str, Any]]:

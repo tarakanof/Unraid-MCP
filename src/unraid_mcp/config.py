@@ -102,6 +102,11 @@ class Settings(BindSettings):
     # Per-call HTTP timeout for mutations that block on slow work (image pulls,
     # array start/stop). Reads and quick mutations keep ``timeout``.
     long_timeout: float = Field(default=600.0, gt=0, validation_alias="UNRAID_MCP_LONG_TIMEOUT")
+    # Comma-separated temperature sensors the health verdict ignores (exact label,
+    # full name, or id; case-insensitive), e.g. unconnected motherboard pins.
+    health_ignore_sensors: str = Field(
+        default="", validation_alias="UNRAID_MCP_HEALTH_IGNORE_SENSORS"
+    )
     log_level: str = Field(default="INFO", validation_alias="UNRAID_MCP_LOG_LEVEL")
 
     @field_validator("api_url")
@@ -156,6 +161,13 @@ class Settings(BindSettings):
                 f"UNRAID_MCP_BEARER_TOKEN must be at least {MIN_BEARER_TOKEN_LENGTH} characters"
             )
         return value
+
+    @property
+    def health_ignored_sensors(self) -> tuple[str, ...]:
+        """Normalised (stripped, lower-cased, non-empty) ignore-list entries."""
+        return tuple(
+            p for part in self.health_ignore_sensors.split(",") if (p := part.strip().lower())
+        )
 
     @property
     def host_for_messages(self) -> str:

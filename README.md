@@ -62,6 +62,10 @@ Slow mutations (Docker image updates, array start/stop) use a longer HTTP timeou
 `UNRAID_MCP_LONG_TIMEOUT` (default 600s), instead of `UNRAID_MCP_TIMEOUT` (30s). If one
 times out, the operation may still be running on the server; check status before retrying.
 
+A temperature sensor that falsely trips the health verdict (an unconnected motherboard
+pin, say) can be silenced with `UNRAID_MCP_HEALTH_IGNORE_SENSORS=AUXTIN0,AUXTIN1` (labels,
+full names or ids); `get_system_metrics` still reports it.
+
 Beyond tools, the server also exposes two MCP **resources** (`unraid://health` and
 `unraid://system-info`) that a client can read without spending a tool call, and a
 **`triage`** prompt that walks an agent through investigating the box. See

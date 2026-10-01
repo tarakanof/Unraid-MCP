@@ -57,6 +57,9 @@ services:
       # UNRAID_MCP_TLS_KEY: "/certs/key.pem"
       # HTTP timeout (seconds) for slow mutations (Docker updates, array start/stop).
       UNRAID_MCP_LONG_TIMEOUT: "600"
+      # Temperature sensors the health verdict ignores (label, name or id), e.g.
+      # unconnected motherboard pins: "AUXTIN0,AUXTIN1".
+      # UNRAID_MCP_HEALTH_IGNORE_SENSORS: ""
       UNRAID_MCP_LOG_LEVEL: "INFO"
     # volumes:
     #   - /mnt/user/appdata/unraid-mcp/certs:/certs:ro

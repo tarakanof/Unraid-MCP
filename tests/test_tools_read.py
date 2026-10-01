@@ -26,18 +26,30 @@ def _resp(data):
 _NO_ALERTS = _resp({"notifications": {"warningsAndAlerts": []}})
 
 
+_OK_TEMP = _resp({"metrics": {"temperature": {"sensors": []}}})
+_HEALTH_EXTRA = {"test_array_space_thresholds_are_not_health_flags"}
+
+
 @pytest.fixture
 def mocked_client(mocked_client, request):
-    """For health tests, slot an empty warningsAndAlerts response in as the 4th
-    request (array, ups, notifications, alerts run concurrently; any UPS
-    configuration follow-up comes after) so their response lists stay readable."""
+    """For health tests, slot an empty warningsAndAlerts and an empty temperature
+    response in as the 4th/5th requests (array, ups, notifications, alerts,
+    temperature run concurrently; any UPS configuration follow-up comes after)
+    so their response lists stay readable. ``test_health_summary*`` lists already
+    carry the alerts response."""
     name = request.function.__name__
-    if not name.startswith("test_health") or name.startswith("test_health_summary"):
+    if name.startswith("test_health_summary") or name.startswith("test_top_alerts_force"):
+        alerts_given = True
+    elif name.startswith("test_health") or name in _HEALTH_EXTRA:
+        alerts_given = False
+    else:
         return mocked_client
 
     def wrap(responses):
-        if isinstance(responses, list) and len(responses) >= 3:
-            responses = [*responses[:3], _NO_ALERTS, *responses[3:]]
+        if isinstance(responses, list) and len(responses) >= (4 if alerts_given else 3):
+            if not alerts_given:
+                responses = [*responses[:3], _NO_ALERTS, *responses[3:]]
+            responses = [*responses[:4], _OK_TEMP, *responses[4:]]
         return mocked_client(responses)
 
     return wrap
@@ -1600,9 +1612,9 @@ async def test_health_ups_verdict(mocked_client, status, charge, runtime, expect
         ]
     ) as (client, route):
         out = await misc.fetch_health(client)
-    assert route.call_count == 4
+    assert route.call_count == 5
     assert out["overall"] == expected
-    assert out["checks"] == dict.fromkeys(("array", "ups", "notifications"), "ok")
+    assert out["checks"] == dict.fromkeys(("array", "ups", "notifications", "temperature"), "ok")
     if reason:
         assert any(reason in item for item in out["reasons"])
     else:
@@ -1647,10 +1659,11 @@ async def test_health_failed_checks(mocked_client, check, failure):
         responses.append(_resp({"upsConfiguration": {"service": "enable"}}))
     async with mocked_client(responses) as (client, route):
         out = await misc.fetch_health(client)
-    assert route.call_count == (5 if config_queried else 4)
+    assert route.call_count == (6 if config_queried else 5)
     assert out["overall"] == "degraded"
     assert out["checks"] == {
-        name: "failed" if name == check else "ok" for name in ("array", "ups", "notifications")
+        name: "failed" if name == check else "ok"
+        for name in ("array", "ups", "notifications", "temperature")
     }
     assert out["reasons"] == [f"{check.capitalize()} check failed or is unsupported"]
 
@@ -1674,7 +1687,7 @@ async def test_health_actionable_errors_propagate(mocked_client, check, failure)
         with pytest.raises(UnraidAuthError if failure == "auth" else UnraidConnectionError):
             await misc.fetch_health(client)
     # The three checks run concurrently, so all were issued before the error surfaced.
-    assert route.call_count == 4
+    assert route.call_count == 5
 
 
 @pytest.mark.parametrize(
@@ -1684,8 +1697,17 @@ async def test_health_empty_success(mocked_client, data):
     async with mocked_client(_resp(data)) as (client, _route):
         out = await misc.fetch_health(client)
     assert out["overall"] == "degraded"
-    assert out["reasons"] == ["Array check failed or is unsupported"]
-    assert out["checks"] == {"array": "failed", "ups": "ok", "notifications": "ok"}
+    assert out["reasons"] == [
+        "Array check failed or is unsupported",
+        "Temperature check failed or is unsupported",
+    ]
+    assert out["checks"] == {
+        "array": "failed",
+        "ups": "ok",
+        "notifications": "ok",
+        "temperature": "failed",
+    }
+    assert "temperature" not in out
     assert out["disk_count"] == 0
     assert out["ups"] == []
 
@@ -1755,7 +1777,7 @@ async def test_health_all_healthy(mocked_client):
         out = await misc.fetch_health(client)
     assert out["overall"] == "ok"
     assert out["reasons"] == []
-    assert out["checks"] == dict.fromkeys(("array", "ups", "notifications"), "ok")
+    assert out["checks"] == dict.fromkeys(("array", "ups", "notifications", "temperature"), "ok")
     assert out["array_state"] == "STOPPED"
 
 
@@ -1789,9 +1811,14 @@ async def test_health_ups_configuration_fallback(mocked_client, config, expected
         ]
     ) as (client, route):
         out = await misc.fetch_health(client)
-    assert route.call_count == 5
+    assert route.call_count == 6
     assert _sent_query(route) == queries.UPS_CONFIGURATION
-    assert out["checks"] == {"array": "ok", "ups": expected, "notifications": "ok"}
+    assert out["checks"] == {
+        "array": "ok",
+        "ups": expected,
+        "notifications": "ok",
+        "temperature": "ok",
+    }
     assert out["overall"] == ("ok" if expected == "not_configured" else "degraded")
     assert out["reasons"] == (
         [] if expected == "not_configured" else ["Ups check failed or is unsupported"]
@@ -1832,7 +1859,8 @@ async def test_array_space_thresholds_are_not_health_flags(mocked_client):
         "array": {
             "disks": [{"status": "DISK_OK", "warning": 80, "critical": 90}],
             "caches": [{"status": "DISK_OK", "critical": 90}],
-        }
+        },
+        "metrics": {"temperature": {"sensors": []}},
     }
     async with mocked_client(_resp(data)) as (client, _route):
         status = await array.fetch_array_status(client)
@@ -1857,11 +1885,11 @@ _UNSUPPORTED = {
 @pytest.mark.parametrize(
     ("ups", "service", "expected", "calls"),
     [
-        (httpx.Response(200, json=_NO_DATA), None, "not_configured", 5),
-        (httpx.Response(200, json=_NO_DATA), "DISABLE", "not_configured", 5),
-        (httpx.Response(200, json=_FORBIDDEN), "DISABLE", "failed", 4),
-        (httpx.Response(403), "DISABLE", "failed", 4),
-        (httpx.Response(200, json=_UNSUPPORTED), None, "failed", 4),
+        (httpx.Response(200, json=_NO_DATA), None, "not_configured", 6),
+        (httpx.Response(200, json=_NO_DATA), "DISABLE", "not_configured", 6),
+        (httpx.Response(200, json=_FORBIDDEN), "DISABLE", "failed", 5),
+        (httpx.Response(403), "DISABLE", "failed", 5),
+        (httpx.Response(200, json=_UNSUPPORTED), None, "failed", 5),
     ],
 )
 async def test_health_not_configured_branches(mocked_client, ups, service, expected, calls):
@@ -1871,7 +1899,7 @@ async def test_health_not_configured_branches(mocked_client, ups, service, expec
         _resp({"notifications": None}),
         _resp({"upsConfiguration": {"service": service}}),
     ]
-    async with mocked_client(responses[: calls - 1] if calls == 4 else responses) as (
+    async with mocked_client(responses[:3] if calls == 5 else responses) as (
         client,
         route,
     ):
@@ -1886,7 +1914,12 @@ async def test_health_notifications_http_403_is_failed(mocked_client):
         [_resp({"array": {"state": "STARTED"}}), _resp({"upsDevices": []}), httpx.Response(403)]
     ) as (client, _route):
         out = await misc.fetch_health(client)
-    assert out["checks"] == {"array": "ok", "ups": "ok", "notifications": "failed"}
+    assert out["checks"] == {
+        "array": "ok",
+        "ups": "ok",
+        "notifications": "failed",
+        "temperature": "ok",
+    }
     assert out["overall"] == "degraded"
 
 
@@ -2032,3 +2065,369 @@ async def test_top_alerts_force_attention_when_overview_fails(mocked_client):
         out = await misc.fetch_health(c)
     assert out["overall"] == "attention"
     assert out["top_alerts"][0]["importance"] == "ALERT"
+
+
+def _sensor(name, value, status, type_="DISK", unit="CELSIUS", id_=None):
+    return {
+        "id": id_,
+        "name": name,
+        "type": type_,
+        "current": {"value": value, "unit": unit, "status": status},
+        "warning": 50,
+        "critical": 60,
+    }
+
+
+def _health_responses(sensors):
+    return [
+        _resp({"array": {"state": "STARTED", "disks": []}}),
+        _resp({"upsDevices": []}),
+        _resp({"notifications": {"overview": {"unread": {"alert": 0, "warning": 0}}}}),
+        _NO_ALERTS,
+        _resp({"metrics": {"temperature": {"sensors": sensors}}}),
+    ]
+
+
+async def test_temperature_health_critical(mocked_client):
+    sensors = [
+        _sensor("disk1", 65, "CRITICAL"),
+        _sensor("disk2", 55, "WARNING"),
+        _sensor("cpu", 40, "NORMAL", "CPU_PACKAGE"),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+    assert out["reasons"] == ["Temperature critical: disk1 65°C", "Temperature warning: disk2 55°C"]
+    assert out["temperature"] == {
+        "hottest": {"name": "disk1", "value": 65, "unit": "CELSIUS", "level": "critical"},
+        "warning_count": 1,
+        "critical_count": 1,
+        "ignored_count": 0,
+    }
+    assert out["checks"]["temperature"] == "ok"
+
+
+async def test_temperature_health_warning_is_attention(mocked_client):
+    async with mocked_client(_health_responses([_sensor("disk2", 55, "WARNING")])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "attention"
+    assert out["reasons"] == ["Temperature warning: disk2 55°C"]
+
+
+async def test_temperature_health_all_normal_no_change(mocked_client):
+    async with mocked_client(_health_responses([_sensor("disk1", 35, "NORMAL")])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "ok"
+    assert out["reasons"] == []
+    assert out["temperature"]["hottest"]["name"] == "disk1"
+    assert out["temperature"]["warning_count"] == out["temperature"]["critical_count"] == 0
+
+
+async def test_temperature_health_no_sensors(mocked_client):
+    async with mocked_client(_health_responses([])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "ok"
+    assert out["temperature"] == {
+        "hottest": None,
+        "warning_count": 0,
+        "critical_count": 0,
+        "ignored_count": 0,
+    }
+
+
+async def test_temperature_health_ignores_non_temperature_lm_sensors(mocked_client):
+    """lm_sensors reports fans/volts/power as CELSIUS + CRITICAL; type is name-guessed."""
+    sensors = [
+        _sensor(
+            "nct CPU Fan", 674, "CRITICAL", "CUSTOM", id_="nct6779-isa-0290:CPU Fan:fan2_input"
+        ),
+        _sensor(
+            "i915 energy1",
+            509499.46,
+            "CRITICAL",
+            "CUSTOM",
+            id_="i915-pci-0900:energy1:energy1_input",
+        ),
+        _sensor("amdgpu fan1", 3000, "CRITICAL", "GPU", id_="amdgpu-pci-0800:fan1:fan1_input"),
+        _sensor("wmi CPU Fan", 2000, "CRITICAL", "CPU_PACKAGE", id_="asus-wmi:CPU Fan:fan1_input"),
+        _sensor("nct Vcore", 90, "CRITICAL", "CPU_CORE", id_="nct6779-isa-0290:Vcore:in0_input"),
+        _sensor("it87 power1", 99, "CRITICAL", "CUSTOM", id_="it87-isa-0a40:power1:power1_input"),
+        _sensor(
+            "k10temp CPU Temp",
+            43.25,
+            "NORMAL",
+            "CUSTOM",
+            id_="k10temp-pci-00c3:CPU Temp:temp1_input",
+        ),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "ok"
+    assert out["temperature"]["hottest"]["name"] == "k10temp CPU Temp"
+    assert out["temperature"]["critical_count"] == 0
+
+
+@pytest.mark.parametrize("label", ["CPUTIN", "AUXTIN1", "Tdie", "PECI Agent 0"])
+async def test_temperature_health_custom_lm_temp_input_counts(mocked_client, label):
+    sensor = _sensor(label, 95, "CRITICAL", "CUSTOM", id_=f"nct6779-isa-0290:{label}:temp2_input")
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+    assert out["reasons"] == [f"Temperature critical: {label} 95°C"]
+
+
+@pytest.mark.parametrize("value", [127, 128, 115.5, 255, -128])
+async def test_temperature_health_sentinel_readings_ignored(mocked_client, value):
+    sensor = _sensor("AUXTIN3", value, "CRITICAL", "CUSTOM", id_="nct:AUXTIN3:temp6_input")
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "ok"
+    assert out["temperature"]["hottest"] is None
+
+
+@pytest.mark.parametrize(
+    ("sensor", "expected"),
+    [
+        (_sensor("WD SN570", 65, "CRITICAL", "NVME", id_="disk:22392R"), "attention"),
+        (_sensor("WD SN570", 74.9, "CRITICAL", "NVME", id_="disk:22392R"), "attention"),
+        (_sensor("WD SN570", 95, "CRITICAL", "NVME", id_="disk:22392R"), "critical"),
+        (
+            _sensor("Composite", 65, "CRITICAL", "NVME", id_="nvme-pci-0100:Composite:temp1_input"),
+            "attention",
+        ),
+        (_sensor("TOSHIBA", 65, "CRITICAL", "DISK", id_="disk:52U0A0"), "critical"),
+        (_sensor("IPMI CPU", 95, "CRITICAL", "CPU_PACKAGE", id_="ipmi:CPU Temp"), "critical"),
+        (_sensor("MB", 95, "CRITICAL", "MOTHERBOARD", id_="nct:MB:temp1_input"), "critical"),
+    ],
+)
+async def test_temperature_health_ids_kept_and_nvme_downgraded(mocked_client, sensor, expected):
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == expected
+    assert out["reasons"][0].startswith("Temperature critical:")
+    assert out["temperature"]["critical_count"] == 1
+
+
+async def test_temperature_health_nvme_critical_does_not_mask_hdd_critical(mocked_client):
+    sensors = [
+        _sensor("nvme", 70, "CRITICAL", "NVME", id_="disk:n"),
+        _sensor("hdd", 62, "CRITICAL", "DISK", id_="disk:h"),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+
+
+async def test_temperature_health_no_id_fallback(mocked_client):
+    sensors = [
+        _sensor("CPU Fan", 674, "CRITICAL", "CUSTOM"),
+        _sensor("MB Temp", 95, "CRITICAL", "CUSTOM"),
+        _sensor("cpu", 40, "NORMAL", "CPU_PACKAGE"),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["reasons"] == ["Temperature critical: MB Temp 95°C"]
+
+
+async def test_temperature_health_level_derived_when_status_unknown(mocked_client):
+    async with mocked_client(_health_responses([_sensor("disk1", 61, "UNKNOWN")])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+
+
+async def test_temperature_health_reasons_capped(mocked_client):
+    sensors = [_sensor(f"d{i}", 70 + i, "CRITICAL") for i in range(7)]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert len(out["reasons"]) == 6
+    assert out["reasons"][0] == "Temperature critical: d6 76°C"
+    assert out["reasons"][-1] == "Temperature critical: 2 more sensors"
+    assert out["temperature"]["critical_count"] == 7
+
+
+@pytest.mark.parametrize("failure", ["unsupported", "forbidden", "http403", "partial"])
+async def test_temperature_health_query_failure_degrades(mocked_client, failure):
+    bad = {
+        "unsupported": httpx.Response(
+            200, json={"errors": [{"message": 'Cannot query field "status" on type "X".'}]}
+        ),
+        "forbidden": httpx.Response(200, json=_FORBIDDEN),
+        "http403": httpx.Response(403),
+        "partial": httpx.Response(
+            200,
+            json={
+                "errors": [{"message": "sensor read failed"}],
+                "data": {"metrics": {"temperature": {"sensors": [_sensor("d", 35, "NORMAL")]}}},
+            },
+        ),
+    }[failure]
+    responses = _health_responses([])
+    responses[4] = bad
+    async with mocked_client(responses) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["checks"]["temperature"] == "failed"
+    assert out["overall"] == "degraded"
+    assert out["reasons"] == ["Temperature check failed or is unsupported"]
+    # Partial GraphQL errors keep usable data (#143); the check stays failed.
+    assert ("temperature" in out) == (failure == "partial")
+
+
+async def test_temperature_health_connection_error_propagates(mocked_client):
+    responses = _health_responses([])
+    responses[4] = httpx.ConnectError("refused")
+    async with mocked_client(responses) as (c, _r):
+        with pytest.raises(UnraidConnectionError):
+            await misc.fetch_health(c)
+
+
+async def test_temperature_health_failure_keeps_critical_signal(mocked_client):
+    responses = _health_responses([])
+    responses[0] = _resp({"array": {"state": "STARTED", "disks": [{"status": "DISK_DSBL"}]}})
+    responses[4] = httpx.Response(403)
+    async with mocked_client(responses) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+    assert out["checks"]["temperature"] == "failed"
+
+
+_PIN = "nct6779-isa-0290:AUXTIN1:temp4_input"
+
+
+@pytest.mark.parametrize(
+    "ignore",
+    [
+        ("auxtin1",),
+        ("nct6779-isa-0290 auxtin1",),
+        (_PIN.lower(),),
+        ("other", " AuxTin1 ".strip().lower()),
+    ],
+)
+async def test_temperature_health_ignore_list_matches(mocked_client, ignore):
+    sensors = [
+        _sensor("nct6779-isa-0290 AUXTIN1", 95, "CRITICAL", "CUSTOM", id_=_PIN),
+        _sensor(
+            "nct6779-isa-0290 CPUTIN",
+            42,
+            "NORMAL",
+            "CUSTOM",
+            id_="nct6779-isa-0290:CPUTIN:temp2_input",
+        ),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c, ignore_sensors=ignore)
+    assert out["overall"] == "ok"
+    assert out["reasons"] == []
+    assert out["temperature"] == {
+        "hottest": {
+            "name": "nct6779-isa-0290 CPUTIN",
+            "value": 42,
+            "unit": "CELSIUS",
+            "level": "normal",
+        },
+        "warning_count": 0,
+        "critical_count": 0,
+        "ignored_count": 1,
+    }
+
+
+async def test_temperature_health_empty_ignore_is_noop(mocked_client):
+    sensors = [_sensor("nct6779-isa-0290 AUXTIN1", 95, "CRITICAL", "CUSTOM", id_=_PIN)]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c, ignore_sensors=())
+    assert out["overall"] == "critical"
+    assert out["temperature"]["ignored_count"] == 0
+
+
+async def test_temperature_health_ignore_list_only_hides_named(mocked_client):
+    sensors = [
+        _sensor("nct6779-isa-0290 AUXTIN1", 95, "CRITICAL", "CUSTOM", id_=_PIN),
+        _sensor("hdd", 65, "CRITICAL", "DISK", id_="disk:h"),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c, ignore_sensors=("auxtin1",))
+    assert out["overall"] == "critical"
+    assert out["reasons"] == ["Temperature critical: hdd 65°C"]
+
+
+def test_settings_health_ignored_sensors_parsing(settings_factory):
+    assert settings_factory().health_ignored_sensors == ()
+    cfg = settings_factory(health_ignore_sensors=" AUXTIN0, nct6779-isa-0290 AUXTIN1 ,,")
+    assert cfg.health_ignored_sensors == ("auxtin0", "nct6779-isa-0290 auxtin1")
+
+
+@pytest.mark.parametrize(
+    ("unit", "hot", "sentinel"),
+    [("FAHRENHEIT", 203, 260.6), ("KELVIN", 368.15, 400.15), ("RANKINE", 662.67, 720.27)],
+)
+async def test_temperature_health_non_celsius_units(mocked_client, unit, hot, sentinel):
+    sensors = [
+        _sensor("cpu", hot, "CRITICAL", "CPU_PACKAGE", unit=unit, id_="ipmi:CPU Temp"),
+        _sensor("pin", sentinel, "CRITICAL", "CUSTOM", unit=unit, id_="nct:AUXTIN3:temp6_input"),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+    assert out["temperature"]["critical_count"] == 1
+    assert out["temperature"]["hottest"]["name"] == "cpu"
+
+
+async def test_temperature_health_ignore_chip_name_does_not_match(mocked_client):
+    sensor = _sensor("nct6779-isa-0290 AUXTIN1", 95, "CRITICAL", "CUSTOM", id_=_PIN)
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c, ignore_sensors=("nct6779-isa-0290",))
+    assert out["overall"] == "critical"
+
+
+async def test_temperature_health_ignore_label_with_server_prefix(mocked_client):
+    sensor = _sensor("nct6779-isa-0290 AUXTIN1", 95, "CRITICAL", "CUSTOM", id_="srv:" + _PIN)
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c, ignore_sensors=("auxtin1",))
+    assert out["overall"] == "ok"
+
+
+@pytest.mark.parametrize("value", [126, 130])
+async def test_temperature_health_hot_readings_above_125_count(mocked_client, value):
+    sensor = _sensor("gpu", value, "CRITICAL", "GPU", id_="ipmi:VRM Temp")
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+    assert out["temperature"]["hottest"]["value"] == value
+
+
+@pytest.mark.parametrize(
+    ("value", "id_"),
+    [(127, "ipmi:CPU Temp"), (115.5, "amdgpu-pci-0800:edge:temp1_input"), (255, "disk:abc")],
+)
+async def test_temperature_health_sentinel_values_kept_off_super_io(mocked_client, value, id_):
+    sensor = _sensor("hot", value, "CRITICAL", "CPU_PACKAGE", id_=id_)
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+
+
+@pytest.mark.parametrize("chip", ["nct6779-isa-0290", "IT8628-isa-0a40", "w83795g-i2c-0-2f"])
+async def test_temperature_health_sentinel_dropped_on_super_io(mocked_client, chip):
+    sensor = _sensor("pin", 127, "CRITICAL", "CUSTOM", id_=f"srv:{chip}:AUXTIN:temp5_input")
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "ok"
+
+
+@pytest.mark.parametrize(
+    ("value", "unit", "expected"),
+    [
+        (75, "CELSIUS", "critical"),
+        (167, "FAHRENHEIT", "critical"),
+        (348.15, "KELVIN", "critical"),
+        (626.67, "RANKINE", "critical"),
+        (74.9, "CELSIUS", "attention"),
+        (166.8, "FAHRENHEIT", "attention"),
+        (348.05, "KELVIN", "attention"),
+        (626.49, "RANKINE", "attention"),
+    ],
+)
+async def test_temperature_health_nvme_75c_boundary_all_units(mocked_client, value, unit, expected):
+    sensor = _sensor("WD SN570", value, "CRITICAL", "NVME", unit=unit, id_="disk:22392R")
+    async with mocked_client(_health_responses([sensor])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == expected
