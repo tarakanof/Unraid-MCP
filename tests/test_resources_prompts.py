@@ -36,6 +36,7 @@ _CANNED = {
             "disks": [{"name": "disk1", "status": "DISK_OK", "size": "500"}],
         },
         "info": {"os": {"hostname": "tower"}, "cpu": {"cores": 8}},
+        "metrics": {"temperature": {"sensors": []}},
     }
 }
 
@@ -155,6 +156,7 @@ async def test_health_tool_and_resource_match(mode, expected):
                 }
             ],
             "notifications": {"overview": {"unread": {"alert": 0, "warning": 0}}},
+            "metrics": {"temperature": {"sensors": []}},
         }
         return httpx.Response(200, json={"data": data})
 

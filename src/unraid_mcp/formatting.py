@@ -810,17 +810,82 @@ def shape_mutation_result_list(
 _TOP_ALERTS_MAX = 5
 
 
+_TEMP_UNIT_SYMBOLS = {"CELSIUS": "°C", "FAHRENHEIT": "°F", "KELVIN": "K", "RANKINE": "°R"}
+_TEMP_REASONS_MAX = 5
+
+
+def shape_health_temperature(data: dict | None) -> list[dict[str, Any]]:
+    """Shape ``metrics.temperature.sensors`` down to real temperature sensors.
+
+    lm_sensors chips surface fans (RPM), voltages and energy counters as
+    ``CUSTOM`` sensors reported in CELSIUS with upstream ``CRITICAL`` status
+    (e.g. a 2504 RPM fan at "2504 CELSIUS"). Every typed sensor (CPU/DISK/NVME/
+    MOTHERBOARD/...) is kept; ``CUSTOM`` ones only when the name says "temp"
+    (``CPU Temp``, ``MB Temp``, ``temp1``). Level prefers upstream
+    ``current.status`` (see ``_shape_sensor``).
+    """
+    temperature = ((data or {}).get("metrics") or {}).get("temperature") or {}
+    return [
+        _shape_sensor(s)
+        for s in temperature.get("sensors") or []
+        if s and (s.get("type") != "CUSTOM" or "temp" in (s.get("name") or "").lower())
+    ]
+
+
+def _temperature_signals(
+    sensors: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[str], bool, bool]:
+    """(summary, reasons, any_critical, any_warning) for shaped sensors."""
+
+    def reading(s: dict[str, Any]) -> str:
+        current = s.get("current") or {}
+        unit = _TEMP_UNIT_SYMBOLS.get(current.get("unit"), current.get("unit") or "")
+        return f"{s.get('name') or 'unnamed'} {current.get('value')}{unit}"
+
+    def hottest_first(level: str) -> list[dict[str, Any]]:
+        found = [s for s in sensors if s.get("level") == level]
+        return sorted(
+            found,
+            key=lambda s: (s["current"].get("value") is None, -(s["current"].get("value") or 0)),
+        )
+
+    critical, warning = hottest_first("critical"), hottest_first("warning")
+    reasons: list[str] = []
+    for label, found in (("critical", critical), ("warning", warning)):
+        reasons.extend(f"Temperature {label}: {reading(s)}" for s in found[:_TEMP_REASONS_MAX])
+        if len(found) > _TEMP_REASONS_MAX:
+            reasons.append(f"Temperature {label}: {len(found) - _TEMP_REASONS_MAX} more sensors")
+    readable = [s for s in sensors if (s.get("current") or {}).get("value") is not None]
+    hot = max(readable, key=lambda s: s["current"]["value"], default=None)
+    summary = {
+        "hottest": {
+            "name": hot.get("name"),
+            "value": hot["current"]["value"],
+            "unit": hot["current"].get("unit"),
+            "level": hot.get("level"),
+        }
+        if hot
+        else None,
+        "warning_count": len(warning),
+        "critical_count": len(critical),
+    }
+    return summary, reasons, bool(critical), bool(warning)
+
+
 def summarize_health(
     array_out: dict[str, Any],
     ups_list: list[dict[str, Any]],
     notifications_overview: dict[str, Any],
     checks: dict[str, str] | None = None,
     top_alerts: list[dict[str, Any]] | None = None,
+    temperature_sensors: list[dict[str, Any]] | None = None,
 ) -> HealthSummary:
     """Compose a compact, triage-friendly health roll-up from the shaped parts.
 
     ``top_alerts`` is the shaped ``warningsAndAlerts`` list, or None when the API
     build lacks that query (the key is then omitted from the result).
+    ``temperature_sensors`` is ``shape_health_temperature`` output, or None when
+    the temperature check failed (the ``temperature`` key is then omitted).
     """
     disks = [
         d
@@ -879,6 +944,11 @@ def summarize_health(
         if runtime is not None and runtime < 300:
             critical = True
             reasons.append(f"UPS {name} runtime is {runtime} seconds (<5 minutes)")
+    temperature = None
+    if temperature_sensors is not None:
+        temperature, temp_reasons, temp_critical, _ = _temperature_signals(temperature_sensors)
+        critical |= temp_critical
+        reasons.extend(temp_reasons)
     if top_alerts and not (unread.get("alert") or unread.get("warning")):
         # The overview query may have failed while warningsAndAlerts succeeded.
         reasons.append(f"Unread warning/alert notifications: {len(top_alerts)}")
@@ -916,6 +986,8 @@ def summarize_health(
         ],
         "notifications_unread": unread,
     }
+    if temperature is not None:
+        result["temperature"] = temperature
     if top_alerts is not None:
         result["top_alerts"] = [
             {"title": a.get("title"), "importance": a.get("importance")}

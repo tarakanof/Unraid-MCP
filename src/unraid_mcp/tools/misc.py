@@ -19,6 +19,7 @@ from ..errors import UnraidAuthError, UnraidGraphQLError
 from ..formatting import (
     shape_array_status,
     shape_connect_status,
+    shape_health_temperature,
     shape_installed_unraid_plugins,
     shape_log_file,
     shape_log_files,
@@ -213,6 +214,7 @@ async def fetch_health(client: UnraidClient) -> HealthSummary:
         (ups, ups_ok, ups_eligible),
         (overview, notifications_ok),
         (alerts, alerts_ok),
+        (sensors, temperature_ok),
     ) = await gather_all(
         safe_query_with_status(
             client, queries.ARRAY_STATUS_LEGACY, shape_array_status, {}, required_field="array"
@@ -229,10 +231,24 @@ async def fetch_health(client: UnraidClient) -> HealthSummary:
         safe_query_with_status(
             client, queries.WARNINGS_AND_ALERTS, shape_warnings_and_alerts, [], tolerate_auth=True
         ),
+        # Needs the newer per-sensor status/thresholds: older builds -> failed.
+        safe_query_with_status(
+            client,
+            queries.HEALTH_TEMPERATURE,
+            shape_health_temperature,
+            [],
+            required_field="metrics",
+            tolerate_auth=True,
+        ),
     )
     checks = {
         name: "ok" if ok else "failed"
-        for name, ok in (("array", array_ok), ("ups", ups_ok), ("notifications", notifications_ok))
+        for name, ok in (
+            ("array", array_ok),
+            ("ups", ups_ok),
+            ("notifications", notifications_ok),
+            ("temperature", temperature_ok),
+        )
     }
     if ups_eligible:
         config, config_ok = await safe_query_with_status(
@@ -247,7 +263,9 @@ async def fetch_health(client: UnraidClient) -> HealthSummary:
         if config_ok and (config.get("service") or "").lower() != "enable":
             checks["ups"] = "not_configured"
     top_alerts = alerts if alerts_ok or alerts else None
-    return summarize_health(array, ups, overview, checks, top_alerts)
+    return summarize_health(
+        array, ups, overview, checks, top_alerts, sensors if temperature_ok else None
+    )
 
 
 async def do_raw_query(
@@ -297,8 +315,12 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         charge <20% or runtime <300 seconds; attention for other unhealthy disks,
         unread alerts/warnings, UPS on battery, or parity errors. Failed queries
         yield degraded when no critical/attention signal exists; otherwise ok.
-        reasons explains each signal; checks marks array/ups/notifications queries
-        as ok or failed; ups is not_configured only when its query fails with a
+        Temperature sensors (CPU/DISK/NVME/... plus CUSTOM sensors named "temp"; fans,
+        voltages and energy counters are ignored) at critical raise critical, at
+        warning raise attention; `temperature` gives the hottest sensor and the
+        warning/critical counts (omitted when that query failed).
+        reasons explains each signal; checks marks array/ups/notifications/temperature
+        queries as ok or failed; ups is not_configured only when its query fails with a
         non-permission, supported GraphQL error and the UPS service is not enabled.
         HTTP 403 on the ups/notifications sub-checks marks them failed; connection errors
         propagate. Partial GraphQL errors mark a check failed while

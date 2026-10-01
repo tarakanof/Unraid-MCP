@@ -73,6 +73,19 @@ query GetSystemMetrics {
 }
 """
 
+# Health-verdict temperature probe: only the per-sensor fields the verdict needs.
+# `current.status` + thresholds are unraid/api v4.30.0+; older builds reject the
+# query, which the health roll-up reports as `checks.temperature = "failed"`.
+HEALTH_TEMPERATURE = """
+query GetHealthTemperature {
+  metrics {
+    temperature {
+      sensors { name type current { value unit status } warning critical }
+    }
+  }
+}
+"""
+
 SYSTEM_METRICS_LEGACY = """
 query GetSystemMetricsLegacy {
   metrics {

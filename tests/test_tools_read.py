@@ -26,18 +26,30 @@ def _resp(data):
 _NO_ALERTS = _resp({"notifications": {"warningsAndAlerts": []}})
 
 
+_OK_TEMP = _resp({"metrics": {"temperature": {"sensors": []}}})
+_HEALTH_EXTRA = {"test_array_space_thresholds_are_not_health_flags"}
+
+
 @pytest.fixture
 def mocked_client(mocked_client, request):
-    """For health tests, slot an empty warningsAndAlerts response in as the 4th
-    request (array, ups, notifications, alerts run concurrently; any UPS
-    configuration follow-up comes after) so their response lists stay readable."""
+    """For health tests, slot an empty warningsAndAlerts and an empty temperature
+    response in as the 4th/5th requests (array, ups, notifications, alerts,
+    temperature run concurrently; any UPS configuration follow-up comes after)
+    so their response lists stay readable. ``test_health_summary*`` lists already
+    carry the alerts response."""
     name = request.function.__name__
-    if not name.startswith("test_health") or name.startswith("test_health_summary"):
+    if name.startswith("test_health_summary") or name.startswith("test_top_alerts_force"):
+        alerts_given = True
+    elif name.startswith("test_health") or name in _HEALTH_EXTRA:
+        alerts_given = False
+    else:
         return mocked_client
 
     def wrap(responses):
-        if isinstance(responses, list) and len(responses) >= 3:
-            responses = [*responses[:3], _NO_ALERTS, *responses[3:]]
+        if isinstance(responses, list) and len(responses) >= (4 if alerts_given else 3):
+            if not alerts_given:
+                responses = [*responses[:3], _NO_ALERTS, *responses[3:]]
+            responses = [*responses[:4], _OK_TEMP, *responses[4:]]
         return mocked_client(responses)
 
     return wrap
@@ -1600,9 +1612,9 @@ async def test_health_ups_verdict(mocked_client, status, charge, runtime, expect
         ]
     ) as (client, route):
         out = await misc.fetch_health(client)
-    assert route.call_count == 4
+    assert route.call_count == 5
     assert out["overall"] == expected
-    assert out["checks"] == dict.fromkeys(("array", "ups", "notifications"), "ok")
+    assert out["checks"] == dict.fromkeys(("array", "ups", "notifications", "temperature"), "ok")
     if reason:
         assert any(reason in item for item in out["reasons"])
     else:
@@ -1647,10 +1659,11 @@ async def test_health_failed_checks(mocked_client, check, failure):
         responses.append(_resp({"upsConfiguration": {"service": "enable"}}))
     async with mocked_client(responses) as (client, route):
         out = await misc.fetch_health(client)
-    assert route.call_count == (5 if config_queried else 4)
+    assert route.call_count == (6 if config_queried else 5)
     assert out["overall"] == "degraded"
     assert out["checks"] == {
-        name: "failed" if name == check else "ok" for name in ("array", "ups", "notifications")
+        name: "failed" if name == check else "ok"
+        for name in ("array", "ups", "notifications", "temperature")
     }
     assert out["reasons"] == [f"{check.capitalize()} check failed or is unsupported"]
 
@@ -1674,7 +1687,7 @@ async def test_health_actionable_errors_propagate(mocked_client, check, failure)
         with pytest.raises(UnraidAuthError if failure == "auth" else UnraidConnectionError):
             await misc.fetch_health(client)
     # The three checks run concurrently, so all were issued before the error surfaced.
-    assert route.call_count == 4
+    assert route.call_count == 5
 
 
 @pytest.mark.parametrize(
@@ -1684,8 +1697,17 @@ async def test_health_empty_success(mocked_client, data):
     async with mocked_client(_resp(data)) as (client, _route):
         out = await misc.fetch_health(client)
     assert out["overall"] == "degraded"
-    assert out["reasons"] == ["Array check failed or is unsupported"]
-    assert out["checks"] == {"array": "failed", "ups": "ok", "notifications": "ok"}
+    assert out["reasons"] == [
+        "Array check failed or is unsupported",
+        "Temperature check failed or is unsupported",
+    ]
+    assert out["checks"] == {
+        "array": "failed",
+        "ups": "ok",
+        "notifications": "ok",
+        "temperature": "failed",
+    }
+    assert "temperature" not in out
     assert out["disk_count"] == 0
     assert out["ups"] == []
 
@@ -1755,7 +1777,7 @@ async def test_health_all_healthy(mocked_client):
         out = await misc.fetch_health(client)
     assert out["overall"] == "ok"
     assert out["reasons"] == []
-    assert out["checks"] == dict.fromkeys(("array", "ups", "notifications"), "ok")
+    assert out["checks"] == dict.fromkeys(("array", "ups", "notifications", "temperature"), "ok")
     assert out["array_state"] == "STOPPED"
 
 
@@ -1789,9 +1811,14 @@ async def test_health_ups_configuration_fallback(mocked_client, config, expected
         ]
     ) as (client, route):
         out = await misc.fetch_health(client)
-    assert route.call_count == 5
+    assert route.call_count == 6
     assert _sent_query(route) == queries.UPS_CONFIGURATION
-    assert out["checks"] == {"array": "ok", "ups": expected, "notifications": "ok"}
+    assert out["checks"] == {
+        "array": "ok",
+        "ups": expected,
+        "notifications": "ok",
+        "temperature": "ok",
+    }
     assert out["overall"] == ("ok" if expected == "not_configured" else "degraded")
     assert out["reasons"] == (
         [] if expected == "not_configured" else ["Ups check failed or is unsupported"]
@@ -1832,7 +1859,8 @@ async def test_array_space_thresholds_are_not_health_flags(mocked_client):
         "array": {
             "disks": [{"status": "DISK_OK", "warning": 80, "critical": 90}],
             "caches": [{"status": "DISK_OK", "critical": 90}],
-        }
+        },
+        "metrics": {"temperature": {"sensors": []}},
     }
     async with mocked_client(_resp(data)) as (client, _route):
         status = await array.fetch_array_status(client)
@@ -1857,11 +1885,11 @@ _UNSUPPORTED = {
 @pytest.mark.parametrize(
     ("ups", "service", "expected", "calls"),
     [
-        (httpx.Response(200, json=_NO_DATA), None, "not_configured", 5),
-        (httpx.Response(200, json=_NO_DATA), "DISABLE", "not_configured", 5),
-        (httpx.Response(200, json=_FORBIDDEN), "DISABLE", "failed", 4),
-        (httpx.Response(403), "DISABLE", "failed", 4),
-        (httpx.Response(200, json=_UNSUPPORTED), None, "failed", 4),
+        (httpx.Response(200, json=_NO_DATA), None, "not_configured", 6),
+        (httpx.Response(200, json=_NO_DATA), "DISABLE", "not_configured", 6),
+        (httpx.Response(200, json=_FORBIDDEN), "DISABLE", "failed", 5),
+        (httpx.Response(403), "DISABLE", "failed", 5),
+        (httpx.Response(200, json=_UNSUPPORTED), None, "failed", 5),
     ],
 )
 async def test_health_not_configured_branches(mocked_client, ups, service, expected, calls):
@@ -1871,7 +1899,7 @@ async def test_health_not_configured_branches(mocked_client, ups, service, expec
         _resp({"notifications": None}),
         _resp({"upsConfiguration": {"service": service}}),
     ]
-    async with mocked_client(responses[: calls - 1] if calls == 4 else responses) as (
+    async with mocked_client(responses[:3] if calls == 5 else responses) as (
         client,
         route,
     ):
@@ -1886,7 +1914,12 @@ async def test_health_notifications_http_403_is_failed(mocked_client):
         [_resp({"array": {"state": "STARTED"}}), _resp({"upsDevices": []}), httpx.Response(403)]
     ) as (client, _route):
         out = await misc.fetch_health(client)
-    assert out["checks"] == {"array": "ok", "ups": "ok", "notifications": "failed"}
+    assert out["checks"] == {
+        "array": "ok",
+        "ups": "ok",
+        "notifications": "failed",
+        "temperature": "ok",
+    }
     assert out["overall"] == "degraded"
 
 
@@ -2032,3 +2065,147 @@ async def test_top_alerts_force_attention_when_overview_fails(mocked_client):
         out = await misc.fetch_health(c)
     assert out["overall"] == "attention"
     assert out["top_alerts"][0]["importance"] == "ALERT"
+
+
+def _sensor(name, value, status, type_="DISK", unit="CELSIUS"):
+    return {
+        "name": name,
+        "type": type_,
+        "current": {"value": value, "unit": unit, "status": status},
+        "warning": 50,
+        "critical": 60,
+    }
+
+
+def _health_responses(sensors):
+    return [
+        _resp({"array": {"state": "STARTED", "disks": []}}),
+        _resp({"upsDevices": []}),
+        _resp({"notifications": {"overview": {"unread": {"alert": 0, "warning": 0}}}}),
+        _NO_ALERTS,
+        _resp({"metrics": {"temperature": {"sensors": sensors}}}),
+    ]
+
+
+async def test_temperature_health_critical(mocked_client):
+    sensors = [
+        _sensor("disk1", 65, "CRITICAL"),
+        _sensor("disk2", 55, "WARNING"),
+        _sensor("cpu", 40, "NORMAL", "CPU_PACKAGE"),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+    assert out["reasons"] == ["Temperature critical: disk1 65°C", "Temperature warning: disk2 55°C"]
+    assert out["temperature"] == {
+        "hottest": {"name": "disk1", "value": 65, "unit": "CELSIUS", "level": "critical"},
+        "warning_count": 1,
+        "critical_count": 1,
+    }
+    assert out["checks"]["temperature"] == "ok"
+
+
+async def test_temperature_health_warning_is_attention(mocked_client):
+    async with mocked_client(_health_responses([_sensor("disk2", 55, "WARNING")])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "attention"
+    assert out["reasons"] == ["Temperature warning: disk2 55°C"]
+
+
+async def test_temperature_health_all_normal_no_change(mocked_client):
+    async with mocked_client(_health_responses([_sensor("disk1", 35, "NORMAL")])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "ok"
+    assert out["reasons"] == []
+    assert out["temperature"]["hottest"]["name"] == "disk1"
+    assert out["temperature"]["warning_count"] == out["temperature"]["critical_count"] == 0
+
+
+async def test_temperature_health_no_sensors(mocked_client):
+    async with mocked_client(_health_responses([])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "ok"
+    assert out["temperature"] == {"hottest": None, "warning_count": 0, "critical_count": 0}
+
+
+async def test_temperature_health_ignores_fans_and_voltages(mocked_client):
+    """lm_sensors CUSTOM fan/energy readings come back as CELSIUS + CRITICAL."""
+    sensors = [
+        _sensor("nct6779 CPU Fan", 674, "CRITICAL", "CUSTOM"),
+        _sensor("i915 energy1", 509499.46, "CRITICAL", "CUSTOM"),
+        _sensor("nct6779 MB Temp", 40, "NORMAL", "CUSTOM"),
+        _sensor("k10temp CPU Temp", 43.25, "NORMAL", "CUSTOM"),
+    ]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "ok"
+    assert out["temperature"]["hottest"]["name"] == "k10temp CPU Temp"
+    assert out["temperature"]["critical_count"] == 0
+
+
+async def test_temperature_health_custom_named_temp_counts(mocked_client):
+    async with mocked_client(
+        _health_responses([_sensor("nct6779 CPUTemp", 95, "CRITICAL", "CUSTOM")])
+    ) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+
+
+async def test_temperature_health_level_derived_when_status_unknown(mocked_client):
+    async with mocked_client(_health_responses([_sensor("disk1", 61, "UNKNOWN")])) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+
+
+async def test_temperature_health_reasons_capped(mocked_client):
+    sensors = [_sensor(f"d{i}", 70 + i, "CRITICAL") for i in range(7)]
+    async with mocked_client(_health_responses(sensors)) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert len(out["reasons"]) == 6
+    assert out["reasons"][0] == "Temperature critical: d6 76°C"
+    assert out["reasons"][-1] == "Temperature critical: 2 more sensors"
+    assert out["temperature"]["critical_count"] == 7
+
+
+@pytest.mark.parametrize("failure", ["unsupported", "forbidden", "http403", "partial"])
+async def test_temperature_health_query_failure_degrades(mocked_client, failure):
+    bad = {
+        "unsupported": httpx.Response(
+            200, json={"errors": [{"message": 'Cannot query field "status" on type "X".'}]}
+        ),
+        "forbidden": httpx.Response(200, json=_FORBIDDEN),
+        "http403": httpx.Response(403),
+        "partial": httpx.Response(
+            200,
+            json={
+                "errors": [{"message": "sensor read failed"}],
+                "data": {"metrics": {"temperature": {"sensors": [_sensor("d", 35, "NORMAL")]}}},
+            },
+        ),
+    }[failure]
+    responses = _health_responses([])
+    responses[4] = bad
+    async with mocked_client(responses) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["checks"]["temperature"] == "failed"
+    assert out["overall"] == "degraded"
+    assert out["reasons"] == ["Temperature check failed or is unsupported"]
+    assert "temperature" not in out
+
+
+async def test_temperature_health_connection_error_propagates(mocked_client):
+    responses = _health_responses([])
+    responses[4] = httpx.ConnectError("refused")
+    async with mocked_client(responses) as (c, _r):
+        with pytest.raises(UnraidConnectionError):
+            await misc.fetch_health(c)
+
+
+async def test_temperature_health_failure_keeps_critical_signal(mocked_client):
+    responses = _health_responses([])
+    responses[0] = _resp({"array": {"state": "STARTED", "disks": [{"status": "DISK_DSBL"}]}})
+    responses[4] = httpx.Response(403)
+    async with mocked_client(responses) as (c, _r):
+        out = await misc.fetch_health(c)
+    assert out["overall"] == "critical"
+    assert out["checks"]["temperature"] == "failed"
