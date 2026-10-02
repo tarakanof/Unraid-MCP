@@ -206,7 +206,7 @@ async def test_core_outputs_validate_without_changing_values(settings_factory, m
                     expected[name], sort_keys=True
                 )
                 # One compact text block: the original object/list without the SDK
-                # wrapper, nulls and empty containers dropped (#156).
+                # wrapper, null-valued keys dropped (#156).
                 original = expected[name].get("result", expected[name])
                 assert len(result.content) == 1
                 assert result.content[0].text == compact_text(original)

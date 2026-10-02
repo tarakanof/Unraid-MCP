@@ -149,11 +149,14 @@ opted in — do not try to work around it.
 - **Sizes.** `{"bytes": int|null, "human": str|null}`. Array/share sizes derive from
   KiB; physical disk sizes from bytes — both are normalized to this shape for you.
 - **Read results: text vs structured content.** A read tool returns one text block
-  of compact JSON (no indentation; a list tool's text is one JSON array). That text
-  **omits** `null` fields and empty objects/lists, so a missing key means "null or
-  empty", not "unsupported". `structuredContent` is the canonical payload: it keeps
-  every field, nulls included, and matches the tool's `outputSchema` (list tools wrap
-  it as `{"result": [...]}`). Error results and mutation results are unchanged.
+  of compact JSON (no indentation; a list tool's text is one JSON array). In that
+  text, keys with `null` values are omitted, so a missing key means "null", not
+  "unsupported". List positions are preserved: `null` list elements stay in place
+  (e.g. per-core CPU usage), and empty lists/objects are kept. `run_graphql_query`
+  text is compact but unpruned (raw upstream data, nulls kept). `structuredContent`
+  is the canonical payload: it keeps every field, nulls included, and matches the
+  tool's `outputSchema` (list tools wrap it as `{"result": [...]}`). Error results
+  and mutation results are unchanged.
 - **Mutation results.** State-changing tools return a concise result, not the raw
   GraphQL envelope. Three shapes:
   - **Boolean actions** — parity (`start`/`pause`/`resume`/`cancel`) and VM

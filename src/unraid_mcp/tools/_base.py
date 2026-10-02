@@ -398,34 +398,35 @@ def require_confirmation(
 # ── Compact results (#156) ───────────────────────────────────────────────────
 
 
-def _is_empty(value: Any) -> bool:
-    return value is None or (isinstance(value, dict | list) and not value)
-
-
 def _prune(value: Any) -> Any:
-    """Recursively drop ``None`` and empty dicts/lists (a container emptied by
-    pruning is dropped too). ``0``, ``False`` and ``""`` are real values and stay."""
+    """Recursively drop dict keys whose value is ``None``.
+
+    List elements are never removed (``None``/``{}`` placeholders keep their
+    position, e.g. per-core CPU usage), and empty lists/dicts stay as-is."""
     if isinstance(value, dict):
-        pruned = {k: _prune(v) for k, v in value.items()}
-        return {k: v for k, v in pruned.items() if not _is_empty(v)}
+        return {k: _prune(v) for k, v in value.items() if v is not None}
     if isinstance(value, list):
-        return [p for p in map(_prune, value) if not _is_empty(p)]
+        return [_prune(v) for v in value]
     return value
 
 
-def compact_text(value: Any) -> str:
-    """Null-free, whitespace-free JSON for a tool's text block."""
-    return json.dumps(_prune(value), separators=(",", ":"), ensure_ascii=False)
+def compact_text(value: Any, *, prune: bool = True) -> str:
+    """Whitespace-free JSON for a tool's text block; null-valued keys omitted
+    unless ``prune`` is false."""
+    return json.dumps(_prune(value) if prune else value, separators=(",", ":"), ensure_ascii=False)
 
 
-def compact_result(result: CallToolResult, *, wrap_output: bool) -> CallToolResult:
+def compact_result(
+    result: CallToolResult, *, wrap_output: bool, prune: bool = True
+) -> CallToolResult:
     """Replace the SDK's text content with ONE compact JSON block.
 
     ``structured_content`` (the canonical, schema-validated payload, nulls kept)
     is passed through untouched. The text is derived from it, so both carry the
     same data; ``wrap_output`` (list/non-object returns, published as
     ``{"result": ...}``) is unwrapped so the model sees the bare list. Error and
-    unstructured results are returned as-is.
+    unstructured results are returned as-is. ``prune=False`` keeps null keys
+    (raw upstream data, e.g. ``run_graphql_query``).
     """
     if result.is_error or result.structured_content is None:
         return result
@@ -433,7 +434,7 @@ def compact_result(result: CallToolResult, *, wrap_output: bool) -> CallToolResu
     if wrap_output:
         payload = payload["result"]
     return result.model_copy(
-        update={"content": [TextContent(type="text", text=compact_text(payload))]}
+        update={"content": [TextContent(type="text", text=compact_text(payload, prune=prune))]}
     )
 
 
@@ -445,11 +446,17 @@ class CompactFuncMetadata(FuncMetadata):
     one-block-per-list-item) text content is swapped out afterwards.
     """
 
+    prune: bool = True
+
     def convert_result(self, result: Any) -> CallToolResult | InputRequiredResult:
         converted = super().convert_result(result)
         if isinstance(converted, InputRequiredResult):
             return converted
-        return compact_result(converted, wrap_output=self.wrap_output)
+        return compact_result(converted, wrap_output=self.wrap_output, prune=self.prune)
+
+
+# Raw upstream passthrough: compact, but nulls are data the caller asked for.
+_UNPRUNED_TOOLS = frozenset({"run_graphql_query"})
 
 
 def compact_read_results(mcp: MCPServer) -> None:
@@ -467,5 +474,6 @@ def compact_read_results(mcp: MCPServer) -> None:
         if isinstance(meta, CompactFuncMetadata):
             continue
         tool.fn_metadata = CompactFuncMetadata(
-            **{name: getattr(meta, name) for name in FuncMetadata.model_fields}
+            **{name: getattr(meta, name) for name in FuncMetadata.model_fields},
+            prune=tool.name not in _UNPRUNED_TOOLS,
         )

@@ -1,4 +1,5 @@
-"""Read tools return one compact, null-free text block; structuredContent is unchanged (#156)."""
+"""Read tools return one compact text block without null-valued keys;
+structuredContent is unchanged (#156)."""
 
 from __future__ import annotations
 
@@ -21,8 +22,20 @@ from unraid_mcp.tools._base import CompactFuncMetadata, compact_result, compact_
 GOLDEN = json.loads((Path(__file__).parent / "fixtures" / "structured_golden.json").read_text())
 
 
+def _null_keys(value, path="$"):
+    """Paths of dict keys whose value is null (list positions don't count)."""
+    if isinstance(value, dict):
+        out = []
+        for k, v in value.items():
+            out += [f"{path}.{k}"] if v is None else _null_keys(v, f"{path}.{k}")
+        return out
+    if isinstance(value, list):
+        return [p for i, v in enumerate(value) for p in _null_keys(v, f"{path}[{i}]")]
+    return []
+
+
 def _assert_compact(result: CallToolResult) -> object:
-    """Exactly one text block of compact JSON with no null and no whitespace layout."""
+    """Exactly one text block of compact JSON with no null-valued keys."""
     assert result.is_error is False, result.content
     assert len(result.content) == 1
     block = result.content[0]
@@ -32,24 +45,23 @@ def _assert_compact(result: CallToolResult) -> object:
     parsed = json.loads(text)
     # Canonical compact form: no indentation, no separator padding.
     assert text == json.dumps(parsed, separators=(",", ":"), ensure_ascii=False)
-    assert "null" not in json.dumps(parsed)
+    assert _null_keys(parsed) == []
     return parsed
 
 
 def _prune_expected(value):
-    """Independent reference for the pruning rule."""
+    """Independent reference for the pruning rule: drop null-valued keys only."""
     if isinstance(value, dict):
-        out = {k: _prune_expected(v) for k, v in value.items()}
-        return {k: v for k, v in out.items() if v not in (None, {}, [])}
+        return {k: _prune_expected(v) for k, v in value.items() if v is not None}
     if isinstance(value, list):
-        return [p for p in map(_prune_expected, value) if p not in (None, {}, [])]
+        return [_prune_expected(v) for v in value]
     return value
 
 
 # ── Pure helper ──────────────────────────────────────────────────────────────
 
 
-def test_compact_text_drops_nulls_and_empties_recursively():
+def test_compact_text_drops_only_null_keys():
     value = {
         "a": None,
         "b": {"c": None, "d": []},
@@ -58,14 +70,25 @@ def test_compact_text_drops_nulls_and_empties_recursively():
         "h": False,
         "i": "",
         "j": {"k": {"l": None}},
+        "lines": [],
         "m": "ü",
     }
-    assert compact_text(value) == '{"e":[1],"g":0,"h":false,"i":"","m":"ü"}'
+    assert compact_text(value) == (
+        '{"b":{"d":[]},"e":[null,{},{},1],"g":0,"h":false,"i":"","j":{"k":{}},"lines":[],"m":"ü"}'
+    )
 
 
-def test_compact_text_top_level_empty():
-    assert compact_text([None, {}]) == "[]"
+def test_compact_text_preserves_list_positions():
+    # Leading and interior None must keep per-core indices aligned.
+    assert compact_text({"per_core": [None, 50, None, 80]}) == '{"per_core":[null,50,null,80]}'
+    # An item whose fields are all null stays present as {}.
+    assert compact_text([{"a": None}, {"a": 1}]) == '[{},{"a":1}]'
+    assert compact_text([None, {}]) == "[null,{}]"
     assert compact_text({"a": None}) == "{}"
+
+
+def test_compact_text_without_pruning_keeps_nulls():
+    assert compact_text({"a": None, "b": [None]}, prune=False) == '{"a":null,"b":[null]}'
 
 
 def test_compact_result_unwraps_wrapped_output_and_keeps_structured():
@@ -76,6 +99,8 @@ def test_compact_result_unwraps_wrapped_output_and_keeps_structured():
     out = compact_result(original, wrap_output=True)
     assert out.structured_content is structured
     assert [b.text for b in out.content] == ['[{"a":1}]']
+    raw = compact_result(original, wrap_output=True, prune=False)
+    assert [b.text for b in raw.content] == ['[{"a":1,"b":null}]']
 
 
 def test_compact_result_leaves_errors_and_unstructured_alone():
@@ -96,6 +121,8 @@ def test_only_read_tools_are_compacted():
     for tool in tools:
         compact = isinstance(tool.fn_metadata, CompactFuncMetadata)
         assert compact is bool(tool.annotations.read_only_hint), tool.name
+        if compact:
+            assert tool.fn_metadata.prune is (tool.name != "run_graphql_query"), tool.name
         # Output schema contract is untouched by the swap.
         assert tool.output_schema == tool.fn_metadata.output_schema
 
@@ -130,11 +157,52 @@ async def test_twenty_container_text_much_smaller_than_pretty_size():
     old = sum(len(pydantic_core.to_json(item, indent=2)) for item in items)
     new = len(result.content[0].text)
     assert len(result.content) == 1
-    # One block instead of 20, no nulls or indentation: 5,194 vs 8,823 chars
-    # (59%) on this fixture. The 64-hex container ids and ports are payload no
-    # pruning can remove, so the issue's 50% target holds only for null-heavy
-    # rows without ports.
-    assert new <= old * 0.6, (new, old)
+    # One block instead of 20, no null keys or indentation: 5,304 vs 8,823
+    # chars (60.1%) on this fixture. The 64-hex container ids, ports and kept
+    # empty lists are payload pruning must not remove, so the issue's 50%
+    # target holds only for null-heavy rows without ports.
+    assert new <= old * 0.61, (new, old)
+
+
+async def test_system_metrics_per_core_keeps_positions():
+    data = {
+        "metrics": {
+            "cpu": {
+                "percentTotal": 32.5,
+                "cpus": [
+                    {"percentTotal": None},
+                    {"percentTotal": 50},
+                    {"percentTotal": None},
+                    {"percentTotal": 80},
+                ],
+            }
+        }
+    }
+    with respx.mock:
+        respx.post(URL).respond(200, json={"data": data})
+        async with Client(build_server(make_settings()), raise_exceptions=True) as s:
+            result = await s.call_tool("get_system_metrics", {})
+    parsed = _assert_compact(result)
+    per_core = result.structured_content["cpu"]["per_core"]
+    assert len(per_core) == 4
+    assert parsed["cpu"]["per_core"] == _prune_expected(per_core)
+    assert len(parsed["cpu"]["per_core"]) == 4
+
+
+async def test_raw_query_text_is_compact_but_unpruned():
+    data = {"array": {"disks": [{"name": "disk1", "temp": None}, None, {"name": None}]}}
+    with respx.mock:
+        respx.post(URL).respond(200, json={"data": data})
+        mcp = build_server(make_settings(allow_raw_query=True))
+        async with Client(mcp, raise_exceptions=True) as s:
+            result = await s.call_tool(
+                "run_graphql_query", {"query": "query { array { disks { name temp } } }"}
+            )
+    assert result.is_error is False
+    assert len(result.content) == 1
+    sc = result.structured_content
+    assert result.content[0].text == json.dumps(sc, separators=(",", ":"), ensure_ascii=False)
+    assert '"temp":null' in result.content[0].text
 
 
 @pytest.mark.parametrize("name", sorted(READ_CASES))
@@ -148,4 +216,6 @@ async def test_every_read_tool_returns_one_compact_block(settings_factory, name)
         assert result.is_error is True
         assert expected in result.content[0].text
         return
+    if name == "run_graphql_query":
+        return  # unpruned by design; covered by test_raw_query_text_is_compact_but_unpruned
     _assert_compact(result)

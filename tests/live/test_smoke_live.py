@@ -292,7 +292,7 @@ async def test_run_graphql_query(live_client):
 @pytest.mark.parametrize("tool", ["list_docker_containers", "get_health_summary"])
 async def test_compact_text_block_through_server(tool):
     """#156: through the real server, a read tool returns ONE compact text block
-    (no null, no newline) whose content mirrors ``structuredContent``."""
+    (no newline, null-valued keys omitted) whose content mirrors ``structuredContent``."""
     from mcp.client import Client
 
     from unraid_mcp.server import build_server
@@ -304,6 +304,6 @@ async def test_compact_text_block_through_server(tool):
     assert len(result.content) == 1
     text = result.content[0].text
     assert "\n" not in text
-    assert "null" not in json.dumps(json.loads(text))
+    json.loads(text)
     sc = result.structured_content
     assert text == compact_text(sc["result"] if tool.startswith("list_") else sc)
