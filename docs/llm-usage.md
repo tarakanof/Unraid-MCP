@@ -96,7 +96,8 @@ A typical stdio client config:
 
 Non-destructive actions on one resource share a tool and an `action` argument
 (e.g. `docker_container_power(action="pause")`). Destructive actions (stop, restart,
-reboot, reset, delete, bulk archive) keep their own tools so hosts can gate them.
+reboot, reset, delete, archive-all (`archive_all_notifications`)) keep their own
+tools so hosts can gate them.
 
 | Tool | Args | Notes |
 |------|------|-------|

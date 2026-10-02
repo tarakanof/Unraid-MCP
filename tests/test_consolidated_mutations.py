@@ -207,3 +207,16 @@ async def test_bulk_rejects_empty_ids_pre_network(settings_factory):
     assert result.is_error is True
     assert "non-empty" in result.content[0].text
     assert route.call_count == 0
+
+
+@pytest.mark.parametrize("action", ["pause", "unpause"])
+async def test_container_power_threads_api_version(mocked_client, action):
+    msg = f'Cannot query field "{action}" on type "DockerMutations".'
+    unknown = httpx.Response(200, json={"errors": [{"message": msg}]})
+    async with mocked_client(unknown) as (client, route):
+        with pytest.raises(ToolError) as exc:
+            await docker.do_container_power(client, "1:a", action, True, api_version="2.100.0")
+        text = str(exc.value)
+        assert "does not support" in text
+        assert "Server reports API 2.100.0" in text
+        assert route.call_count == 1
