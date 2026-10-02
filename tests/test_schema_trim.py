@@ -19,7 +19,8 @@ URL = "https://tower.local/graphql"
 ALL_FLAGS = {"allow_mutations": True, "allow_dangerous": True, "allow_raw_query": True}
 
 # Trimming must keep tools/list (read-only) at <= 75% of its untrimmed size
-# (it is ~73% at the time of #157), and no single tool may balloon past the cap.
+# (it is ~73% at the time of #157; the root additionalProperties:false of #162 is
+# excluded from the measurement, it is not trimming), and no single tool may balloon past the cap.
 MAX_TRIMMED_RATIO = 0.75
 MAX_TOOL_CHARS = 5_500
 
@@ -33,7 +34,9 @@ async def _tools(settings):
 
 def _size(tool):
     # Measured like #157: json.dumps(tool.model_dump(exclude_none=True, by_alias=True)).
-    return len(json.dumps(tool.model_dump(exclude_none=True, by_alias=True)))
+    dumped = tool.model_dump(exclude_none=True, by_alias=True)
+    dumped.get("inputSchema", {}).pop("additionalProperties", None)
+    return len(json.dumps(dumped))
 
 
 def _subschemas(node, key=None, is_model=True):
@@ -217,7 +220,7 @@ def test_input_trim_keeps_nullable_any_of():
         "type": "object",
         "properties": {"since": {"anyOf": [{"type": "string"}, {"type": "null"}]}},
     }
-    assert trim_input_schema(schema) == schema
+    assert trim_input_schema(schema) == {**schema, "additionalProperties": False}
 
 
 def test_trim_description_unwraps_prose_only():

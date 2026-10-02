@@ -8,7 +8,9 @@ docstring's source indentation and hard wraps. Clients without tool search
 load all of it up front, so :func:`trim_published_tools` strips it once, after
 registration.
 
-Only the *published* metadata changes. The SDK validates arguments against
+Trimming changes only the *published* metadata. Separately,
+:func:`forbid_unknown_arguments` makes each tool's argument model reject
+undeclared arguments. The SDK validates arguments against
 each tool's pydantic argument model and results against its output model, not
 against these dicts, so server-side validation is unaffected; clients that
 validate ``structuredContent`` against the published ``outputSchema`` see an
@@ -23,11 +25,17 @@ from __future__ import annotations
 
 import inspect
 import re
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from typing import TYPE_CHECKING, Any
+
+from pydantic import ValidationError
+from pydantic_core import InitErrorDetails, PydanticCustomError
+
+from ..logging import redact
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
+    from pydantic import BaseModel
 
 # Keywords whose value is one subschema / a list of subschemas / a name ->
 # subschema map. Everything else (enum, default, const, required, ...) is data
@@ -197,10 +205,14 @@ def trim_input_schema(
 ) -> dict[str, Any]:
     """Return a copy of a tool input schema without auto-generated titles.
 
-    Nullable ``anyOf`` wrappers stay: some hosts' function-calling validators
-    reject ``"type": [...]`` arrays in parameter schemas.
+    The root gains ``additionalProperties: false`` (the spec's recommendation),
+    and :func:`forbid_unknown_arguments` makes each arg model reject undeclared
+    arguments. Nullable ``anyOf`` wrappers stay: some hosts' function-calling validators reject
+    ``"type": [...]`` arrays in parameter schemas.
     """
-    return _walk(schema, key=None, is_def=False, root_titles=root_titles, output=False)
+    out = _walk(schema, key=None, is_def=False, root_titles=root_titles, output=False)
+    out["additionalProperties"] = False
+    return out
 
 
 def trim_output_schema(
@@ -208,6 +220,69 @@ def trim_output_schema(
 ) -> dict[str, Any]:
     """Return an equivalent, smaller copy of a tool output schema."""
     return _walk(schema, key=None, is_def=False, root_titles=root_titles, output=True)
+
+
+def forbid_unknown_arguments(mcp: MCPServer, secrets: Iterable[str | None] = ()) -> None:
+    """Make every registered tool reject undeclared arguments (security step).
+
+    Independent of :func:`trim_published_tools`; call once after registration.
+    """
+    for tool in mcp._tool_manager.list_tools():  # noqa: SLF001 - no public Tool accessor
+        tool.fn_metadata.arg_model = _forbid_model(tool.fn_metadata.arg_model, secrets)
+
+
+def _forbid_model(arg_model: type[BaseModel], secrets: Iterable[str | None]) -> type[BaseModel]:
+    """Return ``arg_model`` subclassed to reject arguments it does not declare.
+
+    The SDK's argument models ignore extras by default, so a misspelled
+    parameter would be dropped silently and the tool would run with defaults.
+    The subclass fails validation before the tool body (and so any HTTP
+    request) runs. SDK validation runs before ``_base.guarded``, so the errors
+    are rebuilt here without pydantic's ``input_value=...`` echo, and
+    configured ``secrets`` are redacted from argument names and messages.
+    """
+    fields = set(arg_model.model_fields)
+    fields |= {f.alias for f in arg_model.model_fields.values() if f.alias}
+    allowed = ", ".join(sorted(arg_model.model_fields)) or "none"
+
+    def _clean(errors: list[tuple[tuple[str, ...], str]]) -> ValidationError:
+        # A custom error type keeps pydantic from echoing ``input_value`` of the
+        # rejected argument; names and messages are redacted.
+        details = [
+            InitErrorDetails(
+                type=PydanticCustomError(
+                    "invalid_argument", redact(msg, secrets).replace("{", "(")
+                ),
+                loc=tuple(redact(p, secrets) for p in loc),
+                input=None,
+            )
+            for loc, msg in errors
+        ]
+        return ValidationError.from_exception_data(arg_model.__name__, details)
+
+    class Guarded(arg_model):  # type: ignore[valid-type, misc]
+        @classmethod
+        def model_validate(cls, obj: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+            if isinstance(obj, dict):
+                extra = sorted(str(k) for k in obj if k not in fields)
+                if extra:
+                    msg = f"Unknown argument. Allowed: {allowed}."
+                    raise _clean([((k,), msg) for k in extra])
+            try:
+                return super().model_validate(obj, **kwargs)
+            except ValidationError as exc:
+                raise _clean(
+                    [
+                        (tuple(str(p) for p in e["loc"]), e["msg"])
+                        for e in exc.errors(
+                            include_url=False, include_input=False, include_context=False
+                        )
+                    ]
+                ) from None
+
+    Guarded.__name__ = Guarded.__qualname__ = arg_model.__name__
+    Guarded.__module__ = arg_model.__module__
+    return Guarded
 
 
 def trim_published_tools(mcp: MCPServer) -> None:
