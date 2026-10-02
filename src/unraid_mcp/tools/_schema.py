@@ -111,7 +111,7 @@ def _collapse_nullable(node: dict[str, Any]) -> dict[str, Any]:
     if len(typed) != 1 or set(typed[0]) & set(rest):
         return node
     only = typed[0]
-    if "enum" in only:
+    if "enum" in only and None not in only["enum"]:
         # ``Literal[...] | None``: null must join the enum too.
         only = {**only, "enum": [*only["enum"], None]}
     return {**only, "type": [only["type"], "null"], **rest}

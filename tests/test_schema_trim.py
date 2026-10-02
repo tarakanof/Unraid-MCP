@@ -169,6 +169,10 @@ def test_trim_strips_only_auto_titles_and_keeps_data():
             {"enum": ["a", "b", None], "type": ["string", "null"]},
         ),
         (
+            {"anyOf": [{"enum": ["a", None], "type": "string"}, {"type": "null"}]},
+            {"enum": ["a", None], "type": ["string", "null"]},
+        ),
+        (
             {"anyOf": [{"minimum": 1, "type": "integer"}, {"type": "null"}], "default": None},
             {"minimum": 1, "type": ["integer", "null"], "default": None},
         ),
