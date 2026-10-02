@@ -7,6 +7,7 @@ import respx
 from jsonschema import Draft202012Validator
 from mcp.client import Client
 
+from unraid_mcp import tools as tools_pkg
 from unraid_mcp.server import build_server
 from unraid_mcp.tools._schema import (
     trim_description,
@@ -17,10 +18,10 @@ from unraid_mcp.tools._schema import (
 URL = "https://tower.local/graphql"
 ALL_FLAGS = {"allow_mutations": True, "allow_dangerous": True, "allow_raw_query": True}
 
-# 30% below the read-only tools/list payload before trimming (40,111 chars).
-# Measured like the issue: sum of json.dumps(tool.model_dump(exclude_none=True,
-# by_alias=True)). Adding a tool may need this raised; bloating schemas must not.
-READ_ONLY_TOOLS_LIST_MAX = 28_077
+# Trimming must keep tools/list (read-only) at <= 75% of its untrimmed size
+# (it is ~73% at the time of #157), and no single tool may balloon past the cap.
+MAX_TRIMMED_RATIO = 0.75
+MAX_TOOL_CHARS = 5_500
 
 
 async def _tools(settings):
@@ -28,6 +29,11 @@ async def _tools(settings):
         respx.post(URL).respond(200, json={"data": {}})
         async with Client(build_server(settings), raise_exceptions=True) as session:
             return (await session.list_tools()).tools
+
+
+def _size(tool):
+    # Measured like #157: json.dumps(tool.model_dump(exclude_none=True, by_alias=True)).
+    return len(json.dumps(tool.model_dump(exclude_none=True, by_alias=True)))
 
 
 def _subschemas(node, key=None, is_model=True):
@@ -75,10 +81,16 @@ async def test_published_schemas_are_valid_draft_2020_12(settings_factory):
             pytest.fail(f"{name} {kind}Schema: {exc}")
 
 
-async def test_read_only_tools_list_size_is_bounded(settings_factory):
-    tools = await _tools(settings_factory())
-    total = sum(len(json.dumps(t.model_dump(exclude_none=True, by_alias=True))) for t in tools)
-    assert total <= READ_ONLY_TOOLS_LIST_MAX, total
+async def test_trimming_shrinks_read_only_tools_list(settings_factory, monkeypatch):
+    trimmed = sum(_size(t) for t in await _tools(settings_factory()))
+    monkeypatch.setattr(tools_pkg, "trim_published_tools", lambda mcp: None)
+    untrimmed = sum(_size(t) for t in await _tools(settings_factory()))
+    assert trimmed / untrimmed <= MAX_TRIMMED_RATIO, (trimmed, untrimmed)
+
+
+async def test_no_tool_exceeds_size_cap(settings_factory):
+    for tool in await _tools(settings_factory(**ALL_FLAGS)):
+        assert _size(tool) <= MAX_TOOL_CHARS, (tool.name, _size(tool))
 
 
 async def test_size_is_one_shared_def(settings_factory):
@@ -93,10 +105,14 @@ async def test_size_is_one_shared_def(settings_factory):
         assert "human" in schema["$defs"]["Size"]["properties"], tool.name
 
 
-async def test_descriptions_are_dedented_and_unwrapped(settings_factory):
-    tools = await _tools(settings_factory(**ALL_FLAGS))
-    for tool in tools:
-        assert "\n " not in tool.description, tool.name
+def test_descriptions_are_trimmed_docstrings(settings_factory):
+    mcp = build_server(settings_factory(**ALL_FLAGS))
+    for tool in mcp._tool_manager.list_tools():
+        if tool.fn.__doc__:
+            assert tool.description == trim_description(tool.fn.__doc__), tool.name
+        # Idempotent: the source margin and hard wraps are already gone.
+        assert trim_description(tool.description) == tool.description, tool.name
+        assert not tool.description.startswith(" "), tool.name
 
 
 def test_publish_hook_reaches_registered_tools(settings_factory):
@@ -107,10 +123,10 @@ def test_publish_hook_reaches_registered_tools(settings_factory):
     assert tools
     for tool in tools:
         assert "title" not in tool.parameters
-        assert tool.fn_metadata.output_model is None or "title" not in tool.output_schema
+        assert tool.output_schema is None or "title" not in tool.output_schema
 
 
-def test_trim_keeps_non_auto_titles_and_data():
+def test_trim_strips_only_auto_titles_and_keeps_data():
     schema = {
         "title": "HealthSummary",
         "type": "object",
@@ -121,9 +137,12 @@ def test_trim_keeps_non_auto_titles_and_data():
             "level": {"enum": ["title"], "title": "Level", "type": "string"},
         },
         "required": ["title"],
-        "$defs": {"Size": {"title": "Size", "type": "object", "properties": {}}},
+        "$defs": {
+            "Size": {"title": "Size", "type": "object", "properties": {}},
+            "Item": {"title": "SpecialItem", "type": "object"},
+        },
     }
-    trimmed = trim_input_schema(schema)
+    trimmed = trim_input_schema(schema, root_titles={"HealthSummary"})
     assert "title" not in trimmed
     assert trimmed["properties"]["title"] == {"type": "string", "default": "Title"}
     assert trimmed["properties"]["warning_count"] == {"type": "integer"}
@@ -131,7 +150,10 @@ def test_trim_keeps_non_auto_titles_and_data():
     assert trimmed["properties"]["level"]["enum"] == ["title"]
     assert trimmed["required"] == ["title"]
     assert trimmed["$defs"]["Size"] == {"type": "object", "properties": {}}
+    assert trimmed["$defs"]["Item"]["title"] == "SpecialItem"
     assert schema["properties"]["warning_count"]["title"] == "Warning Count"  # not mutated
+    # A root title that is not one pydantic/the SDK generated survives.
+    assert trim_input_schema(schema)["title"] == "HealthSummary"
 
 
 @pytest.mark.parametrize(
@@ -154,6 +176,14 @@ def test_trim_keeps_non_auto_titles_and_data():
             {"anyOf": [{"$ref": "#/$defs/X"}, {"type": "null"}]},
             {"anyOf": [{"$ref": "#/$defs/X"}, {"type": "null"}]},
         ),
+        (
+            {"anyOf": [{"type": "object", "allOf": [{"$ref": "#/$defs/X"}]}, {"type": "null"}]},
+            None,
+        ),
+        ({"anyOf": [{"type": "string", "not": {"type": "null"}}, {"type": "null"}]}, None),
+        ({"anyOf": [{"type": "string"}, {"type": "null"}], "type": "object"}, None),
+        ({"anyOf": [{"type": "string", "allOf": [{"type": "string"}]}, {"type": "null"}]}, None),
+        ({"anyOf": [{"type": "string", "const": "a"}, {"type": "null"}]}, None),
         ({"type": "array", "items": {}}, {"type": "array"}),
         ({"type": "object", "additionalProperties": True}, {"type": "object"}),
         (
@@ -163,9 +193,14 @@ def test_trim_keeps_non_auto_titles_and_data():
     ],
 )
 def test_output_trim_is_equivalent(prop, expected):
-    schema = {"type": "object", "properties": {"p": prop}, "$defs": {"X": {"type": "object"}}}
+    """``expected=None`` means the node must be left unchanged."""
+    schema = {
+        "type": "object",
+        "properties": {"p": prop},
+        "$defs": {"X": {"type": "object", "required": ["k"]}},
+    }
     trimmed = trim_output_schema(schema)
-    assert trimmed["properties"]["p"] == expected
+    assert trimmed["properties"]["p"] == (prop if expected is None else expected)
     validator = Draft202012Validator(trimmed)
     original = Draft202012Validator(schema)
     for value in (None, "a", "b", "c", 0, 1, 1.5, [], [1], {}, {"k": 1}):
@@ -181,7 +216,7 @@ def test_input_trim_keeps_nullable_any_of():
     assert trim_input_schema(schema) == schema
 
 
-def test_trim_description():
+def test_trim_description_unwraps_prose_only():
     doc = """First line
         wrapped here.
 
@@ -189,7 +224,33 @@ def test_trim_description():
         - item one
         - item two
           continued
+
+        Example:
+        ```json
+        {"a": 1,
+         "b": 2}
+        ```
+        | col | val |
+        |-----|-----|
+        | x   | 1   |
+        Trailing prose
+        after table.
         """
     assert trim_description(doc) == (
-        "First line wrapped here.\n\nSecond paragraph\n- item one\n- item two\n  continued"
+        "First line wrapped here.\n"
+        "\n"
+        "Second paragraph\n"
+        "- item one\n"
+        "- item two\n"
+        "  continued\n"
+        "\n"
+        "Example:\n"
+        "```json\n"
+        '{"a": 1,\n'
+        ' "b": 2}\n'
+        "```\n"
+        "| col | val |\n"
+        "|-----|-----|\n"
+        "| x   | 1   |\n"
+        "Trailing prose after table."
     )
