@@ -148,6 +148,12 @@ opted in — do not try to work around it.
   exactly what a `list_*` tool gave you. `get_docker_container` also accepts a plain name.
 - **Sizes.** `{"bytes": int|null, "human": str|null}`. Array/share sizes derive from
   KiB; physical disk sizes from bytes — both are normalized to this shape for you.
+- **Read results: text vs structured content.** A read tool returns one text block
+  of compact JSON (no indentation; a list tool's text is one JSON array). That text
+  **omits** `null` fields and empty objects/lists, so a missing key means "null or
+  empty", not "unsupported". `structuredContent` is the canonical payload: it keeps
+  every field, nulls included, and matches the tool's `outputSchema` (list tools wrap
+  it as `{"result": [...]}`). Error results and mutation results are unchanged.
 - **Mutation results.** State-changing tools return a concise result, not the raw
   GraphQL envelope. Three shapes:
   - **Boolean actions** — parity (`start`/`pause`/`resume`/`cancel`) and VM
