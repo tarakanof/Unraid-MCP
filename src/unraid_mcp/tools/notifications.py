@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal, get_args
 
 from mcp.server.mcpserver import Context, Elicit, ElicitationResult, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import ToolError
@@ -27,6 +27,7 @@ from ._base import (
     feature_unsupported,
     get_app_context,
     guarded,
+    require_action,
     require_confirm,
     require_confirmation,
     unsupported_field_error,
@@ -79,7 +80,7 @@ async def fetch_warnings_and_alerts(
 async def do_archive_notification(
     client: UnraidClient, notification_id: str, confirm: bool
 ) -> dict[str, Any]:
-    require_confirm(confirm, f"archive notification '{notification_id}'")
+    require_confirm(confirm, _archive_state_consequence(notification_id, "archive"))
     return shape_mutation_result(
         await client.execute(queries.ARCHIVE_NOTIFICATION, {"id": notification_id}),
         ("archiveNotification",),
@@ -99,7 +100,7 @@ async def do_archive_all(
 async def do_unread_notification(
     client: UnraidClient, notification_id: str, confirm: bool
 ) -> dict[str, Any]:
-    require_confirm(confirm, f"mark notification '{notification_id}' unread")
+    require_confirm(confirm, _archive_state_consequence(notification_id, "unarchive"))
     return shape_mutation_result(
         await client.execute(queries.UNREAD_NOTIFICATION, {"id": notification_id}),
         ("unreadNotification",),
@@ -123,7 +124,7 @@ async def do_archive_notifications(
 ) -> dict[str, Any]:
     if not ids:
         raise ToolError("ids must be a non-empty list of notification ids.")
-    require_confirm(confirm, f"archive {len(ids)} notification(s)")
+    require_confirm(confirm, _archive_state_bulk_consequence(ids, "archive"))
     return shape_mutation_result(
         await client.execute(queries.ARCHIVE_NOTIFICATIONS, {"ids": ids}), ("archiveNotifications",)
     )
@@ -134,7 +135,7 @@ async def do_unarchive_notifications(
 ) -> dict[str, Any]:
     if not ids:
         raise ToolError("ids must be a non-empty list of notification ids.")
-    require_confirm(confirm, f"unarchive {len(ids)} notification(s)")
+    require_confirm(confirm, _archive_state_bulk_consequence(ids, "unarchive"))
     return shape_mutation_result(
         await client.execute(queries.UNARCHIVE_NOTIFICATIONS, {"ids": ids}),
         ("unarchiveNotifications",),
@@ -187,6 +188,41 @@ async def do_create_notification(
         await client.execute(queries.CREATE_NOTIFICATION, {"input": input_data}),
         ("createNotification",),
     )
+
+
+ArchiveAction = Literal["archive", "unarchive"]
+_ARCHIVE_ACTIONS: tuple[str, ...] = get_args(ArchiveAction)
+
+
+async def do_notification_archive(
+    client: UnraidClient, notification_id: str, action: str, confirm: bool
+) -> dict[str, Any]:
+    """Archive one notification, or move it back to unread (``unarchive``)."""
+    require_action(action, _ARCHIVE_ACTIONS)
+    require_confirm(confirm, _archive_state_consequence(notification_id, action))
+    if action == "archive":
+        return await do_archive_notification(client, notification_id, confirm)
+    return await do_unread_notification(client, notification_id, confirm)
+
+
+async def do_notification_archive_bulk(
+    client: UnraidClient, ids: list[str], action: str, confirm: bool
+) -> dict[str, Any]:
+    """Archive or unarchive a list of notifications by id."""
+    require_action(action, _ARCHIVE_ACTIONS)
+    if action == "archive":
+        return await do_archive_notifications(client, ids, confirm)
+    return await do_unarchive_notifications(client, ids, confirm)
+
+
+def _archive_state_consequence(notification_id: str, action: str) -> str:
+    if action == "archive":
+        return f"archive notification '{notification_id}'"
+    return f"mark notification '{notification_id}' unread"
+
+
+def _archive_state_bulk_consequence(ids: list[str], action: str) -> str:
+    return f"{action} {len(ids)} notification(s)"
 
 
 def _archive_all_consequence(importance: str | None) -> str:
@@ -248,12 +284,13 @@ def register(mcp: MCPServer, settings: Settings) -> None:
 
 
 def register_mutations(mcp: MCPServer, settings: Settings) -> None:
-    @mcp.tool(title="Archive Notification", annotations=MUTATING_IDEMPOTENT)
-    async def archive_notification(
-        ctx: Context, notification_id: str, confirm: bool = False
+    @mcp.tool(title="Notification Archive", annotations=MUTATING_IDEMPOTENT)
+    async def notification_archive(
+        ctx: Context, notification_id: str, action: ArchiveAction, confirm: bool = False
     ) -> dict[str, Any]:
-        """Archive (clear) a single unread notification by id. Requires confirm=true."""
-        return await guarded(ctx, do_archive_notification, notification_id, confirm)
+        """Archive (clear) one unread notification by id, or unarchive one
+        (mark an archived notification unread again). Requires confirm=true."""
+        return await guarded(ctx, do_notification_archive, notification_id, action, confirm)
 
     @mcp.tool(title="Archive All Notifications", annotations=DESTRUCTIVE)
     async def archive_all_notifications(
@@ -268,13 +305,6 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
         """Archive all unread notifications (optionally only one importance). Bulk action —
         requires confirm=true."""
         return await guarded(ctx, do_archive_all, importance, confirm, confirmation=confirmation)
-
-    @mcp.tool(title="Mark Notification Unread", annotations=MUTATING_IDEMPOTENT)
-    async def mark_notification_unread(
-        ctx: Context, notification_id: str, confirm: bool = False
-    ) -> dict[str, Any]:
-        """Mark an archived notification unread again by id. Requires confirm=true."""
-        return await guarded(ctx, do_unread_notification, notification_id, confirm)
 
     @mcp.tool(title="Delete Notification", annotations=DESTRUCTIVE_IDEMPOTENT)
     async def delete_notification(
@@ -299,21 +329,14 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
             confirmation=confirmation,
         )
 
-    @mcp.tool(title="Archive Notifications", annotations=MUTATING_IDEMPOTENT)
-    async def archive_notifications(
-        ctx: Context, ids: list[str], confirm: bool = False
+    @mcp.tool(title="Notification Archive Bulk", annotations=MUTATING_IDEMPOTENT)
+    async def notification_archive_bulk(
+        ctx: Context, ids: list[str], action: ArchiveAction, confirm: bool = False
     ) -> dict[str, Any]:
-        """Bulk-archive unread notifications by id (from list_notifications). Requires a
-        non-empty ids list and confirm=true."""
-        return await guarded(ctx, do_archive_notifications, ids, confirm)
-
-    @mcp.tool(title="Unarchive Notifications", annotations=MUTATING_IDEMPOTENT)
-    async def unarchive_notifications(
-        ctx: Context, ids: list[str], confirm: bool = False
-    ) -> dict[str, Any]:
-        """Bulk-unarchive notifications by id, moving them back to unread. Requires a
-        non-empty ids list and confirm=true."""
-        return await guarded(ctx, do_unarchive_notifications, ids, confirm)
+        """Archive unread notifications, or unarchive archived ones back to unread,
+        by id (from list_notifications). Requires a non-empty ids list and
+        confirm=true."""
+        return await guarded(ctx, do_notification_archive_bulk, ids, action, confirm)
 
     @mcp.tool(title="Unarchive All Notifications", annotations=MUTATING)
     async def unarchive_all_notifications(
