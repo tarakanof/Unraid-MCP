@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 - 2026-10-02
+
+Shorter ids (#172, #174): no server prefix anywhere; container ids are 12-hex short ids.
 
 ### Changed
 
