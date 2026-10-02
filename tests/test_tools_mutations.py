@@ -316,7 +316,7 @@ async def test_update_container_with_confirm_sends_and_shapes(mocked_client):
         assert body["query"] == queries.UPDATE_CONTAINER
         assert body["variables"] == {"id": "1:abc"}
         assert result == {
-            "id": "1:abc",
+            "id": "abc",
             "names": ["/plex"],
             "state": "RUNNING",
             "status": "Up 2 seconds",
@@ -374,7 +374,7 @@ async def test_update_containers_with_confirm_sends_and_shapes_list(mocked_clien
         assert body["query"] == queries.UPDATE_CONTAINERS
         assert body["variables"] == {"ids": ["1:a", "1:b"]}
         assert isinstance(result, list)
-        assert [c["id"] for c in result] == ["1:a", "1:b"]
+        assert [c["id"] for c in result] == ["a", "b"]
 
 
 async def test_update_containers_rejects_empty_list_pre_network(mocked_client):
@@ -418,7 +418,7 @@ async def test_update_all_containers_with_confirm_sends_and_shapes_list(mocked_c
         assert route.call_count == 1
         body = json.loads(route.calls.last.request.content)
         assert body["query"] == queries.UPDATE_ALL_CONTAINERS
-        assert [c["id"] for c in result] == ["1:a"]
+        assert [c["id"] for c in result] == ["a"]
 
 
 async def test_update_all_containers_old_api_friendly_error(mocked_client):
@@ -1116,7 +1116,7 @@ async def test_set_autostart_merges_into_existing_list(mocked_client):
         # c (order 1) untouched and first; b removed; a appended with wait.
         expected = [{"id": "1:c", "autoStart": True}, {"id": "1:a", "autoStart": True, "wait": 5}]
         assert sent["variables"] == {"entries": expected, "persist": True}
-        assert out == {"ok": True, "autostart": expected}
+        assert out == {"ok": True, "autostart": [{**e, "id": e["id"][2:]} for e in expected]}
 
 
 async def test_set_autostart_unknown_id_rejected_before_mutation(mocked_client):
@@ -1184,7 +1184,7 @@ async def test_set_autostart_order_reorders_existing(mocked_client):
         out = await docker.do_set_docker_autostart(
             client, [{"id": "1:a", "auto_start": True}], order=["1:b", "1:a"], confirm=True
         )
-        assert [e["id"] for e in out["autostart"]] == ["1:b", "1:a", "1:c"]
+        assert [e["id"] for e in out["autostart"]] == ["b", "a", "c"]
         assert out["autostart"][0]["wait"] == 10
 
 

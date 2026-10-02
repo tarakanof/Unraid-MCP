@@ -337,6 +337,44 @@ def _shape_labels(labels: Any) -> tuple[Any, bool]:
     return labels, False
 
 
+# Docker's own short-id length. Container ids arrive as the `PrefixedID`
+# `<serverId>:<64-hex>`; the server prefix is identical on every object, so output
+# drops it and keeps the first 12 hex chars (the tools resolve it back, #172).
+SHORT_ID_LEN = 12
+
+
+def bare_container_id(cid: Any) -> Any:
+    """``<serverId>:<hex>`` → ``<hex>``; non-strings and bare ids pass through."""
+    return cid.rsplit(":", 1)[-1] if isinstance(cid, str) else cid
+
+
+def short_container_id(cid: Any) -> Any:
+    """The 12-hex Docker short id of a (prefixed or bare) container id."""
+    bare = bare_container_id(cid)
+    return bare[:SHORT_ID_LEN] if isinstance(bare, str) else bare
+
+
+def shorten_container_ids(items: list[Any]) -> list[Any]:
+    """Copy of ``items`` with each dict's ``id`` shortened to 12 hex chars.
+
+    Short ids that collide within ``items`` fall back to the bare 64-hex id so
+    every emitted id still identifies exactly one container.
+    """
+    shorts = [short_container_id(i.get("id")) if isinstance(i, dict) else None for i in items]
+    seen: dict[Any, int] = {}
+    for s in shorts:
+        if s is not None:
+            seen[s] = seen.get(s, 0) + 1
+    out: list[Any] = []
+    for item, short in zip(items, shorts, strict=True):
+        if not isinstance(item, dict) or short is None:
+            out.append(item)
+            continue
+        cid = short if seen[short] == 1 else bare_container_id(item.get("id"))
+        out.append({**item, "id": cid})
+    return out
+
+
 def shape_container(c: dict | None) -> Container | None:
     """Compact list-view shape (cheap fields only). Newer-API fields are ``None``
     when the connected build predates them."""
@@ -426,7 +464,10 @@ def shape_port_conflicts(data: dict | None) -> dict[str, Any]:
     pc = ((data or {}).get("docker") or {}).get("portConflicts") or {}
 
     def _containers(item: dict) -> list[dict[str, Any]]:
-        return [{"id": x.get("id"), "name": x.get("name")} for x in (item.get("containers") or [])]
+        return [
+            {"id": short_container_id(x.get("id")), "name": x.get("name")}
+            for x in (item.get("containers") or [])
+        ]
 
     container_ports = [
         {"private_port": i.get("privatePort"), "type": i.get("type"), "containers": _containers(i)}
@@ -492,7 +533,7 @@ def shape_container_stats(events: list[dict] | None) -> list[dict[str, Any]]:
         stats = (event or {}).get("dockerContainerStats") or {}
         out.append(
             {
-                "id": sanitize_control(stats.get("id")),
+                "id": short_container_id(sanitize_control(stats.get("id"))),
                 "cpu_percent": stats.get("cpuPercent"),
                 "mem_percent": stats.get("memPercent"),
                 "mem_usage": sanitize_control(stats.get("memUsage")),
@@ -554,7 +595,7 @@ def shape_container_logs(data: dict | None) -> dict[str, Any]:
     omitted = keep_from
     kept = lines[keep_from:]
     out: dict[str, Any] = {
-        "container_id": logs.get("containerId"),
+        "container_id": short_container_id(logs.get("containerId")),
         "lines": kept,
         "cursor": logs.get("cursor"),
         "truncated": any(line["truncated"] for line in kept) or omitted > 0,

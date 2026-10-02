@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import weakref
 from datetime import datetime
 from typing import Annotated, Any, Literal, get_args
@@ -16,6 +17,8 @@ from ..config import Settings
 from ..errors import UnraidConnectionError, UnraidGraphQLError
 from ..formatting import (
     MAX_LOG_RESULT_CHARS,
+    SHORT_ID_LEN,
+    bare_container_id,
     sanitize_control,
     shape_container_detail,
     shape_container_logs,
@@ -27,6 +30,8 @@ from ..formatting import (
     shape_mutation_result,
     shape_mutation_result_list,
     shape_port_conflicts,
+    short_container_id,
+    shorten_container_ids,
 )
 from ..logging import redact
 from ..types import Container, ContainerListItem
@@ -84,6 +89,17 @@ CONCISE_CONTAINER_KEYS = (
 )
 
 
+async def _list_containers(client: UnraidClient) -> list[Container | None]:
+    """Every container, shaped, with the full upstream ids (internal use)."""
+    try:
+        return shape_containers(await client.execute(queries.LIST_CONTAINERS))
+    except UnraidGraphQLError as exc:
+        if not unsupported_field_error(exc):
+            raise
+        # Older API lacks the newer cheap fields: retry with the original selection.
+        return shape_containers(await client.execute(queries.LIST_CONTAINERS_BASIC))
+
+
 async def fetch_containers(
     client: UnraidClient,
     *,
@@ -92,22 +108,16 @@ async def fetch_containers(
     update_available: bool | None = None,
     detail: str = "full",
 ) -> list[Container | None]:
-    """List containers, filtered after the GraphQL call (#158).
+    """List containers, filtered after the GraphQL call (#158), with short ids (#172).
 
-    The logic default is ``detail="full"`` so internal callers (name lookup)
-    keep every field; the ``list_docker_containers`` tool defaults to concise.
+    Ids are the 12-hex Docker short id; one that collides with another
+    container's short id is emitted as the bare 64-hex id instead.
     """
     state = upper_if_str(state)
     if state is not None:
         require_choice("state", state, _CONTAINER_STATES)
     require_choice("detail", detail, DETAILS)
-    try:
-        items = shape_containers(await client.execute(queries.LIST_CONTAINERS))
-    except UnraidGraphQLError as exc:
-        if not unsupported_field_error(exc):
-            raise
-        # Older API lacks the newer cheap fields: retry with the original selection.
-        items = shape_containers(await client.execute(queries.LIST_CONTAINERS_BASIC))
+    items = shorten_container_ids(await _list_containers(client))
     if name is not None or state is not None or update_available is not None:
         items = [
             c
@@ -120,16 +130,103 @@ async def fetch_containers(
     return select_detail(items, CONCISE_CONTAINER_KEYS, detail)
 
 
-def _matches(container: dict[str, Any], identifier: str) -> bool:
-    ident = identifier.lstrip("/")
-    cid = container.get("id") or ""
-    return cid == identifier or container.get("name") == ident or cid.split(":")[-1] == identifier
+_HEX = re.compile(r"[0-9a-fA-F]+")
+_FULL_HEX_LEN = 64
+_MAX_CANDIDATES = 10
 
 
-def _looks_like_id(identifier: str) -> bool:
-    """PrefixedIDs come back as ``<serverId>:<rawId>``; plain container names
-    never contain a colon, so this is a cheap, reliable discriminator."""
-    return ":" in identifier
+def _is_hex(value: str) -> bool:
+    return _HEX.fullmatch(value) is not None
+
+
+def _passes_through(identifier: str) -> bool:
+    """Forms upstream's ``PrefixedID`` input takes as-is: ``<serverId>:<id>``
+    (prefix stripped server-side) or the bare 64-hex id."""
+    return ":" in identifier or (len(identifier) == _FULL_HEX_LEN and _is_hex(identifier))
+
+
+def _is_short_id(identifier: str) -> bool:
+    """A Docker short id: 12..63 hex chars (upstream only matches the full id)."""
+    return SHORT_ID_LEN <= len(identifier) < _FULL_HEX_LEN and _is_hex(identifier)
+
+
+def _needs_lookup(identifier: str, names: bool) -> bool:
+    return not _passes_through(identifier) and (names or _is_short_id(identifier))
+
+
+def _container_names(ref: dict[str, Any]) -> list[str]:
+    return [n.lstrip("/") for n in ref.get("names") or [] if isinstance(n, str)]
+
+
+def _pick_container(refs: list[dict[str, Any]], identifier: str, *, names: bool) -> str:
+    """Match a short id (>= 12 hex chars, case-insensitive) or, with ``names``,
+    a container name, to exactly one full id. Ambiguity is an error."""
+    ident = identifier.lstrip("/") if names else identifier
+    prefix = identifier.lower() if _is_short_id(identifier) else None
+    found: list[dict[str, Any]] = []
+    for ref in refs:
+        cid = ref.get("id")
+        if not isinstance(cid, str):
+            continue
+        if (prefix and bare_container_id(cid).lower().startswith(prefix)) or (
+            names and ident in _container_names(ref)
+        ):
+            found.append(ref)
+    if len(found) == 1:
+        return found[0]["id"]
+    if not found:
+        accepted = "a container id or name" if names else "a container id"
+        raise ToolError(
+            f"No Docker container matching '{identifier}'. Pass {accepted} from "
+            "list_docker_containers (short ids need at least 12 hex chars)."
+        )
+    candidates = [
+        f"{bare_container_id(r['id'])} ({', '.join(_container_names(r)) or '?'})"
+        for r in found[:_MAX_CANDIDATES]
+    ]
+    more = f" and {len(found) - _MAX_CANDIDATES} more" if len(found) > _MAX_CANDIDATES else ""
+    raise ToolError(
+        f"'{identifier}' matches {len(found)} containers: {'; '.join(candidates)}{more}. "
+        "Pass a longer id; nothing was changed."
+    )
+
+
+async def resolve_container_id(
+    client: UnraidClient, identifier: str, *, names: bool = False
+) -> str:
+    """Expand a caller-supplied container reference to an id upstream accepts.
+
+    A short id (12..63 hex chars) and, with ``names``, a container name are
+    resolved against the container list. Anything else (the full
+    ``PrefixedID``, the bare 64-hex id, unknown forms) is sent unchanged, with
+    no extra request. Mutations call this only AFTER ``require_confirm`` since
+    the lookup is network I/O.
+    """
+    if not isinstance(identifier, str) or not identifier.strip():
+        raise ToolError("Container id must be a non-empty id from list_docker_containers.")
+    if not _needs_lookup(identifier.strip(), names):
+        return identifier
+    identifier = identifier.strip()
+    data = await client.execute(queries.CONTAINER_REFS)
+    refs = ((data or {}).get("docker") or {}).get("containers") or []
+    return _pick_container([r for r in refs if isinstance(r, dict)], identifier, names=names)
+
+
+async def resolve_container_ids(client: UnraidClient, identifiers: list[str]) -> list[str]:
+    """Batch :func:`resolve_container_id`: at most one list request for all ids."""
+    if not any(isinstance(i, str) and _needs_lookup(i.strip(), False) for i in identifiers):
+        return list(identifiers)
+    data = await client.execute(queries.CONTAINER_REFS)
+    refs = [
+        r for r in ((data or {}).get("docker") or {}).get("containers") or [] if isinstance(r, dict)
+    ]
+    out: list[str] = []
+    for ident in identifiers:
+        if not isinstance(ident, str) or not ident.strip():
+            raise ToolError("Container id must be a non-empty id from list_docker_containers.")
+        short = ident.strip()
+        out.append(_pick_container(refs, short, names=False) if _is_short_id(short) else ident)
+    return out
 
 
 async def fetch_container_native(client: UnraidClient, container_id: str) -> Container | None:
@@ -137,7 +234,8 @@ async def fetch_container_native(client: UnraidClient, container_id: str) -> Con
 
     Returns the shaped container dict, or ``None`` if the API doesn't have
     this field (old build) or the id doesn't resolve — both cases mean the
-    caller should fall back to the client-side list+filter path.
+    caller should fall back to the client-side list+filter path. Upstream
+    matches ``id`` exactly: pass the full or bare 64-hex id, not a short one.
     """
     variables = {"id": container_id}
     try:
@@ -178,22 +276,26 @@ async def fetch_container(
                 ) from None
             raise
         container = {**container, **shape_container_sizes(data, container.get("id"))}
-    return container
+    return {**container, "id": short_container_id(container.get("id"))}
 
 
 async def _resolve_container(client: UnraidClient, identifier: str) -> dict[str, Any]:
-    if _looks_like_id(identifier):
-        native = await fetch_container_native(client, identifier)
-        if native is not None:
-            return native
-    for container in await fetch_containers(client):
-        if _matches(container, identifier):
-            # Resolved via the list: upgrade to the detail view by id (same
-            # output as an id lookup), keeping the list row if that yields nothing.
-            if container.get("id") and not _looks_like_id(identifier):
-                native = await fetch_container_native(client, container["id"])
-                if native is not None:
-                    return native
+    """Detail view for an id (full, bare or short) or name; full upstream id kept."""
+    rows: list[dict[str, Any]] | None = None
+    cid = identifier
+    if _needs_lookup(identifier.strip(), True):
+        # The list doubles as the lookup table and the old-build fallback row.
+        rows = [c for c in await _list_containers(client) if c is not None]
+        cid = _pick_container(rows, identifier.strip(), names=True)
+    native = await fetch_container_native(client, cid)
+    if native is not None:
+        return native
+    # Old build without `docker.container`, or an id upstream didn't match: list fallback.
+    if rows is None:
+        rows = [c for c in await _list_containers(client) if c is not None]
+    bare = bare_container_id(cid)
+    for container in rows:
+        if bare_container_id(container.get("id")) == bare:
             return container
     raise ToolError(f"No Docker container matching '{identifier}'.")
 
@@ -252,6 +354,7 @@ async def fetch_container_logs(
         )
     if since is not None:
         since = _validate_since(since)
+    container_id = await resolve_container_id(client, container_id)
     try:
         result = await client.execute(
             queries.CONTAINER_LOGS, {"id": container_id, "since": since, "tail": tail}
@@ -379,16 +482,18 @@ async def do_start_container(
     client: UnraidClient, container_id: str, confirm: bool
 ) -> dict[str, Any]:
     require_confirm(confirm, _container_power_consequence(container_id, "start"))
+    container_id = await resolve_container_id(client, container_id)
     result = await client.execute(queries.START_CONTAINER, {"id": container_id})
-    return shape_mutation_result(result, ("docker", "start"))
+    return _short_result(shape_mutation_result(result, ("docker", "start")))
 
 
 async def do_stop_container(
     client: UnraidClient, container_id: str, confirm: bool
 ) -> dict[str, Any]:
     require_confirm(confirm, _stop_container_consequence(container_id))
+    container_id = await resolve_container_id(client, container_id)
     result = await client.execute(queries.STOP_CONTAINER, {"id": container_id})
-    return shape_mutation_result(result, ("docker", "stop"))
+    return _short_result(shape_mutation_result(result, ("docker", "stop")))
 
 
 async def do_restart_container(
@@ -402,6 +507,7 @@ async def do_restart_container(
     container is left stopped.
     """
     require_confirm(confirm, _restart_container_consequence(container_id))
+    container_id = await resolve_container_id(client, container_id)
     try:
         result = await client.execute(queries.RESTART_CONTAINER, {"id": container_id})
     except UnraidGraphQLError as exc:
@@ -409,13 +515,14 @@ async def do_restart_container(
             raise
         await do_stop_container(client, container_id, confirm=True)
         return await do_start_container(client, container_id, confirm=True)
-    return shape_mutation_result(result, ("docker", "restart"))
+    return _short_result(shape_mutation_result(result, ("docker", "restart")))
 
 
 async def do_pause_container(
     client: UnraidClient, container_id: str, confirm: bool, *, api_version: str | None = None
 ) -> dict[str, Any]:
     require_confirm(confirm, _container_power_consequence(container_id, "pause"))
+    container_id = await resolve_container_id(client, container_id)
     try:
         result = await client.execute(queries.PAUSE_CONTAINER, {"id": container_id})
     except UnraidGraphQLError as exc:
@@ -424,13 +531,14 @@ async def do_pause_container(
                 "pausing Docker containers", api_version=api_version
             ) from None
         raise
-    return shape_mutation_result(result, ("docker", "pause"))
+    return _short_result(shape_mutation_result(result, ("docker", "pause")))
 
 
 async def do_unpause_container(
     client: UnraidClient, container_id: str, confirm: bool, *, api_version: str | None = None
 ) -> dict[str, Any]:
     require_confirm(confirm, _container_power_consequence(container_id, "unpause"))
+    container_id = await resolve_container_id(client, container_id)
     try:
         result = await client.execute(queries.UNPAUSE_CONTAINER, {"id": container_id})
     except UnraidGraphQLError as exc:
@@ -439,7 +547,14 @@ async def do_unpause_container(
                 "unpausing Docker containers", api_version=api_version
             ) from None
         raise
-    return shape_mutation_result(result, ("docker", "unpause"))
+    return _short_result(shape_mutation_result(result, ("docker", "unpause")))
+
+
+def _short_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Shorten the container ``id`` in a docker mutation result (#172)."""
+    if "id" in result:
+        return {**result, "id": short_container_id(result["id"])}
+    return result
 
 
 ContainerPowerAction = Literal["start", "pause", "unpause"]
@@ -480,6 +595,7 @@ async def do_update_container(
         raise ToolError(
             "container_id must be a non-empty container id (see list_docker_containers)."
         )
+    container_id = await resolve_container_id(client, container_id)
     try:
         result = await client.execute(
             queries.UPDATE_CONTAINER, {"id": container_id}, timeout=client.long_request_timeout
@@ -488,7 +604,7 @@ async def do_update_container(
         if unsupported_field_error(exc):
             raise feature_unsupported("Docker container updates", api_version=api_version) from None
         raise
-    return shape_mutation_result(result, ("docker", "updateContainer"))
+    return _short_result(shape_mutation_result(result, ("docker", "updateContainer")))
 
 
 async def do_update_containers(
@@ -503,6 +619,7 @@ async def do_update_containers(
     """Pull the latest image for a batch of containers and recreate them."""
     require_confirm(confirm, _update_containers_consequence(container_ids))
     _validate_container_ids(container_ids)
+    container_ids = await resolve_container_ids(client, container_ids)
     n = len(container_ids)
     if progress is not None:
         await progress(f"Updating {n} container(s)")
@@ -523,7 +640,7 @@ async def do_update_containers(
         raise
     if progress is not None:
         await progress(f"Updated {n} container(s)")
-    return shape_mutation_result_list(result, ("docker", "updateContainers"))
+    return shorten_container_ids(shape_mutation_result_list(result, ("docker", "updateContainers")))
 
 
 async def do_refresh_docker_digests(
@@ -628,6 +745,41 @@ def _validate_order(order: list[str] | None) -> list[str] | None:
     return order
 
 
+def _canonical_id(refs: list[dict[str, Any]], identifier: str) -> str:
+    """Map a full, bare or short (>= 12 hex) id to the container's full id from
+    ``refs``. Unmatched ids come back unchanged so the merge reports them all;
+    an ambiguous short id raises."""
+    want = bare_container_id(identifier).lower()
+    if _passes_through(identifier):
+        hits = [r for r in refs if bare_container_id(r.get("id") or "").lower() == want]
+    elif _is_short_id(identifier):
+        hits = [r for r in refs if bare_container_id(r.get("id") or "").lower().startswith(want)]
+    else:
+        hits = []
+    if len(hits) > 1:
+        _pick_container(refs, identifier, names=False)  # raises the ambiguity error
+    return hits[0]["id"] if hits else identifier
+
+
+def _canonicalize_autostart(
+    containers: list[dict[str, Any]], changes: list[dict[str, Any]], order: list[str] | None
+) -> tuple[list[dict[str, Any]], list[str] | None]:
+    """Rewrite caller ids (any accepted form) to full ids; reject an id listed
+    twice under different forms."""
+    refs = [c for c in containers if isinstance(c, dict) and isinstance(c.get("id"), str)]
+    changes = [{**c, "id": _canonical_id(refs, c["id"])} for c in changes]
+    ids = [c["id"] for c in changes]
+    dupes = sorted({short_container_id(i) for i in ids if ids.count(i) > 1})
+    if dupes:
+        raise ToolError(f"entries list the same container more than once: {dupes}.")
+    if order is not None:
+        order = [_canonical_id(refs, o) for o in order]
+        dupes = sorted({short_container_id(o) for o in order if order.count(o) > 1})
+        if dupes:
+            raise ToolError(f"order lists id(s) more than once: {dupes}.")
+    return changes, order
+
+
 def _merge_autostart(
     containers: list[dict[str, Any]],
     changes: list[dict[str, Any]],
@@ -711,6 +863,7 @@ async def do_set_docker_autostart(
         async with _autostart_lock(client):
             state = await _execute_strict(client, queries.DOCKER_AUTOSTART_STATE)
             containers = ((state or {}).get("docker") or {}).get("containers") or []
+            changes, order = _canonicalize_autostart(containers, changes, order)
             full = _merge_autostart(containers, changes, order)
             result = await _execute_strict(
                 client,
@@ -725,7 +878,7 @@ async def do_set_docker_autostart(
         raise
     if ((result or {}).get("docker") or {}).get("updateAutostartConfiguration") is not True:
         raise ToolError("The Unraid API did not confirm the autostart update (no true result).")
-    return {"ok": True, "autostart": full}
+    return {"ok": True, "autostart": shorten_container_ids(full)}
 
 
 # ── Dangerous-tier logic ────────────────────────────────────────────────────
@@ -754,7 +907,9 @@ async def do_update_all_containers(
         if unsupported_field_error(exc):
             raise feature_unsupported("Docker container updates", api_version=api_version) from None
         raise
-    shaped = shape_mutation_result_list(result, ("docker", "updateAllContainers"))
+    shaped = shorten_container_ids(
+        shape_mutation_result_list(result, ("docker", "updateAllContainers"))
+    )
     if progress is not None:
         await progress(f"Updated {len(shaped)} container(s)")
     return shaped
@@ -771,6 +926,7 @@ async def do_remove_container(
         raise ToolError(
             "container_id must be a non-empty container id (see list_docker_containers)."
         )
+    container_id = await resolve_container_id(client, container_id)
     result = await client.execute(
         queries.REMOVE_DOCKER_CONTAINER, {"id": container_id, "withImage": with_image}
     )
@@ -870,7 +1026,8 @@ def register(mcp: MCPServer, settings: Settings) -> None:
     ) -> list[ContainerListItem | None]:
         """List Docker containers. Filter before listing everything: name
         (case-insensitive substring), state, update_available (false also
-        excludes null, i.e. unknown on older API builds). detail="concise"
+        excludes null, i.e. unknown on older API builds). id is the 12-hex
+        short id; container tools also take the full id. detail="concise"
         returns id, name, image, state, status, update_available, web_ui_url;
         "full" adds names, auto_start(_order), orphaned, network_mode, ports.
         Use get_docker_container for one container's sizes, mounts and labels."""
@@ -887,7 +1044,7 @@ def register(mcp: MCPServer, settings: Settings) -> None:
     async def get_docker_container(
         ctx: Context, identifier: str, include_sizes: bool = False
     ) -> Container:
-        """Get one Docker container by id or name.
+        """Get one Docker container by id (short or full) or name.
 
         Adds to the list fields: rebuild_ready, lan_ip_ports, icon/project/support
         URLs, template_path, auto_start_wait, mounts, labels and Tailscale

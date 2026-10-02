@@ -11,6 +11,7 @@ from unraid_mcp.formatting import (
     shape_container,
     shape_container_detail,
     shape_physical_disk,
+    shorten_container_ids,
     summarize_health,
 )
 from unraid_mcp.server import build_server
@@ -149,8 +150,8 @@ def _fixture(kind):
             "notifications_unread": {},
             "top_alerts": [],
         },
-        "list_docker_containers": {"result": [shape_container(container)]},
-        "get_docker_container": shape_container_detail(container),
+        "list_docker_containers": {"result": shorten_container_ids([shape_container(container)])},
+        "get_docker_container": shorten_container_ids([shape_container_detail(container)])[0],
         "list_disks": {"result": [shape_physical_disk(disk)]},
         "get_disk": shape_physical_disk(disk),
     }

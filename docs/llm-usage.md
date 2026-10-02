@@ -156,7 +156,13 @@ opted in — do not try to work around it.
 ## Conventions
 
 - **IDs (`PrefixedID`).** The API returns ids like `"<serverId>:<rawId>"`. Pass back
-  exactly what a `list_*` tool gave you. `get_docker_container` also accepts a plain name.
+  exactly what a `list_*` tool gave you. Container ids are the exception: every
+  container result (lists, detail, logs, stats, port conflicts, mutation results)
+  shows the 12-hex Docker short id, or the bare 64-hex id if two containers share
+  a short id. Container tools accept the short id (12+ hex chars), the bare 64-hex
+  id or the full `<serverId>:<id>`; `get_docker_container` also accepts a name. A
+  short id matching more than one container is an error that lists the
+  candidates, and nothing is changed. Disk, VM and notification ids are unchanged.
 - **Sizes.** `{"bytes": int|null, "human": str|null}`. Array/share sizes derive from
   KiB; physical disk sizes from bytes — both are normalized to this shape for you.
 - **Read results: text vs structured content.** A read tool returns one text block

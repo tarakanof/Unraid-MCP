@@ -235,6 +235,10 @@ async def test_get_container_detail(live_client):
     detail = await _run(docker.fetch_container, live_client, identifier)
     assert isinstance(detail, dict)
     _check_shapes(detail)
+    if containers[0].get("id"):
+        # The listed (short) id round-trips to the same container (#172).
+        assert detail["id"] == containers[0]["id"]
+        assert ":" not in detail["id"]
 
 
 async def test_get_container_logs(live_client):

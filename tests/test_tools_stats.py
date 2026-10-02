@@ -116,7 +116,7 @@ async def test_happy_path_returns_one_entry_per_container():
     assert result["partial"] is False
     assert result["note"] is None
     ids = [c["id"] for c in result["containers"]]
-    assert ids == ["docker:a", "docker:b"]
+    assert ids == ["a", "b"]
     first = result["containers"][0]
     assert first["cpu_percent"] == 10.0
     assert first["mem_usage"] == "65.56MiB / 31.25GiB"  # pre-formatted string, not bytes
@@ -130,7 +130,7 @@ async def test_ansi_in_id_is_sanitized_before_keying_and_output():
     script = [_ack(), _next(polluted), _next("docker:def456"), _next(polluted)]
     _, result = await _fetch(script)
     ids = [c["id"] for c in result["containers"]]
-    assert ids == ["docker:abc123", "docker:def456"]  # clean, deduped
+    assert ids == ["abc123", "def456"]  # clean, deduped, short
     assert all("\x1b" not in i and "[H" not in i for i in ids)
     assert result["sampled"] == 2  # the polluted repeat did not double-count
 
@@ -221,7 +221,7 @@ async def test_stats_settings_bearer_token_redacted_in_tool_output():
         settings=_settings(bearer_token=token),
     )
     assert token not in str(result)
-    assert "***REDACTED***" in str(result)
+    assert "***REDACTED" in str(result)
 
 
 async def test_stats_connection_error_redacts_configured_secrets():
