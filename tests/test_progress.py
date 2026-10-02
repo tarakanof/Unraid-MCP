@@ -220,7 +220,7 @@ async def test_stalled_reporter_cannot_hang_updates(monkeypatch, mocked_client):
             docker.do_update_containers(client, ["1:a"], confirm=True, progress=progress),
             timeout=3,
         )
-    assert result[0]["id"] == "1:a"
+    assert result[0]["id"] == "a"
     assert len(ctx.calls) >= 1  # worker attempted (and timed out) without blocking the update
 
 

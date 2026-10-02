@@ -226,6 +226,15 @@ query GetDockerNetworks {
 }
 """
 
+# Minimal id/name list used to expand a short container id (or a name) into the
+# full id. `PrefixedID` input accepts `<serverId>:<id>` or the bare id, but only
+# the exact 64-hex id: `docker.container(id)` matches ids exactly (#172).
+CONTAINER_REFS = """
+query DockerContainerRefs {
+  docker { containers { id names } }
+}
+"""
+
 CONTAINER_LOGS = """
 query GetContainerLogs($id: PrefixedID!, $since: DateTime, $tail: Int) {
   docker { logs(id: $id, since: $since, tail: $tail) { containerId lines { timestamp message } cursor } }
@@ -234,7 +243,7 @@ query GetContainerLogs($id: PrefixedID!, $since: DateTime, $tail: Int) {
 
 DOCKER_UPDATE_STATUSES = """
 query GetDockerUpdateStatuses {
-  docker { containerUpdateStatuses { name updateStatus } }
+  docker { containerUpdateStatuses { name updateStatus } containers { id names } }
 }
 """
 

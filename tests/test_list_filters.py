@@ -12,6 +12,7 @@ from unraid_mcp.formatting import (
     shape_containers,
     shape_physical_disks,
     shape_shares,
+    shorten_container_ids,
 )
 from unraid_mcp.server import build_server
 from unraid_mcp.tools import array, docker, shares, vm
@@ -106,7 +107,7 @@ DATA = {**CONTAINERS, **DISKS, **VMS, **SHARES}
 TOOLS = {
     "list_docker_containers": (
         docker.fetch_containers,
-        shape_containers(CONTAINERS),
+        shorten_container_ids(shape_containers(CONTAINERS)),
         {"id", "name", "image", "state", "status", "update_available", "web_ui_url"},
     ),
     "list_disks": (
@@ -332,7 +333,7 @@ async def test_filters_apply_through_sdk(settings_factory):
     )
     assert result.structured_content["result"] == [
         {
-            "id": "1:a",
+            "id": "a",
             "name": "Plex",
             "image": "Plex:latest",
             "state": "RUNNING",

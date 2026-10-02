@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **BREAKING: container ids are short in output (#172).** Container results
+  (`list_docker_containers`, `get_docker_container`, logs, stats, port
+  conflicts, docker mutation results and the `set_docker_autostart` list) show
+  the 12-hex Docker short id instead of the 129-char `<serverId>:<64-hex>`
+  `PrefixedID`. Only `list_docker_containers` and `check_docker_updates` check
+  short ids against every container and fall back to the bare 64-hex id when
+  two share one; other results always show 12 chars, and an ambiguous id is
+  rejected on input with the candidates listed. Scripts that compare or store full ids must switch to the short or
+  bare form. The live concise running-container list (30 containers) went from
+  8,591 to 5,082 chars, the full list from 13,922 to 10,413, and port conflicts
+  from 2,029 to 742.
+- Container tools accept the short id (12+ hex chars, case-insensitive), the
+  bare 64-hex id or the full `PrefixedID`; `get_docker_container` still also
+  accepts a name. Upstream `PrefixedID` input takes the bare id but matches only
+  the exact full id, so a short id is expanded with a container-list query.
+  Mutations do that lookup only after `confirm` (and the destructive-tool
+  elicitation), and the consequence text shows the id as the caller typed it. A
+  short id that matches more than one container is an error that lists the
+  candidates; no mutation is sent. Batch updates reject the same container
+  given twice (any mix of short, bare and full ids) before sending anything.
+  Ids are trimmed and their hex lowercased before they are sent.
+- `check_docker_updates` results include the container's short `id` (joined
+  by name in the same request), so its output can feed the update tools.
+
 ## 0.10.0 - 2026-10-02
 
 LLM token-efficiency release (#163): smaller `tools/list` (read-only 40.1k →

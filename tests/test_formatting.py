@@ -483,14 +483,14 @@ def test_shape_container_stats_cleans_id_and_passes_strings():
         },
     ]
     out = shape_container_stats(events)
-    assert out[0]["id"] == "docker:first"  # control chars stripped
+    assert out[0]["id"] == "first"  # control chars stripped, prefix dropped
     assert out[0]["cpu_percent"] == 12.5
     assert out[0]["mem_percent"] == 3.2
     # Pre-formatted composite strings pass through verbatim — no {bytes, human}.
     assert out[0]["mem_usage"] == "65.56MiB / 31.25GiB"
     assert out[0]["net_io"] == "1.2kB / 3.4kB"
     assert out[0]["block_io"] == "0B / 8.19kB"
-    assert out[1]["id"] == "docker:second"
+    assert out[1]["id"] == "second"
     # No size-shaped dict slipped in (would carry a "human"/"bytes" pair).
     for entry in out:
         for value in entry.values():

@@ -612,7 +612,7 @@ async def test_docker_list_and_resolve(mocked_client):
         out = await docker.fetch_containers(c)
         assert out[0]["name"] == "plex"
     async with mocked_client(_resp(data)) as (c, r):
-        assert (await docker.fetch_container(c, "sonarr"))["id"] == "1:123456"
+        assert (await docker.fetch_container(c, "sonarr"))["id"] == "123456"
     async with mocked_client(_resp(data)) as (c, r):
         assert (await docker.fetch_container(c, "1:abcdef"))["name"] == "plex"
     async with mocked_client(_resp(data)) as (c, r):
@@ -640,7 +640,7 @@ async def test_container_logs_happy_path(mocked_client):
     }
     async with mocked_client(_resp(data)) as (c, r):
         out = await docker.fetch_container_logs(c, "1:abcdef", tail=10)
-    assert out["container_id"] == "1:abcdef"
+    assert out["container_id"] == "abcdef"
     assert out["lines"] == [
         {"timestamp": "2024-01-01T00:00:00Z", "message": "starting up", "truncated": False},
         {"timestamp": "2024-01-01T00:00:01Z", "message": "ready", "truncated": False},
@@ -724,14 +724,15 @@ async def test_docker_updates_happy_and_empty(mocked_client):
             "containerUpdateStatuses": [
                 {"name": "plex", "updateStatus": "UP_TO_DATE"},
                 {"name": "sonarr", "updateStatus": "UPDATE_AVAILABLE"},
-            ]
+            ],
+            "containers": [{"id": "1:" + "ab" * 32, "names": ["/plex"]}],
         }
     }
     async with mocked_client(_resp(data)) as (c, r):
         out = await docker.fetch_docker_updates(c)
     assert out == [
-        {"name": "plex", "update_status": "UP_TO_DATE"},
-        {"name": "sonarr", "update_status": "UPDATE_AVAILABLE"},
+        {"id": "ab" * 6, "name": "plex", "update_status": "UP_TO_DATE"},
+        {"id": None, "name": "sonarr", "update_status": "UPDATE_AVAILABLE"},
     ]
     assert _sent_query(r) == queries.DOCKER_UPDATE_STATUSES
 
@@ -772,7 +773,7 @@ async def test_container_native_path_hit(mocked_client):
     }
     async with mocked_client(_resp(data)) as (c, r):
         out = await docker.fetch_container(c, "1:abcdef")
-    assert out["id"] == "1:abcdef"
+    assert out["id"] == "abcdef"
     assert out["name"] == "plex"
     assert r.call_count == 1
     assert _sent_query(r) == queries.DOCKER_CONTAINER
@@ -801,7 +802,7 @@ async def test_container_falls_back_on_old_api(mocked_client):
         r,
     ):
         out = await docker.fetch_container(c, "1:abcdef")
-    assert out["id"] == "1:abcdef"
+    assert out["id"] == "abcdef"
     assert r.call_count == 3
     calls = r.calls
     assert json.loads(calls[0].request.content)["query"] == queries.DOCKER_CONTAINER
@@ -839,7 +840,7 @@ async def test_container_name_lookup_detail_null_keeps_list_row(mocked_client):
     lst = {"docker": {"containers": [{"id": "1:abcdef", "names": ["/plex"]}]}}
     async with mocked_client([_resp(lst), _resp({"docker": {"container": None}})]) as (c, r):
         out = await docker.fetch_container(c, "plex")
-    assert out["id"] == "1:abcdef"
+    assert out["id"] == "abcdef"
     assert r.call_count == 2
 
 
@@ -1548,7 +1549,7 @@ async def test_container_include_sizes_true(mocked_client):
     assert out["size_root_fs"] == {"bytes": 2147483648, "human": "2.0 GiB"}
     assert out["size_rw"] == {"bytes": 1024, "human": "1.0 KiB"}
     assert out["size_log"] == {"bytes": None, "human": None}
-    assert out["id"] == "1:abcdef"
+    assert out["id"] == "abcdef"
 
 
 async def test_container_include_sizes_missing_container_is_null(mocked_client):
