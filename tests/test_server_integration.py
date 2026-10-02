@@ -265,7 +265,7 @@ async def test_every_tool_has_title_and_explicit_annotations(settings_factory):
 async def test_idempotent_hint_advertised(settings_factory):
     by_name = await _list_all_tools(settings_factory)
     assert by_name["get_system_info"].annotations.idempotent_hint is True
-    assert by_name["start_docker_container"].annotations.idempotent_hint is True
+    assert by_name["docker_container_power"].annotations.idempotent_hint is True
     assert by_name["stop_docker_container"].annotations.idempotent_hint is True
     assert by_name["stop_docker_container"].annotations.destructive_hint is True
     # repeating these has further effect, so they must not claim idempotence

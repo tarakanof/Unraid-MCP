@@ -146,6 +146,12 @@ the safety switches — is in [docs/configuration.md](docs/configuration.md).
 
 ## Upgrading
 
+From 0.9 to the next release: thirteen non-destructive mutation tools were merged into
+five tools that take an `action` argument (`docker_container_power`, `vm_power`,
+`parity_check_control`, `notification_archive`, `notification_archive_bulk`). The old
+names are gone, with no aliases. Destructive tools keep their names. The old → new
+mapping is in [CHANGELOG.md](CHANGELOG.md).
+
 From 0.7 to 0.8 (full list in [CHANGELOG.md](CHANGELOG.md)):
 
 - `UNRAID_MCP_BEARER_TOKEN` is now required on non-localhost binds, including the Docker

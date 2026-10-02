@@ -92,13 +92,12 @@ MUTATING_TOOLS = [t for t in _TOOLS if not _is_read_only(t)]
 # discovered set) fails the test instead of silently losing refusal coverage.
 EXPECTED_MUTATING = {
     "refresh_docker_digests", "set_docker_autostart",
-    "start_array", "stop_array", "start_parity_check", "pause_parity_check",
-    "resume_parity_check", "cancel_parity_check", "start_docker_container",
-    "stop_docker_container", "restart_docker_container", "pause_docker_container",
-    "unpause_docker_container", "update_docker_container", "update_docker_containers",
-    "start_vm", "stop_vm", "pause_vm", "resume_vm", "reboot_vm", "force_stop_vm", "reset_vm",
-    "archive_notification", "archive_all_notifications", "mark_notification_unread",
-    "delete_notification", "archive_notifications", "unarchive_notifications",
+    "start_array", "stop_array", "start_parity_check", "parity_check_control",
+    "docker_container_power", "stop_docker_container", "restart_docker_container",
+    "update_docker_container", "update_docker_containers",
+    "vm_power", "stop_vm", "reboot_vm", "force_stop_vm", "reset_vm",
+    "notification_archive", "archive_all_notifications", "delete_notification",
+    "notification_archive_bulk",
     "unarchive_all_notifications", "delete_archived_notifications", "create_notification",
     "mount_array_disk", "unmount_array_disk", "clear_disk_statistics", "add_disk_to_array",
     "remove_docker_container", "update_all_docker_containers",
@@ -203,3 +202,36 @@ async def test_read_tool_empty_data(settings_factory, name):
     else:
         assert result.is_error is True
         assert expected in result.content[0].text
+
+
+# Consolidated tools dispatch on an ``action`` enum; _dummy_args only picks the
+# first value, so cover every value of every such tool here.
+ACTION_CASES = [
+    (t, action)
+    for t in MUTATING_TOOLS
+    for action in t.input_schema["properties"].get("action", {}).get("enum", [])
+]
+
+
+def test_action_cases_not_vacuous():
+    assert {t.name for t, _ in ACTION_CASES} == {
+        "docker_container_power",
+        "vm_power",
+        "parity_check_control",
+        "notification_archive",
+        "notification_archive_bulk",
+    }
+
+
+@pytest.mark.parametrize(
+    "tool,action", ACTION_CASES, ids=[f"{t.name}-{a}" for t, a in ACTION_CASES]
+)
+async def test_every_action_refuses_without_confirm_no_http(settings_factory, tool, action):
+    ok = httpx.Response(200, json={"data": {}})
+    async with _session(settings_factory, ok, **_ALL_FLAGS) as (session, route):
+        baseline = route.call_count
+        args = {**_dummy_args(tool.input_schema), "action": action}
+        result = await session.call_tool(tool.name, args)
+        assert result.is_error is True
+        assert "Refusing to" in result.content[0].text
+        assert route.call_count == baseline, "refusal made an HTTP request"

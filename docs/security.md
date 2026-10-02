@@ -50,7 +50,8 @@ nothing.
 
 **Notification lifecycle tools** (mutate tier, all require `confirm=true`):
 
-- `archive_notifications` / `unarchive_notifications` — bulk archive/unarchive by id.
+- `notification_archive` / `notification_archive_bulk` — archive or unarchive one
+  notification, or a list by id (`action` = `archive` | `unarchive`).
 - `unarchive_all_notifications` — bulk unarchive, optionally filtered by severity.
 - `delete_archived_notifications` — annotated `destructive`: permanently deletes
   **every** archived notification in one call (irreversible).
