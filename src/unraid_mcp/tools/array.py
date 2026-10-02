@@ -32,6 +32,7 @@ from ._base import (
     contains_ci,
     execute_with_fallback,
     guarded,
+    local_id,
     require_action,
     require_choice,
     require_confirm,
@@ -97,7 +98,7 @@ def _disk_not_found(disk_id: str) -> ToolError:
 
 async def fetch_disk(client: UnraidClient, disk_id: str) -> Disk:
     try:
-        data = await client.execute(queries.DISK_DETAILS, {"id": disk_id})
+        data = await client.execute(queries.DISK_DETAILS, {"id": local_id(disk_id)})
     except UnraidGraphQLError as exc:
         # The upstream resolver raises NotFoundException("Disk with id ${id} not
         # found") for unknown/malformed ids (see disks.service.ts). Match on that
@@ -201,7 +202,8 @@ async def do_mount_array_disk(client: UnraidClient, disk_id: str, confirm: bool)
     require_confirm(confirm, _mount_array_disk_consequence(disk_id))
     _require_disk_id(disk_id)
     return shape_mutation_result(
-        await client.execute(queries.MOUNT_ARRAY_DISK, {"id": disk_id}), ("array", "mountArrayDisk")
+        await client.execute(queries.MOUNT_ARRAY_DISK, {"id": local_id(disk_id)}),
+        ("array", "mountArrayDisk"),
     )
 
 
@@ -211,7 +213,7 @@ async def do_unmount_array_disk(
     require_confirm(confirm, _unmount_array_disk_consequence(disk_id))
     _require_disk_id(disk_id)
     return shape_mutation_result(
-        await client.execute(queries.UNMOUNT_ARRAY_DISK, {"id": disk_id}),
+        await client.execute(queries.UNMOUNT_ARRAY_DISK, {"id": local_id(disk_id)}),
         ("array", "unmountArrayDisk"),
     )
 
@@ -222,7 +224,7 @@ async def do_clear_disk_statistics(
     require_confirm(confirm, _clear_disk_statistics_consequence(disk_id))
     _require_disk_id(disk_id)
     return shape_mutation_result(
-        await client.execute(queries.CLEAR_ARRAY_DISK_STATISTICS, {"id": disk_id}),
+        await client.execute(queries.CLEAR_ARRAY_DISK_STATISTICS, {"id": local_id(disk_id)}),
         ("array", "clearArrayDiskStatistics"),
     )
 
@@ -234,7 +236,7 @@ async def do_add_disk_to_array(
     _require_disk_id(disk_id)
     if slot is not None and slot < 0:
         raise ToolError(f"slot must be a non-negative integer, got {slot}.")
-    input_: dict[str, Any] = {"id": disk_id}
+    input_: dict[str, Any] = {"id": local_id(disk_id)}
     if slot is not None:
         input_["slot"] = slot
     return shape_mutation_result(

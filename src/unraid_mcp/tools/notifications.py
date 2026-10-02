@@ -27,6 +27,7 @@ from ._base import (
     feature_unsupported,
     get_app_context,
     guarded,
+    local_id,
     require_action,
     require_confirm,
     require_confirmation,
@@ -82,7 +83,7 @@ async def do_archive_notification(
 ) -> dict[str, Any]:
     require_confirm(confirm, _archive_state_consequence(notification_id, "archive"))
     return shape_mutation_result(
-        await client.execute(queries.ARCHIVE_NOTIFICATION, {"id": notification_id}),
+        await client.execute(queries.ARCHIVE_NOTIFICATION, {"id": local_id(notification_id)}),
         ("archiveNotification",),
     )
 
@@ -102,7 +103,7 @@ async def do_unread_notification(
 ) -> dict[str, Any]:
     require_confirm(confirm, _archive_state_consequence(notification_id, "unarchive"))
     return shape_mutation_result(
-        await client.execute(queries.UNREAD_NOTIFICATION, {"id": notification_id}),
+        await client.execute(queries.UNREAD_NOTIFICATION, {"id": local_id(notification_id)}),
         ("unreadNotification",),
     )
 
@@ -113,7 +114,8 @@ async def do_delete_notification(
     require_confirm(confirm, _delete_notification_consequence(notification_id))
     return shape_mutation_result(
         await client.execute(
-            queries.DELETE_NOTIFICATION, {"id": notification_id, "type": notification_type}
+            queries.DELETE_NOTIFICATION,
+            {"id": local_id(notification_id), "type": notification_type},
         ),
         ("deleteNotification",),
     )
@@ -126,7 +128,8 @@ async def do_archive_notifications(
         raise ToolError("ids must be a non-empty list of notification ids.")
     require_confirm(confirm, _archive_state_bulk_consequence(ids, "archive"))
     return shape_mutation_result(
-        await client.execute(queries.ARCHIVE_NOTIFICATIONS, {"ids": ids}), ("archiveNotifications",)
+        await client.execute(queries.ARCHIVE_NOTIFICATIONS, {"ids": [local_id(i) for i in ids]}),
+        ("archiveNotifications",),
     )
 
 
@@ -137,7 +140,7 @@ async def do_unarchive_notifications(
         raise ToolError("ids must be a non-empty list of notification ids.")
     require_confirm(confirm, _archive_state_bulk_consequence(ids, "unarchive"))
     return shape_mutation_result(
-        await client.execute(queries.UNARCHIVE_NOTIFICATIONS, {"ids": ids}),
+        await client.execute(queries.UNARCHIVE_NOTIFICATIONS, {"ids": [local_id(i) for i in ids]}),
         ("unarchiveNotifications",),
     )
 

@@ -155,16 +155,20 @@ opted in — do not try to work around it.
 
 ## Conventions
 
-- **IDs (`PrefixedID`).** The API returns ids like `"<serverId>:<rawId>"`. Pass back
-  exactly what a `list_*` tool gave you. Container ids are the exception: every
-  container result (lists, detail, logs, stats, port conflicts, update checks,
-  mutation results) shows the 12-hex Docker short id. Only `list_docker_containers`
-  and `check_docker_updates` check short ids against every container and show the
+- **IDs (`PrefixedID`).** The API returns ids as `"<serverId>:<localId>"`; the
+  64-hex server prefix is the same on every object, so tool and resource output
+  drops it and shows the bare local id (disk serial, VM UUID, notification file
+  name, ...). Every tool that takes an id accepts the bare id or the full
+  `<serverId>:<id>`; ids are trimmed, case is kept (disk serials and notification
+  names are case-sensitive). Container ids are shorter still: every container
+  result (lists, detail, logs, stats, port conflicts, update checks, mutation
+  results) shows the 12-hex Docker short id. Only `list_docker_containers` and
+  `check_docker_updates` check short ids against every container and show the
   bare 64-hex id when two share one; other results always show 12 chars. Container
   tools accept the short id (12+ hex chars), the bare 64-hex id or the full
   `<serverId>:<id>`; `get_docker_container` also accepts a name. A short id that
   matches more than one container is rejected with the candidates listed, and
-  nothing is changed. Disk, VM and notification ids are unchanged.
+  nothing is changed.
 - **Sizes.** `{"bytes": int|null, "human": str|null}`. Array/share sizes derive from
   KiB; physical disk sizes from bytes — both are normalized to this shape for you.
 - **Read results: text vs structured content.** A read tool returns one text block

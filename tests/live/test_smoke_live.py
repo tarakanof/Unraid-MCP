@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -84,6 +85,10 @@ async def live_client():
 def _is_int(value: Any) -> bool:
     # bool is a subclass of int; a size in bytes must never be a bool.
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+# `<64-hex serverId>:` must never reach output; ids are bare (#174).
+_SERVER_PREFIX = re.compile(r"[0-9a-fA-F]{64}:")
 
 
 def _check_shapes(obj: Any) -> None:
@@ -166,6 +171,7 @@ async def test_read_returns_dict(live_client, fetch):
     result = await _run(fetch, live_client)
     assert isinstance(result, dict)
     _check_shapes(result)
+    assert not _SERVER_PREFIX.search(json.dumps(result, default=str))
 
 
 @pytest.mark.parametrize("fetch", LIST_READS, ids=lambda f: f.__name__)
@@ -175,6 +181,7 @@ async def test_read_returns_list(live_client, fetch):
     for item in result:
         assert isinstance(item, dict)
     _check_shapes(result)
+    assert not _SERVER_PREFIX.search(json.dumps(result, default=str))
 
 
 @pytest.mark.parametrize(
@@ -217,6 +224,7 @@ async def test_get_disk_detail(live_client):
     detail = await _run(array.fetch_disk, live_client, disk_id)
     assert detail is None or isinstance(detail, dict)
     if detail is not None:
+        assert detail.get("id") == disk_id  # the bare listed id round-trips (#174)
         assert "size" in detail
         _check_shapes(detail)
         assert isinstance(detail.get("partitions"), list)

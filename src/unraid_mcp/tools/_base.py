@@ -17,6 +17,7 @@ from pydantic import BaseModel, BeforeValidator, Field
 
 from ..client import UnraidClient
 from ..errors import UnraidAuthError, UnraidError, UnraidGraphQLError
+from ..formatting import strip_server_prefix
 from ..logging import get_logger, redact
 
 if TYPE_CHECKING:  # avoid a runtime import cycle (server imports tools imports _base)
@@ -118,6 +119,13 @@ def feature_unsupported(
         msg += f" Requires {requires}."
     msg += " Upgrade Unraid or the Connect plugin."
     return ToolError(msg)
+
+
+def local_id(identifier: Any) -> Any:
+    """A caller's ``PrefixedID`` input as upstream resolves it: trimmed, server
+    prefix dropped, so bare and prefixed ids behave the same (#174). Case is
+    kept: disk serials and notification file names are matched exactly."""
+    return strip_server_prefix(identifier.strip()) if isinstance(identifier, str) else identifier
 
 
 async def guarded(

@@ -4,6 +4,17 @@
 
 ### Changed
 
+- **BREAKING: no server prefix on any id (#174).** Every `PrefixedID` in tool
+  and resource output (disks, VMs, notifications, shares, network interfaces,
+  Docker networks, `whoami`, Connect registration, hardware, mutation results,
+  `run_graphql_query` `id`/`containerId` fields) is now the bare local id
+  instead of `<64-hex serverId>:<localId>`. Upstream's `PrefixedID` input drops
+  the prefix, so bare ids round-trip; tools taking a disk, VM, notification or
+  array-disk id accept both forms (trimmed, case kept). Scripts that store or
+  compare prefixed ids must switch to the bare form. Live box: `list_disks`
+  2,192 to 1,607 chars, `list_vms` 1,639 to 924, `list_notifications` 3,464 to
+  3,074, `list_network_interfaces` 11,492 to 9,412. Container requests resolved
+  from a short id or name now send the bare 64-hex id.
 - **BREAKING: container ids are short in output (#172).** Container results
   (`list_docker_containers`, `get_docker_container`, logs, stats, port
   conflicts, docker mutation results and the `set_docker_autostart` list) show

@@ -337,9 +337,37 @@ def _shape_labels(labels: Any) -> tuple[Any, bool]:
     return labels, False
 
 
-# Docker's own short-id length. Container ids arrive as the `PrefixedID`
-# `<serverId>:<64-hex>`; the server prefix is identical on every object, so output
-# drops it and keeps the first 12 hex chars (the tools resolve it back, #172).
+# `PrefixedID` output is `<serverId>:<localId>`, serverId being a sha256 hex digest
+# that is identical on every object. Upstream input drops a `<x>:` prefix, so the
+# bare local id round-trips (#174). Upstream never prefixes a local id that already
+# contains ':' (e.g. sensor ids), and those are left alone here too.
+_SERVER_PREFIX = re.compile(r"[0-9a-fA-F]{64}:(?=[^:]+\Z)")
+_PREFIXED_ID_KEYS = frozenset({"id", "containerId"})
+
+
+def strip_server_prefix(value: Any) -> Any:
+    """``<64-hex serverId>:<localId>`` → ``<localId>``; anything else unchanged."""
+    if isinstance(value, str) and (m := _SERVER_PREFIX.match(value)):
+        return value[m.end() :]
+    return value
+
+
+def strip_server_prefixes(data: Any) -> Any:
+    """Copy of a GraphQL ``data`` tree with the server prefix dropped from every
+    ``id``/``containerId`` (the schema's ``PrefixedID`` output fields)."""
+    if isinstance(data, dict):
+        return {
+            k: strip_server_prefix(v) if k in _PREFIXED_ID_KEYS else strip_server_prefixes(v)
+            for k, v in data.items()
+        }
+    if isinstance(data, list):
+        return [strip_server_prefixes(v) for v in data]
+    return data
+
+
+# Docker's own short-id length. Container ids are 64-hex (the client already
+# dropped the server prefix); output keeps the first 12 hex chars (the tools
+# resolve it back, #172).
 SHORT_ID_LEN = 12
 
 

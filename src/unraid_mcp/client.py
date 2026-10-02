@@ -21,6 +21,7 @@ from .errors import (
     UnraidGraphQLError,
     UnraidServerError,
 )
+from .formatting import strip_server_prefixes
 from .logging import get_logger, redact
 
 log = get_logger(__name__)
@@ -81,7 +82,8 @@ class UnraidClient:
         timeout then reports that the operation may still be running.
 
         Raises an :class:`~unraid_mcp.errors.UnraidError` subclass on failure.
-        Configured secrets are scrubbed from data and errors.
+        Configured secrets are scrubbed from data and errors; ``PrefixedID``
+        values come back without the server prefix.
         """
         data, _ = await self.execute_with_errors(query, variables, timeout=timeout)
         return data
@@ -196,4 +198,6 @@ class UnraidClient:
             # warning and return what we got.
             log.warning("GraphQL returned partial errors: %s", messages)
 
-        return data or {}, errors
+        # The server prefix on every `PrefixedID` is constant noise; upstream
+        # takes the bare id on input, so callers only ever see bare ids (#174).
+        return strip_server_prefixes(data or {}), errors
