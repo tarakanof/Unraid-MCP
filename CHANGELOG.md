@@ -1,8 +1,50 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 - 2026-10-02
+
+LLM token-efficiency release (#163): smaller `tools/list` (read-only 40.1k →
+30.5k chars; mutations-enabled 61.9k → 44.4k chars, 61 → 53 tools) and much
+smaller tool results.
+
+### Security
+
+- Validation errors for tool arguments no longer echo input values, and
+  argument names are redacted against the configured API key and bearer
+  token (#162).
+
+### Added
+
+- Server `instructions` map tasks to tool groups for clients with tool search
+  (Claude Code loads only names + instructions up front);
+  `get_health_summary`, `list_warnings_and_alerts` and `get_system_info` carry
+  `_meta["anthropic/alwaysLoad"]` (#161).
 
 ### Changed
+
+- **BREAKING: unknown tool arguments are rejected (#162).** Every input schema
+  publishes `additionalProperties: false` and calls with undeclared arguments
+  fail with `Unknown argument. Allowed: …` before any request is made
+  (previously they were silently ignored). `tools/list` is now in alphabetical
+  order.
+
+- **Read tools return one compact text block (#156).** The text block is
+  compact JSON with null-valued keys omitted (list positions and empty
+  containers kept); lists are one block instead of one per item.
+  `structuredContent` is unchanged and canonical. `run_graphql_query` text is
+  compact but keeps nulls.
+
+- **Published schemas and descriptions trimmed (#157).** Auto-generated
+  titles stripped, nullable `anyOf` collapsed where equivalent, redundant
+  defaults dropped, docstrings unwrapped; ~30% smaller `tools/list` with
+  identical validation.
+
+- **Log and raw-query results have a 60,000-char budget (#159).**
+  `get_docker_container_logs` keeps the newest lines (`truncated`,
+  `omitted_lines`, `hint`; older lines are not retrievable — lower `tail`);
+  `read_log_file` keeps leading lines and returns `next_start_line` to page on
+  (`line_truncated` when a single line is cut); `run_graphql_query` returns a
+  truncated preview with guidance to narrow the selection. Log tools carry
+  `_meta["anthropic/maxResultSizeChars"]`.
 
 - **BREAKING (default output): list tools take filters and default to
   `detail="concise"` (#158).** `list_docker_containers`, `list_disks` and
