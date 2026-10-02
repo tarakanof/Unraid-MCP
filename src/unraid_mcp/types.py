@@ -7,8 +7,8 @@ from typing_extensions import TypedDict
 
 
 class Size(TypedDict):
-    bytes: Annotated[int | None, Field(description="Size in bytes; null if unavailable.")]
-    human: Annotated[str | None, Field(description="Human-readable binary size, such as 1.0 TiB.")]
+    bytes: Annotated[int | None, Field(description="Size in bytes.")]
+    human: Annotated[str | None, Field(description="Binary units, e.g. 1.0 TiB.")]
 
 
 class ContainerPort(TypedDict):
@@ -27,7 +27,8 @@ class TailscaleStatus(TypedDict):
 
 
 class Container(TypedDict):
-    """List item and detail share the same shaped fields."""
+    # List item and detail share the same shaped fields. (A class docstring would
+    # be published as a schema description; keep dev notes as comments.)
 
     id: str | None
     name: Annotated[
@@ -72,7 +73,7 @@ class DiskPartition(TypedDict):
 
 
 class Disk(TypedDict):
-    """Physical disk list item and detail; unselected fields remain null."""
+    # Physical disk list item and detail; unselected fields remain null.
 
     id: str | None
     name: str | None
@@ -165,27 +166,15 @@ class HealthTemperature(TypedDict):
     hottest: HealthTemperatureSensor | None
     warning_count: int
     critical_count: int
-    ignored_count: Annotated[
-        int, Field(description="Sensors skipped via UNRAID_MCP_HEALTH_IGNORE_SENSORS.")
-    ]
+    ignored_count: int
 
 
 class HealthSummary(TypedDict):
-    overall: Annotated[
-        Literal["ok", "attention", "critical", "degraded"],
-        Field(
-            description="Critical: failed disks, UPS low/depleting battery or a critical "
-            "temperature (NVMe only from 75 C). Attention: other unhealthy disks, unread "
-            "alerts/warnings, UPS on battery, parity errors, a warning temperature or an NVMe "
-            "critical below 75 C. "
-            "Degraded: only failed sub-queries."
-        ),
-    ]
-    reasons: Annotated[list[str], Field(description="One entry per signal behind overall.")]
-    checks: Annotated[
-        dict[str, Literal["ok", "failed", "not_configured"]],
-        Field(description="Status of the array, ups, notifications and temperature queries."),
-    ]
+    # overall/reasons/checks/temperature/ignored_count semantics are documented in
+    # the get_health_summary docstring; repeating them here only bloats tools/list.
+    overall: Literal["ok", "attention", "critical", "degraded"]
+    reasons: list[str]
+    checks: dict[str, Literal["ok", "failed", "not_configured"]]
     array_state: str | None
     capacity: Capacity | None
     disk_count: Annotated[int, Field(description="Assigned disks, excluding empty array slots.")]
@@ -194,9 +183,4 @@ class HealthSummary(TypedDict):
     ups: list[HealthUPS]
     notifications_unread: NotificationCounts
     top_alerts: NotRequired[list[TopAlert]]
-    temperature: NotRequired[
-        Annotated[
-            HealthTemperature,
-            Field(description="Hottest real temperature sensor; omitted if its query failed."),
-        ]
-    ]
+    temperature: NotRequired[HealthTemperature]
