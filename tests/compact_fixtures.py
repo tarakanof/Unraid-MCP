@@ -36,11 +36,26 @@ def twenty_containers() -> dict[str, Any]:
 
 # (golden key, tool, arguments, mocked GraphQL ``data``)
 CASES: list[tuple[str, str, dict[str, Any], dict[str, Any]]] = [
-    ("list_docker_containers_20", "list_docker_containers", {}, twenty_containers()),
-    ("list_docker_containers_full", "list_docker_containers", {}, _fixture("full")[0]),
-    ("list_docker_containers_null", "list_docker_containers", {}, _fixture("null")[0]),
+    (
+        "list_docker_containers_20",
+        "list_docker_containers",
+        {"detail": "full"},
+        twenty_containers(),
+    ),
+    (
+        "list_docker_containers_full",
+        "list_docker_containers",
+        {"detail": "full"},
+        _fixture("full")[0],
+    ),
+    (
+        "list_docker_containers_null",
+        "list_docker_containers",
+        {"detail": "full"},
+        _fixture("null")[0],
+    ),
     ("get_health_summary_full", "get_health_summary", {}, _fixture("full")[0]),
     ("get_health_summary_null", "get_health_summary", {}, _fixture("null")[0]),
-    ("list_disks_full", "list_disks", {}, _fixture("full")[0]),
-    ("list_disks_null", "list_disks", {}, _fixture("null")[0]),
+    ("list_disks_full", "list_disks", {"detail": "full"}, _fixture("full")[0]),
+    ("list_disks_null", "list_disks", {"detail": "full"}, _fixture("null")[0]),
 ]

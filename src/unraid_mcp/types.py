@@ -90,6 +90,45 @@ class Disk(TypedDict):
     partitions: list[DiskPartition]
 
 
+# List-tool items (#158): only the concise keys are required; the rest appear
+# with detail="full". get_* tools keep the strict Container/Disk contracts.
+# Declaration order is the serialized key order: keep it in sync with the shapers.
+
+
+class ContainerListItem(TypedDict):
+    id: str | None
+    name: Annotated[
+        str | None, Field(description="First container name without the leading slash.")
+    ]
+    names: NotRequired[list[str]]
+    image: str | None
+    state: str | None
+    status: str | None
+    auto_start: NotRequired[bool | None]
+    auto_start_order: NotRequired[int | None]
+    update_available: bool | None
+    orphaned: NotRequired[bool | None]
+    web_ui_url: str | None
+    network_mode: NotRequired[str | None]
+    ports: NotRequired[list[ContainerPort]]
+
+
+class DiskListItem(TypedDict):
+    id: str | None
+    name: str | None
+    device: str | None
+    vendor: NotRequired[str | None]
+    type: str | None
+    serial: NotRequired[str | None]
+    interface: NotRequired[str | None]
+    smart_status: str | None
+    temp_c: Annotated[int | float | None, Field(description="Disk temperature in degrees Celsius.")]
+    spinning: bool | None
+    size: Size
+    firmware: NotRequired[str | None]
+    partitions: NotRequired[list[DiskPartition]]
+
+
 class ArrayDisk(TypedDict):
     name: str | None
     device: str | None

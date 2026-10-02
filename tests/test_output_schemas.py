@@ -20,9 +20,9 @@ from unraid_mcp.tools._base import compact_text
 URL = "https://tower.local/graphql"
 TOOLS = [
     ("get_health_summary", {}),
-    ("list_docker_containers", {}),
+    ("list_docker_containers", {"detail": "full"}),
     ("get_docker_container", {"identifier": "1:abc"}),
-    ("list_disks", {}),
+    ("list_disks", {"detail": "full"}),
     ("get_disk", {"disk_id": "1:disk"}),
 ]
 CONTAINER = {

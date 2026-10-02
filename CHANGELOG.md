@@ -4,6 +4,28 @@
 
 ### Changed
 
+- **BREAKING (default output): list tools take filters and default to
+  `detail="concise"` (#158).** `list_docker_containers`, `list_disks` and
+  `list_shares` now return a small key set per item by default. Pass
+  `detail="full"` for the previous output (unchanged). `list_vms` gains
+  `name`/`state` filters only (its output is already id/name/state). Concise keys:
+
+  | Tool | Concise keys | Filters |
+  | --- | --- | --- |
+  | `list_docker_containers` | `id, name, image, state, status, update_available, web_ui_url` | `name`, `state` (`RUNNING`/`PAUSED`/`EXITED`), `update_available` |
+  | `list_disks` | `id, name, device, type, smart_status, temp_c, spinning, size` | `name` (model or device), `type`, `smart_status` (`OK`/`UNKNOWN`) |
+  | `list_vms` | no `detail` (always `id, name, state`) | `name`, `state` (`VmState`) |
+  | `list_shares` | `name, free, used, size` | `name` |
+
+  `name` filters are case-insensitive substrings; enum filters accept any case
+  (`state="running"`). `update_available=false` also excludes containers whose
+  value is `null` (older API builds). Invalid enum values are rejected with the
+  allowed values before any request is made. `get_docker_container` / `get_disk`
+  output contracts are unchanged. Agents or
+  scripts that read `ports`, `names`, `auto_start`, `serial`, `interface`,
+  `comment`, `allocator`, `cache` etc. from these lists must pass
+  `detail="full"`.
+
 - **BREAKING: non-destructive mutation tools consolidated into `action`-dispatch
   tools (#160).** Actions that share one module and one annotation tier
   (`MUTATING_IDEMPOTENT`) now live in a single tool taking

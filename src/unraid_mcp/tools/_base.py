@@ -6,14 +6,14 @@ import asyncio
 import contextlib
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from mcp.server.mcpserver import Context, Elicit, ElicitationResult
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.utilities.func_metadata import FuncMetadata
 from mcp.types import CallToolResult, InputRequiredResult, TextContent, ToolAnnotations
 from mcp_types.version import is_version_at_least
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 from ..client import UnraidClient
 from ..errors import UnraidAuthError, UnraidError, UnraidGraphQLError
@@ -242,12 +242,53 @@ def require_confirm(confirm: bool, action: str) -> None:
         )
 
 
+def require_choice(param: str, value: Any, allowed: tuple[Any, ...]) -> None:
+    """Raise ``ToolError`` (before any network call) if ``value`` is not one of
+    ``allowed``. The MCP layer already validates ``Literal`` schemas; this guards
+    direct callers of the ``fetch_*`` / ``do_*`` logic."""
+    if value not in allowed:
+        raise ToolError(f"Invalid {param} '{value}'. Must be one of: {', '.join(allowed)}.")
+
+
 def require_action(action: str, allowed: tuple[str, ...]) -> None:
-    """Raise ``ToolError`` (before any network call) if a consolidated tool's
-    ``action`` is not one of ``allowed``. The MCP layer already validates the
-    ``Literal`` schema; this guards direct callers of the ``do_*`` logic."""
-    if action not in allowed:
-        raise ToolError(f"Invalid action '{action}'. Must be one of: {', '.join(allowed)}.")
+    """``require_choice`` for a consolidated tool's ``action``."""
+    require_choice("action", action, allowed)
+
+
+# List tools (#158): ``concise`` keeps a small fixed key set per item, ``full``
+# returns every shaped field.
+Detail = Literal["concise", "full"]
+DETAILS: tuple[str, ...] = get_args(Detail)
+
+
+def upper_if_str(value: Any) -> Any:
+    """Uppercase strings (enum filters accept any case); pass anything else through."""
+    return value.upper() if isinstance(value, str) else value
+
+
+# ``Annotated[<UPPERCASE Literal> | None, CaseInsensitive]``: the published schema
+# keeps the uppercase enum, but "running" is accepted as "RUNNING".
+CaseInsensitive = BeforeValidator(upper_if_str)
+
+
+def contains_ci(needle: str | None, *haystacks: Any) -> bool:
+    """Case-insensitive substring match against any string haystack.
+    ``needle=None`` (filter unset) always matches."""
+    if needle is None:
+        return True
+    n = needle.casefold()
+    return any(isinstance(h, str) and n in h.casefold() for h in haystacks)
+
+
+def select_detail(items: list[Any], keys: tuple[str, ...], detail: str) -> list[Any]:
+    """Project each dict item onto ``keys`` for ``detail="concise"``; ``full``
+    returns the items unchanged. Non-dict items (``None``) pass through."""
+    if detail == "full":
+        return items
+    return [
+        {k: item[k] for k in keys if k in item} if isinstance(item, dict) else item
+        for item in items
+    ]
 
 
 REAP_TIMEOUT_S = 1.0
