@@ -372,7 +372,9 @@ SHORT_ID_LEN = 12
 
 
 def bare_container_id(cid: Any) -> Any:
-    """``<serverId>:<hex>`` → ``<hex>``; non-strings and bare ids pass through."""
+    """``<serverId>:<hex>`` → ``<hex>``; non-strings and bare ids pass through.
+    Prefixed input still occurs: callers' ids, and stats subscription frames
+    (subscriptions bypass the client's prefix strip)."""
     return cid.rsplit(":", 1)[-1] if isinstance(cid, str) else cid
 
 

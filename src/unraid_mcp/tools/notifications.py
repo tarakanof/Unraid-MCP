@@ -128,7 +128,7 @@ async def do_archive_notifications(
         raise ToolError("ids must be a non-empty list of notification ids.")
     require_confirm(confirm, _archive_state_bulk_consequence(ids, "archive"))
     return shape_mutation_result(
-        await client.execute(queries.ARCHIVE_NOTIFICATIONS, {"ids": [local_id(i) for i in ids]}),
+        await client.execute(queries.ARCHIVE_NOTIFICATIONS, {"ids": _local_ids(ids)}),
         ("archiveNotifications",),
     )
 
@@ -140,7 +140,7 @@ async def do_unarchive_notifications(
         raise ToolError("ids must be a non-empty list of notification ids.")
     require_confirm(confirm, _archive_state_bulk_consequence(ids, "unarchive"))
     return shape_mutation_result(
-        await client.execute(queries.UNARCHIVE_NOTIFICATIONS, {"ids": [local_id(i) for i in ids]}),
+        await client.execute(queries.UNARCHIVE_NOTIFICATIONS, {"ids": _local_ids(ids)}),
         ("unarchiveNotifications",),
     )
 
@@ -216,6 +216,11 @@ async def do_notification_archive_bulk(
     if action == "archive":
         return await do_archive_notifications(client, ids, confirm)
     return await do_unarchive_notifications(client, ids, confirm)
+
+
+def _local_ids(ids: list[str]) -> list[str]:
+    """Bare ids, first occurrence kept: `x` and `<serverId>:x` are one notification."""
+    return list(dict.fromkeys(local_id(i) for i in ids))
 
 
 def _archive_state_consequence(notification_id: str, action: str) -> str:

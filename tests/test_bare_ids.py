@@ -16,7 +16,7 @@ from mcp.types import ElicitResult
 from tests.conftest import URL
 from unraid_mcp.formatting import strip_server_prefix, strip_server_prefixes
 from unraid_mcp.server import build_server
-from unraid_mcp.tools import array, notifications, vm
+from unraid_mcp.tools import array, misc, notifications, vm
 from unraid_mcp.tools._base import local_id
 
 SERVER = "3f9a" * 16  # sha256 hex, like upstream's getServerIdentifier()
@@ -201,7 +201,6 @@ OPS = {
     "GetLogFile": {
         "logFile": {"path": "/var/log/syslog", "content": "x\n", "totalLines": 1, "startLine": 1}
     },
-    "RawProbe": {"vms": {"domains": [{"id": p(VM_UUID)}]}, "docker": {"containerId": p(CID)}},
 }
 OPS["GetUpsDevicesLegacy"] = OPS["GetUpsDevices"]
 OPS["GetArrayStatusLegacy"] = OPS["GetArrayStatus"]
@@ -244,11 +243,11 @@ READ_CALLS = {
     "list_vms": {},
     "list_warnings_and_alerts": {},
     "read_log_file": {"path": "/var/log/syslog"},
-    "run_graphql_query": {"query": "query RawProbe { vms { domains { id } } }"},
     "whoami": {},
 }
 # Stats come from a websocket subscription, shortened in test_tools_stats.py.
-NOT_HTTP = {"get_docker_container_stats"}
+# run_graphql_query returns raw upstream data on purpose (see the raw tests below).
+NOT_HTTP = {"get_docker_container_stats", "run_graphql_query"}
 
 
 def _text(result) -> str:
@@ -411,3 +410,43 @@ async def test_destructive_vm_elicits_with_caller_id_before_any_request(settings
     assert not result.is_error, result.content
     assert any(f"force-stop VM '{p(VM_UUID)}'" in m for m in messages)
     assert _body(route.calls[-1])["variables"] == {"id": VM_UUID}
+
+
+# ── run_graphql_query: raw upstream data, prefixes kept ─────────────────────
+
+RAW = {
+    "vms": {"id": p("vms"), "domains": [{"local": p(VM_UUID), "id": p(VM_UUID)}]},
+    "id": {"id": p("nested")},  # `id: vms { ... }` alias
+    "notifications": {"list": [{"id": p(NOTE), "description": p("free text")}]},
+}
+
+
+async def test_raw_query_returns_ids_unstripped(mocked_client):
+    async with mocked_client(_resp(RAW)) as (client, _):
+        out = await misc.do_raw_query(client, "query { vms { id } }")
+    assert out == RAW
+
+
+async def test_raw_query_tool_keeps_prefixes_end_to_end(settings_factory):
+    with respx.mock:
+        respx.post(URL).mock(return_value=_resp(RAW))
+        mcp = build_server(settings_factory(allow_raw_query=True))
+        async with Client(mcp) as session:
+            result = await session.call_tool("run_graphql_query", {"query": "query { vms { id } }"})
+    assert not result.is_error, result.content
+    assert result.structured_content == RAW
+
+
+async def test_client_opt_out_keeps_aliases_and_text_untouched(mocked_client):
+    async with mocked_client(_resp(RAW)) as (client, _):
+        raw = await client.execute("query { x }", strip_prefixes=False)
+        data, _ = await client.execute_with_errors("query { x }", strip_prefixes=False)
+    assert raw == data == RAW
+
+
+async def test_bulk_notification_ids_deduped_after_normalizing(mocked_client):
+    done = {"archiveNotifications": {"unread": COUNTS, "archive": COUNTS}}
+    ids = [p(NOTE), NOTE, f" {NOTE} ", "Other_1.notify"]
+    async with mocked_client(_resp(done)) as (client, route):
+        await notifications.do_notification_archive_bulk(client, ids, "archive", True)
+    assert _body(route.calls[0])["variables"] == {"ids": [NOTE, "Other_1.notify"]}

@@ -158,7 +158,8 @@ opted in — do not try to work around it.
 - **IDs (`PrefixedID`).** The API returns ids as `"<serverId>:<localId>"`; the
   64-hex server prefix is the same on every object, so tool and resource output
   drops it and shows the bare local id (disk serial, VM UUID, notification file
-  name, ...). Every tool that takes an id accepts the bare id or the full
+  name, ...); `run_graphql_query` returns raw data, so ids there keep the
+  prefix. Every tool that takes an id accepts the bare id or the full
   `<serverId>:<id>`; ids are trimmed, case is kept (disk serials and notification
   names are case-sensitive). Container ids are shorter still: every container
   result (lists, detail, logs, stats, port conflicts, update checks, mutation
