@@ -64,6 +64,12 @@ class Container(TypedDict):
     size_log: NotRequired[Size]
 
 
+class DockerUpdateStatus(TypedDict):
+    id: str | None
+    name: str | None
+    update_status: str | None
+
+
 class DiskPartition(TypedDict):
     __pydantic_config__ = ConfigDict(extra="forbid")
 

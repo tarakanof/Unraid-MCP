@@ -17,7 +17,7 @@ import re
 from typing import Any
 
 from .errors import UnraidServerError
-from .types import ArrayDisk, Container, Disk, HealthSummary, Size
+from .types import ArrayDisk, Container, Disk, DockerUpdateStatus, HealthSummary, Size
 
 _FAILED_STATUSES = {"DISK_DSBL", "DISK_INVALID", "DISK_WRONG", "DISK_DSBL_NEW", "DISK_NP_DSBL"}
 # DISK_NP means "no device present" - an empty/unassigned array slot, which is a
@@ -686,10 +686,21 @@ def limit_raw_result(data: dict[str, Any], budget: int = MAX_RAW_RESULT_CHARS) -
     return envelope
 
 
-def shape_docker_update_statuses(data: dict | None) -> list[dict[str, Any]]:
+def shape_docker_update_statuses(data: dict | None) -> list[DockerUpdateStatus]:
+    """Statuses keyed by name upstream; ``id`` (short, as in the container list)
+    is joined from ``containers`` by name, null when no container matches."""
     docker = (data or {}).get("docker") or {}
+    ids: dict[str, Any] = {}
+    for c in shorten_container_ids([c for c in docker.get("containers") or [] if c]):
+        for n in c.get("names") or []:
+            if isinstance(n, str):
+                ids.setdefault(n.lstrip("/"), c.get("id"))
     return [
-        {"name": item.get("name"), "update_status": item.get("updateStatus")}
+        {
+            "id": ids.get(str(item.get("name") or "").lstrip("/")),
+            "name": item.get("name"),
+            "update_status": item.get("updateStatus"),
+        }
         for item in (docker.get("containerUpdateStatuses") or [])
     ]
 

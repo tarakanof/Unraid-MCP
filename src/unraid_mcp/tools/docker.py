@@ -34,7 +34,7 @@ from ..formatting import (
     shorten_container_ids,
 )
 from ..logging import redact
-from ..types import Container, ContainerListItem
+from ..types import Container, ContainerListItem, DockerUpdateStatus
 from ._base import (
     DESTRUCTIVE,
     DESTRUCTIVE_IDEMPOTENT,
@@ -191,6 +191,30 @@ def _pick_container(refs: list[dict[str, Any]], identifier: str, *, names: bool)
     )
 
 
+def _normalize_id(identifier: str) -> str:
+    """Trim, and lowercase the hex id part of a full or bare 64-hex id
+    (upstream matches ids exactly; Docker ids are lowercase)."""
+    ident = identifier.strip()
+    if ":" in ident:
+        prefix, bare = ident.rsplit(":", 1)
+        return f"{prefix}:{bare.lower()}" if _is_hex(bare) else ident
+    if len(ident) == _FULL_HEX_LEN and _is_hex(ident):
+        return ident.lower()
+    return ident
+
+
+def _require_id(identifier: Any) -> str:
+    if not isinstance(identifier, str) or not identifier.strip():
+        raise ToolError("Container id must be a non-empty id from list_docker_containers.")
+    return identifier.strip()
+
+
+async def _fetch_refs(client: UnraidClient) -> list[dict[str, Any]]:
+    data = await client.execute(queries.CONTAINER_REFS)
+    refs = ((data or {}).get("docker") or {}).get("containers") or []
+    return [r for r in refs if isinstance(r, dict)]
+
+
 async def resolve_container_id(
     client: UnraidClient, identifier: str, *, names: bool = False
 ) -> str:
@@ -198,34 +222,31 @@ async def resolve_container_id(
 
     A short id (12..63 hex chars) and, with ``names``, a container name are
     resolved against the container list. Anything else (the full
-    ``PrefixedID``, the bare 64-hex id, unknown forms) is sent unchanged, with
-    no extra request. Mutations call this only AFTER ``require_confirm`` since
-    the lookup is network I/O.
+    ``PrefixedID``, the bare 64-hex id, unknown forms) is sent trimmed (hex
+    lowercased), with no extra request. Mutations call this only AFTER
+    ``require_confirm`` since the lookup is network I/O.
     """
-    if not isinstance(identifier, str) or not identifier.strip():
-        raise ToolError("Container id must be a non-empty id from list_docker_containers.")
-    if not _needs_lookup(identifier.strip(), names):
-        return identifier
-    identifier = identifier.strip()
-    data = await client.execute(queries.CONTAINER_REFS)
-    refs = ((data or {}).get("docker") or {}).get("containers") or []
-    return _pick_container([r for r in refs if isinstance(r, dict)], identifier, names=names)
+    ident = _require_id(identifier)
+    if not _needs_lookup(ident, names):
+        return _normalize_id(ident)
+    return _pick_container(await _fetch_refs(client), ident, names=names)
 
 
 async def resolve_container_ids(client: UnraidClient, identifiers: list[str]) -> list[str]:
-    """Batch :func:`resolve_container_id`: at most one list request for all ids."""
-    if not any(isinstance(i, str) and _needs_lookup(i.strip(), False) for i in identifiers):
-        return list(identifiers)
-    data = await client.execute(queries.CONTAINER_REFS)
-    refs = [
-        r for r in ((data or {}).get("docker") or {}).get("containers") or [] if isinstance(r, dict)
+    """Batch :func:`resolve_container_id`: at most one list request for all ids.
+    Two inputs that resolve to the same container are rejected."""
+    idents = [_require_id(i) for i in identifiers]
+    refs = await _fetch_refs(client) if any(_is_short_id(i) for i in idents) else []
+    out = [
+        _pick_container(refs, i, names=False) if _is_short_id(i) else _normalize_id(i)
+        for i in idents
     ]
-    out: list[str] = []
-    for ident in identifiers:
-        if not isinstance(ident, str) or not ident.strip():
-            raise ToolError("Container id must be a non-empty id from list_docker_containers.")
-        short = ident.strip()
-        out.append(_pick_container(refs, short, names=False) if _is_short_id(short) else ident)
+    keys = [bare_container_id(o).lower() for o in out]
+    dupes = sorted({_shown(k) for k in keys if keys.count(k) > 1})
+    if dupes:
+        raise ToolError(
+            f"container_ids list the same container more than once: {dupes}. Nothing was changed."
+        )
     return out
 
 
@@ -281,23 +302,32 @@ async def fetch_container(
 
 async def _resolve_container(client: UnraidClient, identifier: str) -> dict[str, Any]:
     """Detail view for an id (full, bare or short) or name; full upstream id kept."""
+    ident = _require_id(identifier)
     rows: list[dict[str, Any]] | None = None
-    cid = identifier
-    if _needs_lookup(identifier.strip(), True):
+    cid = _normalize_id(ident)
+    if _needs_lookup(ident, True):
         # The list doubles as the lookup table and the old-build fallback row.
         rows = [c for c in await _list_containers(client) if c is not None]
-        cid = _pick_container(rows, identifier.strip(), names=True)
+        cid = _pick_container(rows, ident, names=True)
     native = await fetch_container_native(client, cid)
     if native is not None:
         return native
-    # Old build without `docker.container`, or an id upstream didn't match: list fallback.
+    # Old build without `docker.container`, or an id upstream didn't match: list
+    # fallback by id, then by exact name (a container may be named like a hex id).
     if rows is None:
         rows = [c for c in await _list_containers(client) if c is not None]
-    bare = bare_container_id(cid)
+    bare = bare_container_id(cid).lower()
     for container in rows:
-        if bare_container_id(container.get("id")) == bare:
+        if str(bare_container_id(container.get("id")) or "").lower() == bare:
             return container
-    raise ToolError(f"No Docker container matching '{identifier}'.")
+    named = next((c for c in rows if ident.lstrip("/") in _container_names(c)), None)
+    if named is not None:
+        if named.get("id"):
+            native = await fetch_container_native(client, named["id"])
+            if native is not None:
+                return native
+        return named
+    raise ToolError(f"No Docker container matching '{ident}'.")
 
 
 async def fetch_docker_port_conflicts(
@@ -370,7 +400,7 @@ async def fetch_container_logs(
 
 async def fetch_docker_updates(
     client: UnraidClient, *, api_version: str | None = None
-) -> list[dict[str, Any]]:
+) -> list[DockerUpdateStatus]:
     try:
         return shape_docker_update_statuses(await client.execute(queries.DOCKER_UPDATE_STATUSES))
     except UnraidGraphQLError as exc:
@@ -668,6 +698,13 @@ async def do_refresh_docker_digests(
 MAX_AUTOSTART_WAIT = 2147483647  # GraphQL Int max
 
 
+def _shown(cid: str) -> str:
+    """Id as shown in error messages: never the server prefix; the 12-hex short
+    id for a 64-hex id, else the bare form."""
+    bare = bare_container_id(cid)
+    return short_container_id(bare) if len(bare) == _FULL_HEX_LEN and _is_hex(bare) else bare
+
+
 def _validate_autostart_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Validate and normalise requested changes ({id, auto_start, wait?})."""
     if not isinstance(entries, list) or not entries:
@@ -687,7 +724,7 @@ def _validate_autostart_entries(entries: list[dict[str, Any]]) -> list[dict[str,
         if not isinstance(cid, str) or not cid.strip():
             raise ToolError(f"entries[{i}].id must be a non-empty container id.")
         if cid in seen:
-            raise ToolError(f"entries[{i}].id {cid!r} is listed more than once.")
+            raise ToolError(f"entries[{i}].id {_shown(cid)!r} is listed more than once.")
         seen.add(cid)
         auto = entry["auto_start"] if "auto_start" in entry else entry.get("autoStart")
         if not isinstance(auto, bool):
@@ -739,7 +776,7 @@ def _validate_order(order: list[str] | None) -> list[str] | None:
     for i, cid in enumerate(order):
         if not isinstance(cid, str) or not cid.strip():
             raise ToolError(f"order[{i}] must be a non-empty container id.")
-    dupes = sorted({c for c in order if order.count(c) > 1})
+    dupes = sorted({_shown(c) for c in order if order.count(c) > 1})
     if dupes:
         raise ToolError(f"order lists id(s) more than once: {dupes}.")
     return order
@@ -769,12 +806,12 @@ def _canonicalize_autostart(
     refs = [c for c in containers if isinstance(c, dict) and isinstance(c.get("id"), str)]
     changes = [{**c, "id": _canonical_id(refs, c["id"])} for c in changes]
     ids = [c["id"] for c in changes]
-    dupes = sorted({short_container_id(i) for i in ids if ids.count(i) > 1})
+    dupes = sorted({_shown(i) for i in ids if ids.count(i) > 1})
     if dupes:
         raise ToolError(f"entries list the same container more than once: {dupes}.")
     if order is not None:
         order = [_canonical_id(refs, o) for o in order]
-        dupes = sorted({short_container_id(o) for o in order if order.count(o) > 1})
+        dupes = sorted({_shown(o) for o in order if order.count(o) > 1})
         if dupes:
             raise ToolError(f"order lists id(s) more than once: {dupes}.")
     return changes, order
@@ -792,7 +829,7 @@ def _merge_autostart(
     requested enables updated in place or appended.
     """
     known = {c["id"] for c in containers if c.get("id")}
-    missing = [c["id"] for c in changes if c["id"] not in known]
+    missing = [_shown(c["id"]) for c in changes if c["id"] not in known]
     if missing:
         raise ToolError(
             f"Unknown container id(s): {missing}. Use ids from list_docker_containers; "
@@ -820,7 +857,7 @@ def _merge_autostart(
             current.append(dict(change))
     if order:
         have = {e["id"] for e in current}
-        not_enabled = [c for c in order if c not in have]
+        not_enabled = [_shown(c) for c in order if c not in have]
         if not_enabled:
             raise ToolError(
                 f"order lists id(s) that would not be autostart-enabled: {not_enabled}. "
@@ -943,6 +980,13 @@ def _validate_container_ids(container_ids: list[str]) -> None:
             f"Too many container ids: {len(container_ids)} exceeds the maximum of "
             f"{MAX_UPDATE_CONTAINERS} per call. Split the update into smaller batches."
         )
+    # Same id twice, or full and bare forms of one id: caught without a request.
+    keys = [
+        bare_container_id(_normalize_id(i)).lower() for i in container_ids if isinstance(i, str)
+    ]
+    dupes = sorted({_shown(k) for k in keys if keys.count(k) > 1})
+    if dupes:
+        raise ToolError(f"container_ids list the same container more than once: {dupes}.")
 
 
 def _container_power_consequence(container_id: str, action: str) -> str:
@@ -1027,7 +1071,8 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         """List Docker containers. Filter before listing everything: name
         (case-insensitive substring), state, update_available (false also
         excludes null, i.e. unknown on older API builds). id is the 12-hex
-        short id; container tools also take the full id. detail="concise"
+        short id (bare 64-hex if two share it); container tools also take the
+        full id. detail="concise"
         returns id, name, image, state, status, update_available, web_ui_url;
         "full" adds names, auto_start(_order), orphaned, network_mode, ports.
         Use get_docker_container for one container's sizes, mounts and labels."""
@@ -1117,8 +1162,8 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         briefly opens a websocket, collects one reading for each container, then
         disconnects (typically ~2s; bounded to ~12s — it never hangs). Returns
         `{"containers": [{id, cpu_percent, mem_percent, mem_usage, net_io,
-        block_io}, ...], "sampled", "partial", "note"}`. `id` matches
-        `list_docker_containers`. `mem_usage`/`net_io`/`block_io` are the API's
+        block_io}, ...], "sampled", "partial", "note"}`. `id` is the
+        12-hex short id. `mem_usage`/`net_io`/`block_io` are the API's
         pre-formatted "used / limit" strings (e.g. "65.56MiB / 31.25GiB"), not
         byte counts. If `partial` is true the window elapsed before every
         container reported — see `note` and retry for a full snapshot. Requires
@@ -1134,8 +1179,8 @@ def register(mcp: MCPServer, settings: Settings) -> None:
             )
 
     @mcp.tool(title="Check Docker Updates", annotations=READ_ONLY)
-    async def check_docker_updates(ctx: Context) -> list[dict[str, Any]]:
-        """Per-container Docker image update status (name, update_status).
+    async def check_docker_updates(ctx: Context) -> list[DockerUpdateStatus]:
+        """Per-container Docker image update status (id, name, update_status).
         Reads cached image-update digests already computed by the Unraid API;
         it does not trigger a fresh digest check (call
         `refresh_docker_digests` first when mutations are enabled)."""

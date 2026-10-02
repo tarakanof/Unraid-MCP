@@ -724,14 +724,15 @@ async def test_docker_updates_happy_and_empty(mocked_client):
             "containerUpdateStatuses": [
                 {"name": "plex", "updateStatus": "UP_TO_DATE"},
                 {"name": "sonarr", "updateStatus": "UPDATE_AVAILABLE"},
-            ]
+            ],
+            "containers": [{"id": "1:" + "ab" * 32, "names": ["/plex"]}],
         }
     }
     async with mocked_client(_resp(data)) as (c, r):
         out = await docker.fetch_docker_updates(c)
     assert out == [
-        {"name": "plex", "update_status": "UP_TO_DATE"},
-        {"name": "sonarr", "update_status": "UPDATE_AVAILABLE"},
+        {"id": "ab" * 6, "name": "plex", "update_status": "UP_TO_DATE"},
+        {"id": None, "name": "sonarr", "update_status": "UPDATE_AVAILABLE"},
     ]
     assert _sent_query(r) == queries.DOCKER_UPDATE_STATUSES
 

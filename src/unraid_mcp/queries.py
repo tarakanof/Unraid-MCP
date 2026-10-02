@@ -243,7 +243,7 @@ query GetContainerLogs($id: PrefixedID!, $since: DateTime, $tail: Int) {
 
 DOCKER_UPDATE_STATUSES = """
 query GetDockerUpdateStatuses {
-  docker { containerUpdateStatuses { name updateStatus } }
+  docker { containerUpdateStatuses { name updateStatus } containers { id names } }
 }
 """
 

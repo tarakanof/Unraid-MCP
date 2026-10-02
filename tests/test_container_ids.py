@@ -282,3 +282,133 @@ async def test_destructive_short_id_elicits_with_caller_id_before_any_request(se
     sent = [_body(c) for c in route.calls[1:]]
     assert sent[0]["query"] == queries.CONTAINER_REFS
     assert sent[1]["variables"] == {"id": FULL}
+
+
+# ── Review follow-ups ────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "ids",
+    [
+        [FULL, FULL],
+        [PLEX, FULL],
+        [PLEX.upper(), PLEX],
+        [f" {PLEX} ", f"{SERVER}:{PLEX.upper()}"],
+    ],
+    ids=["full-full", "bare-full", "case", "space-prefixed-upper"],
+)
+async def test_update_containers_literal_alias_duplicates_rejected_before_any_request(
+    mocked_client, ids
+):
+    async with mocked_client(_resp(REFS)) as (client, route):
+        with pytest.raises(ToolError, match="more than once"):
+            await docker.do_update_containers(client, ids, confirm=True)
+    assert route.call_count == 0
+
+
+@pytest.mark.parametrize(
+    "ids",
+    [[PLEX[:12], FULL], [PLEX[:12], PLEX], [PLEX[:12], PLEX[:16].upper()]],
+    ids=["short-full", "short-bare", "short-short"],
+)
+async def test_update_containers_resolved_duplicates_rejected_before_mutation(mocked_client, ids):
+    async with mocked_client(_resp(REFS)) as (client, route):
+        with pytest.raises(ToolError, match="more than once") as exc:
+            await docker.do_update_containers(client, ids, confirm=True)
+    assert route.call_count == 1
+    assert _body(route.calls[0])["query"] == queries.CONTAINER_REFS
+    assert SERVER not in str(exc.value)
+
+
+async def test_update_containers_literal_duplicates_refused_before_elicitation(settings_factory):
+    async def elicit(context, params):
+        pytest.fail("duplicates must be refused before asking a human")
+
+    with respx.mock:
+        respx.post(URL).mock(return_value=_resp({}))
+        mcp = build_server(settings_factory(allow_mutations=True))
+        async with Client(mcp, mode="auto", elicitation_callback=elicit) as client:
+            respx.calls.clear()
+            result = await client.call_tool(
+                "update_docker_containers", {"container_ids": [PLEX, FULL], "confirm": True}
+            )
+            assert result.is_error
+            assert len(respx.calls) == 0
+
+
+@pytest.mark.parametrize("ident", [f"  {FULL.upper()} ", f"{PLEX.upper()}\n"])
+async def test_passthrough_ids_are_trimmed_and_lowercased(mocked_client, ident):
+    async with mocked_client(_resp(STOPPED)) as (client, route):
+        await docker.do_stop_container(client, ident, confirm=True)
+    sent = _body(route.calls[0])["variables"]["id"]
+    assert sent == sent.strip()
+    assert sent.split(":")[-1] == PLEX
+
+
+async def test_hex_looking_name_reachable_by_exact_name(mocked_client):
+    hex_name = "d" * 64
+    rows = {
+        "docker": {
+            "containers": [
+                {"id": FULL, "names": [f"/{hex_name}"], "state": "RUNNING"},
+                {"id": f"{SERVER}:{RADARR}", "names": ["/radarr"]},
+            ]
+        }
+    }
+    responses = [_resp({"docker": {"container": None}}), _resp(rows), _resp(DETAIL)]
+    async with mocked_client(responses) as (client, route):
+        out = await docker.fetch_container(client, hex_name)
+    assert out["id"] == PLEX[:12]
+    assert _body(route.calls[0])["variables"] == {"id": hex_name}
+    assert _body(route.calls[2])["variables"] == {"id": FULL}
+
+
+async def test_hex_looking_short_name_reachable(mocked_client):
+    rows = {"docker": {"containers": [{"id": FULL, "names": ["/cafebabe1234"]}]}}
+    async with mocked_client([_resp(rows), _resp(DETAIL)]) as (client, route):
+        out = await docker.fetch_container(client, "cafebabe1234")
+    assert out["id"] == PLEX[:12]
+    assert _body(route.calls[1])["variables"] == {"id": FULL}
+
+
+AUTOSTART_STATE = {
+    "docker": {
+        "containers": [
+            {"id": FULL, "names": ["/plex"], "autoStart": True, "autoStartOrder": 0},
+            {"id": f"{SERVER}:{RADARR}", "names": ["/radarr"], "autoStart": False},
+        ]
+    }
+}
+
+
+@pytest.mark.parametrize(
+    "entries,order",
+    [
+        ([{"id": "deadbeefdead", "auto_start": True}], None),
+        ([{"id": f"{SERVER}:{'e' * 64}", "auto_start": True}], None),
+        ([{"id": PLEX[:12], "auto_start": False}], [PLEX[:12]]),
+        ([{"id": RADARR[:12], "auto_start": True}], [RADARR[:12], FULL, PLEX]),
+        ([{"id": PLEX[:12], "auto_start": True}, {"id": FULL, "auto_start": True}], None),
+    ],
+    ids=["unknown-short", "unknown-full", "order-not-enabled", "order-dup", "entries-dup"],
+)
+async def test_autostart_errors_never_show_server_prefix(mocked_client, entries, order):
+    async with mocked_client(_resp(AUTOSTART_STATE)) as (client, route):
+        with pytest.raises(ToolError) as exc:
+            await docker.do_set_docker_autostart(client, entries, order=order, confirm=True)
+    msg = str(exc.value)
+    assert SERVER not in msg
+    assert PLEX not in msg and RADARR not in msg  # short form only
+    assert route.call_count <= 1  # at most the state read; never the mutation
+
+
+async def test_check_docker_updates_ids_feed_update_tools(mocked_client):
+    data = {
+        "docker": {
+            "containerUpdateStatuses": [{"name": "plex", "updateStatus": "UPDATE_AVAILABLE"}],
+            "containers": REFS["docker"]["containers"],
+        }
+    }
+    async with mocked_client(_resp(data)) as (client, _):
+        (status,) = await docker.fetch_docker_updates(client)
+    assert status == {"id": PLEX[:12], "name": "plex", "update_status": "UPDATE_AVAILABLE"}
