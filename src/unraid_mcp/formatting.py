@@ -509,8 +509,22 @@ _TRUNCATION_MARKER = "… [truncated]"
 # tokens and truncates at 25k; line-count caps alone allow ~2M chars.
 MAX_LOG_RESULT_CHARS = 60_000
 MAX_RAW_RESULT_CHARS = MAX_LOG_RESULT_CHARS
-# Per-line JSON overhead beyond the message (keys, timestamp, punctuation).
-_LOG_LINE_OVERHEAD_CHARS = 80
+# Room kept free for metadata keys (path, cursor, hint, counters, ...).
+_RESULT_RESERVE_CHARS = 1_000
+
+
+def _jlen(value: Any) -> int:
+    """Length of ``value`` as serialized JSON (escaping included)."""
+    return len(json.dumps(value, ensure_ascii=False, default=str))
+
+
+def _cut_to_escaped(text: str, avail: int) -> str:
+    """Longest prefix of ``text`` whose JSON-escaped body is <= ``avail`` chars."""
+    avail = max(avail, 0)
+    while text and _jlen(text) - 2 > avail:
+        excess = _jlen(text) - 2 - avail
+        text = text[: max(0, len(text) - max(1, excess // 2))]
+    return text
 
 
 def _shape_log_line(line: dict | None) -> dict[str, Any]:
@@ -526,12 +540,14 @@ def shape_container_logs(data: dict | None) -> dict[str, Any]:
     docker = (data or {}).get("docker") or {}
     logs = docker.get("logs") or {}
     lines = [_shape_log_line(line) for line in (logs.get("lines") or [])]
-    # Keep the NEWEST lines that fit the budget (tail semantics); drop the oldest.
+    # Keep the NEWEST lines that fit the serialized budget (tail semantics);
+    # the oldest are dropped.
+    budget = MAX_LOG_RESULT_CHARS - _RESULT_RESERVE_CHARS
     used = 0
     keep_from = len(lines)
     for i in range(len(lines) - 1, -1, -1):
-        cost = len(lines[i]["message"]) + _LOG_LINE_OVERHEAD_CHARS
-        if used + cost > MAX_LOG_RESULT_CHARS:
+        cost = _jlen(lines[i]) + 2
+        if used + cost > budget:
             break
         used += cost
         keep_from = i
@@ -546,6 +562,10 @@ def shape_container_logs(data: dict | None) -> dict[str, Any]:
     if omitted:
         out["truncation_reason"] = "char_budget"
         out["omitted_lines"] = omitted
+        out["hint"] = (
+            "Older lines were dropped to fit the size budget and cannot be "
+            "retrieved; lower `tail` or narrow `since` for a smaller window."
+        )
     return out
 
 
@@ -570,45 +590,59 @@ def shape_log_file(data: dict | None) -> dict[str, Any]:
         "total_lines": f.get("totalLines"),
         "start_line": f.get("startLine"),
     }
-    if isinstance(content, str) and len(content) > MAX_LOG_RESULT_CHARS:
-        # Keep whole leading lines; paging forward resumes at the first omitted one.
-        lines = content.splitlines(keepends=True)
+    avail = MAX_LOG_RESULT_CHARS - _RESULT_RESERVE_CHARS - _jlen(f.get("path"))
+    if isinstance(content, str) and _jlen(content) - 2 > avail:
+        # Split on "\n" only: upstream counts lines by \n, and next_start_line
+        # must stay in step with it (str.splitlines also splits on \r, \x0c, ...).
+        lines = content.split("\n")
+        lines = [ln + "\n" for ln in lines[:-1]] + ([lines[-1]] if lines[-1] else [])
         kept: list[str] = []
         used = 0
         for line in lines:
-            if used + len(line) > MAX_LOG_RESULT_CHARS:
+            cost = _jlen(line) - 2
+            if used + cost > avail:
                 break
             kept.append(line)
-            used += len(line)
-        if not kept:  # single line larger than the budget: cut it
-            kept = [lines[0][:MAX_LOG_RESULT_CHARS] + _TRUNCATION_MARKER]
+            used += cost
+        line_truncated = False
+        if not kept:  # one line alone exceeds the budget: cut it
+            marker_cost = _jlen(_TRUNCATION_MARKER) - 2
+            kept = [_cut_to_escaped(lines[0], avail - marker_cost) + _TRUNCATION_MARKER]
+            line_truncated = True
         out["content"] = "".join(kept)
         out["truncated"] = True
         out["truncation_reason"] = "char_budget"
         out["omitted_lines"] = len(lines) - len(kept)
+        if line_truncated:
+            out["line_truncated"] = True
         start = f.get("startLine")
-        if isinstance(start, int):
-            out["next_start_line"] = start + len(kept)
+        if not isinstance(start, int):
+            start = 1
+        out["next_start_line"] = start + len(kept)
     return out
 
 
 def limit_raw_result(data: dict[str, Any], budget: int = MAX_RAW_RESULT_CHARS) -> dict[str, Any]:
     """Pass a raw GraphQL result through unless its JSON exceeds ``budget`` chars;
-    then return a truncation envelope with a prefix preview and a hint."""
-    text = json.dumps(data, default=str)
+    then return a truncation envelope (<= ``budget`` serialized) with a prefix
+    preview and a hint."""
+    text = json.dumps(data, ensure_ascii=False, default=str)
     if len(text) <= budget:
         return data
-    return {
+    envelope: dict[str, Any] = {
         "truncated": True,
         "truncation_reason": "char_budget",
         "total_chars": len(text),
-        "preview": text[:budget] + _TRUNCATION_MARKER,
         "message": (
             f"Result is {len(text)} chars, over the {budget}-char budget. "
             "Narrow the query selection (fewer fields, filters, or a smaller "
             "list window) and re-run."
         ),
+        "preview": "",
     }
+    room = budget - _jlen(envelope) - (_jlen(_TRUNCATION_MARKER) - 2)
+    envelope["preview"] = _cut_to_escaped(text, room) + _TRUNCATION_MARKER
+    return envelope
 
 
 def shape_docker_update_statuses(data: dict | None) -> list[dict[str, Any]]:

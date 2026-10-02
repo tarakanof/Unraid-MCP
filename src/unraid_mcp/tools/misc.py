@@ -370,11 +370,14 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         the tail of the file, first call with a small `lines` to learn `total_lines`,
         then call again with `start_line = total_lines - lines + 1`.
 
-        Results are capped at ~60k characters. If a slice is bigger (long lines),
+        The serialized result is capped at ~60k characters. If a slice is bigger (long lines),
         `content` keeps whole leading lines and the response adds `truncated: true`,
         `truncation_reason: "char_budget"`, `omitted_lines`, and `next_start_line`
         (the first omitted line) — call again with `start_line=next_start_line`
-        (optionally a smaller `lines`) to continue.
+        (optionally a smaller `lines`) to continue. If a single line alone exceeds
+        the budget it is cut and `line_truncated: true` is set; the remainder of
+        that line cannot be retrieved by paging (`next_start_line` moves on to the
+        next line).
         """
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, fetch_log_file, path, lines, start_line, api_version=api_version)
