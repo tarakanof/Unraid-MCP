@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
+import respx
 from mcp.client import Client
 
+from tests.conftest import URL, make_settings
 from unraid_mcp.formatting import MAX_LOG_RESULT_CHARS, MAX_RAW_RESULT_CHARS
 from unraid_mcp.server import build_server
 from unraid_mcp.tools import docker, misc
@@ -205,3 +208,47 @@ async def test_budgeted_tools_advertise_meta(settings_factory):
         tools = {t.name: t for t in (await session.list_tools()).tools}
     for name in ("get_docker_container_logs", "read_log_file"):
         assert tools[name].meta == {"anthropic/maxResultSizeChars": MAX_LOG_RESULT_CHARS}
+
+
+# Protocol level: text block AND structured payload within budget.
+
+
+def _short_lines():
+    return _logs_payload(1000, 20)
+
+
+def _quote_lines():
+    payload = _logs_payload(1000, 0)
+    for line in payload["docker"]["logs"]["lines"]:
+        line["message"] = '"\\' * 995
+    return payload
+
+
+def _quote_file():
+    return _log_file_payload("\n".join('"\\' * 1000 for _ in range(500)) + "\n")
+
+
+def _quote_raw():
+    return {"a": ['"\\' * 50_000]}
+
+
+@pytest.mark.parametrize(
+    "tool,arguments,data,flags",
+    [
+        ("get_docker_container_logs", {"container_id": "1:a", "tail": 1000}, _short_lines(), {}),
+        ("get_docker_container_logs", {"container_id": "1:a", "tail": 1000}, _quote_lines(), {}),
+        ("read_log_file", {"path": "/var/log/syslog", "lines": 500}, _quote_file(), {}),
+        ("run_graphql_query", {"query": "query { a }"}, _quote_raw(), {"allow_raw_query": True}),
+    ],
+    ids=["docker-short", "docker-quotes", "logfile-quotes", "raw-quotes"],
+)
+async def test_protocol_text_and_structured_within_budget(tool, arguments, data, flags):
+    with respx.mock:
+        respx.post(URL).respond(200, json={"data": data})
+        async with Client(build_server(make_settings(**flags)), raise_exceptions=True) as s:
+            result = await s.call_tool(tool, arguments)
+    assert result.is_error is False, result.content
+    assert len(result.content) == 1
+    assert len(result.content[0].text) <= MAX_LOG_RESULT_CHARS
+    assert _ser(result.structured_content) <= MAX_LOG_RESULT_CHARS
+    assert result.structured_content["truncated"] is True
