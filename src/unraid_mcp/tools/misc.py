@@ -316,9 +316,8 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         title="Get Health Summary", annotations=READ_ONLY, meta={"anthropic/alwaysLoad": True}
     )
     async def get_health_summary(ctx: Context) -> HealthSummary:
-        """Compact health roll-up for triage: array state, capacity, any unhealthy disks,
-        parity-check status, UPS state, unread notification counts, and up to 5 top
-        unread warnings/alerts (`top_alerts`, when the API supports it).
+        """Compact health roll-up for triage, including up to 5 top unread
+        warnings/alerts (`top_alerts`, when the API supports it).
 
         overall is critical for red/failed/missing disks, UPS LOWBATT, or ONBATT with
         charge <20% or runtime <300 seconds; attention for other unhealthy disks,
@@ -334,9 +333,8 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         reasons explains each signal; checks marks array/ups/notifications/temperature
         queries as ok or failed; ups is not_configured only when its query fails with a
         non-permission, supported GraphQL error and the UPS service is not enabled.
-        HTTP 403 on the ups/notifications sub-checks marks them failed; connection errors
-        propagate. Partial GraphQL errors mark a check failed while
-        preserving usable data. Auth/connection/configuration errors propagate.
+        HTTP 403 on the ups/notifications sub-checks or partial GraphQL errors mark a
+        check failed (usable data is kept); auth/connection/configuration errors propagate.
         Array state is informational. Also at unraid://health.
         """
         return await guarded(ctx, fetch_health, ignore_sensors=settings.health_ignored_sensors)

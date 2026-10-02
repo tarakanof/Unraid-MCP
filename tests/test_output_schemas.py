@@ -169,13 +169,13 @@ async def test_core_tools_advertise_typed_output_schemas(settings_factory):
         if name.startswith("list_"):
             item = schema["properties"]["result"]["items"]["anyOf"][0]
             definition = schema["$defs"][item["$ref"].split("/")[-1]]
-            assert definition["properties"]["id"]["anyOf"][0]["type"] == "string"
+            assert definition["properties"]["id"]["type"] == ["string", "null"]
             assert "id" in definition["required"]
         else:
             assert ("overall" if name == "get_health_summary" else "id") in schema["properties"]
     size = schemas["get_disk"]["$defs"]["Size"]
     assert set(size["properties"]) == {"bytes", "human"}
-    assert size["properties"]["bytes"]["anyOf"][0]["type"] == "integer"
+    assert size["properties"]["bytes"]["type"] == ["integer", "null"]
     assert size["properties"]["bytes"]["description"]
     for name in ("list_disks", "get_health_summary"):
         assert schemas[name]["$defs"]["Size"] == size
@@ -186,7 +186,7 @@ async def test_core_tools_advertise_typed_output_schemas(settings_factory):
     counts = schemas["get_health_summary"]["$defs"]["NotificationCounts"]
     assert "required" not in counts
     port = schemas["get_docker_container"]["$defs"]["ContainerPort"]
-    assert port["properties"]["private"]["anyOf"][0]["type"] == "integer"
+    assert port["properties"]["private"]["type"] == ["integer", "null"]
 
 
 @pytest.mark.parametrize("mode", ["auto", "legacy"])

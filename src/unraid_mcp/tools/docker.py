@@ -816,10 +816,9 @@ def _confirm_update_all_docker_containers(
 def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(title="List Docker Containers", annotations=READ_ONLY)
     async def list_docker_containers(ctx: Context) -> list[Container | None]:
-        """List Docker containers with id, name, image, state, status, autostart,
-        autostart order, update_available, orphaned, web_ui_url, network_mode and
-        ports. Newer fields are null on older Unraid API builds. Use
-        get_docker_container for sizes, mounts and labels."""
+        """List Docker containers (id, name, image, state, ports, ...). Newer fields
+        are null on older Unraid API builds. Use get_docker_container for sizes,
+        mounts and labels."""
         return await guarded(ctx, fetch_containers)
 
     @mcp.tool(title="Get Docker Container", annotations=READ_ONLY)
