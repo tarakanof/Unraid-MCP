@@ -39,7 +39,8 @@ INSTRUCTIONS = (
     "- Notifications: *notification* tools.\n"
     "- System/UPS/network: get_system_*, get_hardware_inventory, get_ups_status, "
     "list_network_interfaces, list_plugins, get_services, get_connect_status, whoami.\n"
-    "Flow: list (use filters/limits) -> get one item (id or name) where a get tool "
+    "Flow: list (use filters/limits; lists default to detail=concise, pass "
+    'detail="full" for every field) -> get one item (id or name) where a get tool '
     "exists -> act; use ids from list results directly otherwise. Mutating tools need "
     "confirm=true and exist only if the server enables them; don't search for them "
     "otherwise.\n"

@@ -103,7 +103,7 @@ def _check_shapes(obj: Any) -> None:
             _check_shapes(item)
 
 
-async def _run(fetch: Callable[..., Awaitable[Any]], *args: Any) -> Any:
+async def _run(fetch: Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any) -> Any:
     """Call a read fetch, turning a capability-degradation error into a skip so
     tools unsupported by this API version don't fail the run.
 
@@ -116,7 +116,7 @@ async def _run(fetch: Callable[..., Awaitable[Any]], *args: Any) -> Any:
     treat both the same way and skip.
     """
     try:
-        return await fetch(*args)
+        return await fetch(*args, **kwargs)
     except UnraidGraphQLError as exc:
         pytest.skip(f"unsupported by this Unraid API version: {exc}")
     except ToolError as exc:
@@ -175,6 +175,36 @@ async def test_read_returns_list(live_client, fetch):
     for item in result:
         assert isinstance(item, dict)
     _check_shapes(result)
+
+
+@pytest.mark.parametrize(
+    "fetch,kwargs,keys",
+    [
+        (
+            docker.fetch_containers,
+            {"state": "RUNNING"},
+            {"id", "name", "image", "state", "status", "update_available"},
+        ),
+        (
+            array.fetch_disks,
+            {},
+            {"id", "name", "device", "type", "smart_status", "temp_c", "spinning", "size"},
+        ),
+        (vm.fetch_vms, {}, {"id", "name", "state"}),
+        (shares.fetch_shares, {}, {"name", "free", "used", "size"}),
+    ],
+    ids=lambda v: getattr(v, "__name__", None),
+)
+async def test_list_concise_and_filters(live_client, fetch, kwargs, keys):
+    """#158: concise key set is a subset of full; filters only narrow."""
+    full = await _run(fetch, live_client, detail="full")
+    concise = await _run(fetch, live_client, detail="concise", **kwargs)
+    for item in concise:
+        assert set(item) <= keys, item
+        if "state" in kwargs:
+            assert item["state"] == kwargs["state"]
+    assert len(concise) <= len(full)
+    _check_shapes(concise)
 
 
 async def test_get_disk_detail(live_client):

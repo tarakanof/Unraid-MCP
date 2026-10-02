@@ -22,15 +22,20 @@ from ..types import Disk
 from ._base import (
     DESTRUCTIVE,
     DESTRUCTIVE_IDEMPOTENT,
+    DETAILS,
     MUTATING,
     MUTATING_IDEMPOTENT,
     READ_ONLY,
     Confirmation,
+    Detail,
+    contains_ci,
     execute_with_fallback,
     guarded,
     require_action,
+    require_choice,
     require_confirm,
     require_confirmation,
+    select_detail,
 )
 
 # ── Read logic ───────────────────────────────────────────────────────────────
@@ -51,8 +56,36 @@ async def fetch_parity_history(client: UnraidClient) -> list[dict[str, Any]]:
     return (await client.execute(queries.PARITY_HISTORY)).get("parityHistory") or []
 
 
-async def fetch_disks(client: UnraidClient) -> list[Disk | None]:
-    return shape_physical_disks(await client.execute(queries.LIST_DISKS))
+SmartStatus = Literal["OK", "UNKNOWN"]
+_SMART_STATUSES: tuple[str, ...] = get_args(SmartStatus)
+CONCISE_DISK_KEYS = ("id", "name", "device", "type", "smart_status", "temp_c", "spinning", "size")
+
+
+async def fetch_disks(
+    client: UnraidClient,
+    *,
+    name: str | None = None,
+    disk_type: str | None = None,
+    smart_status: str | None = None,
+    detail: str = "full",
+) -> list[Disk | None]:
+    """List physical disks, filtered after the GraphQL call (#158). ``name``
+    matches the model name or device path; ``disk_type`` (free-form upstream
+    string, e.g. HD/SSD/NVMe) matches case-insensitively."""
+    if smart_status is not None:
+        require_choice("smart_status", smart_status, _SMART_STATUSES)
+    require_choice("detail", detail, DETAILS)
+    items = shape_physical_disks(await client.execute(queries.LIST_DISKS))
+    if name is not None or disk_type is not None or smart_status is not None:
+        items = [
+            d
+            for d in items
+            if d is not None
+            and contains_ci(name, d.get("name"), d.get("device"))
+            and (disk_type is None or (d.get("type") or "").casefold() == disk_type.casefold())
+            and (smart_status is None or d.get("smart_status") == smart_status)
+        ]
+    return select_detail(items, CONCISE_DISK_KEYS, detail)
 
 
 def _disk_not_found(disk_id: str) -> ToolError:
@@ -285,10 +318,26 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         return await guarded(ctx, fetch_parity_history)
 
     @mcp.tool(title="List Disks", annotations=READ_ONLY)
-    async def list_disks(ctx: Context) -> list[Disk | None]:
-        """List physical disks (id, name, device, type, SMART status, temp_c, spinning, size).
-        Use a disk id with get_disk for full details."""
-        return await guarded(ctx, fetch_disks)
+    async def list_disks(
+        ctx: Context,
+        name: str | None = None,
+        type: str | None = None,
+        smart_status: SmartStatus | None = None,
+        detail: Detail = "concise",
+    ) -> list[Disk | None]:
+        """List physical disks. Filter before listing everything: name (substring
+        of model or device), type (HD/SSD/NVMe, case-insensitive), smart_status.
+        detail="concise" returns id, name, device, type, smart_status, temp_c,
+        spinning, size; "full" adds vendor, serial, interface. Use a disk id
+        with get_disk for one disk's firmware and partitions."""
+        return await guarded(
+            ctx,
+            fetch_disks,
+            name=name,
+            disk_type=type,
+            smart_status=smart_status,
+            detail=detail,
+        )
 
     @mcp.tool(title="Get Disk", annotations=READ_ONLY)
     async def get_disk(ctx: Context, disk_id: str) -> Disk:

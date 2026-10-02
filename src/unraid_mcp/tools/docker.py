@@ -33,18 +33,23 @@ from ..types import Container
 from ._base import (
     DESTRUCTIVE,
     DESTRUCTIVE_IDEMPOTENT,
+    DETAILS,
     MUTATING,
     MUTATING_IDEMPOTENT,
     READ_ONLY,
     Confirmation,
+    Detail,
     ProgressCallback,
+    contains_ci,
     feature_unsupported,
     get_app_context,
     guarded,
     progress_reporter,
     require_action,
+    require_choice,
     require_confirm,
     require_confirmation,
+    select_detail,
     unsupported_field_error,
     with_heartbeat,
 )
@@ -64,14 +69,44 @@ STATS_TIMEOUT_S = 12.0
 UPDATE_HEARTBEAT_S = 10.0
 
 
-async def fetch_containers(client: UnraidClient) -> list[Container | None]:
+ContainerState = Literal["RUNNING", "PAUSED", "EXITED"]
+_CONTAINER_STATES: tuple[str, ...] = get_args(ContainerState)
+CONCISE_CONTAINER_KEYS = ("id", "name", "image", "state", "status", "update_available")
+
+
+async def fetch_containers(
+    client: UnraidClient,
+    *,
+    name: str | None = None,
+    state: str | None = None,
+    update_available: bool | None = None,
+    detail: str = "full",
+) -> list[Container | None]:
+    """List containers, filtered after the GraphQL call (#158).
+
+    The logic default is ``detail="full"`` so internal callers (name lookup)
+    keep every field; the ``list_docker_containers`` tool defaults to concise.
+    """
+    if state is not None:
+        require_choice("state", state, _CONTAINER_STATES)
+    require_choice("detail", detail, DETAILS)
     try:
-        return shape_containers(await client.execute(queries.LIST_CONTAINERS))
+        items = shape_containers(await client.execute(queries.LIST_CONTAINERS))
     except UnraidGraphQLError as exc:
         if not unsupported_field_error(exc):
             raise
-    # Older API lacks the newer cheap fields: retry with the original selection.
-    return shape_containers(await client.execute(queries.LIST_CONTAINERS_BASIC))
+        # Older API lacks the newer cheap fields: retry with the original selection.
+        items = shape_containers(await client.execute(queries.LIST_CONTAINERS_BASIC))
+    if name is not None or state is not None or update_available is not None:
+        items = [
+            c
+            for c in items
+            if c is not None
+            and contains_ci(name, *(n.lstrip("/") for n in c.get("names") or []))
+            and (state is None or c.get("state") == state)
+            and (update_available is None or c.get("update_available") is update_available)
+        ]
+    return select_detail(items, CONCISE_CONTAINER_KEYS, detail)
 
 
 def _matches(container: dict[str, Any], identifier: str) -> bool:
@@ -815,11 +850,27 @@ def _confirm_update_all_docker_containers(
 
 def register(mcp: MCPServer, settings: Settings) -> None:
     @mcp.tool(title="List Docker Containers", annotations=READ_ONLY)
-    async def list_docker_containers(ctx: Context) -> list[Container | None]:
-        """List Docker containers (id, name, image, state, ports, ...). Newer fields
-        are null on older Unraid API builds. Use get_docker_container for sizes,
-        mounts and labels."""
-        return await guarded(ctx, fetch_containers)
+    async def list_docker_containers(
+        ctx: Context,
+        name: str | None = None,
+        state: ContainerState | None = None,
+        update_available: bool | None = None,
+        detail: Detail = "concise",
+    ) -> list[Container | None]:
+        """List Docker containers. Filter before listing everything: name
+        (case-insensitive substring), state, update_available. detail="concise"
+        returns id, name, image, state, status, update_available; "full" adds
+        names, auto_start(_order), orphaned, web_ui_url, network_mode, ports.
+        Newer fields are null on older API builds. Use get_docker_container for
+        one container's sizes, mounts and labels."""
+        return await guarded(
+            ctx,
+            fetch_containers,
+            name=name,
+            state=state,
+            update_available=update_available,
+            detail=detail,
+        )
 
     @mcp.tool(title="Get Docker Container", annotations=READ_ONLY)
     async def get_docker_container(

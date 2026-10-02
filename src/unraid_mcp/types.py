@@ -34,17 +34,19 @@ class Container(TypedDict):
     name: Annotated[
         str | None, Field(description="First container name without the leading slash.")
     ]
-    names: list[str]
+    # NotRequired fields below are omitted by list_docker_containers(detail="concise")
+    # (#158). Declaration order is the serialized key order: keep it.
+    names: NotRequired[list[str]]
     image: str | None
     state: str | None
     status: str | None
-    auto_start: bool | None
-    auto_start_order: int | None
+    auto_start: NotRequired[bool | None]
+    auto_start_order: NotRequired[int | None]
     update_available: bool | None
-    orphaned: bool | None
-    web_ui_url: str | None
-    network_mode: str | None
-    ports: list[ContainerPort]
+    orphaned: NotRequired[bool | None]
+    web_ui_url: NotRequired[str | None]
+    network_mode: NotRequired[str | None]
+    ports: NotRequired[list[ContainerPort]]
     # Detail-only fields (get_docker_container); absent from the list view.
     rebuild_ready: NotRequired[bool | None]
     lan_ip_ports: NotRequired[list[Any]]
@@ -78,16 +80,18 @@ class Disk(TypedDict):
     id: str | None
     name: str | None
     device: str | None
-    vendor: str | None
+    # NotRequired fields are omitted by list_disks(detail="concise") (#158).
+    # Declaration order is the serialized key order: keep it.
+    vendor: NotRequired[str | None]
     type: str | None
-    serial: str | None
-    interface: str | None
+    serial: NotRequired[str | None]
+    interface: NotRequired[str | None]
     smart_status: str | None
     temp_c: Annotated[int | float | None, Field(description="Disk temperature in degrees Celsius.")]
     spinning: bool | None
     size: Size
-    firmware: str | None
-    partitions: list[DiskPartition]
+    firmware: NotRequired[str | None]
+    partitions: NotRequired[list[DiskPartition]]
 
 
 class ArrayDisk(TypedDict):

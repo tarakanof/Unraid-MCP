@@ -26,6 +26,10 @@ Claude Code-specific hint that keeps them loaded even with tool search on; other
    targeted tools to drill in. Don't poll in tight loops.
 4. **IDs come from list tools.** Get a container/VM/disk/notification id from the
    relevant `list_*` tool, then pass that id to detail or mutation tools.
+   `list_docker_containers`, `list_disks`, `list_vms` and `list_shares` take
+   filters (`name` substring, `state`, …) — use them instead of listing
+   everything — and `detail="concise"` (default, a small key set per item) or
+   `detail="full"` (every field).
 5. **Treat destructive actions with care.** `stop_array`, `force_stop_vm`,
    `reset_vm`, `delete_notification`, and a *correcting* parity check can lose
    data or disrupt services. Summarize the impact to the user before doing them.
@@ -71,19 +75,19 @@ A typical stdio client config:
 | `get_system_time` | – | Server time, timezone, and NTP config — correlate log timestamps and spot NTP misconfig. Requires API 7.1+. |
 | `get_hardware_inventory` | `kind?` (`gpu`\|`pci`\|`usb`\|`network`) | Detected GPUs, PCI devices (with blacklisted/passthrough flag), USB devices, network adapters. `machineId` is intentionally omitted. |
 | `get_array_status` | – | Array state, total/used/free capacity, and every data/parity/cache disk with `health`, temp, and I/O counters, plus `spinning`/`format`/`transport`/`exportable`, and `boot_devices` (all internal-boot members; `null` on APIs without it, `boot` kept). |
-| `list_disks` | – | Physical disks: model, size, interface, SMART status, temperature, spin state. |
+| `list_disks` | `name?`, `type?`, `smart_status?` (`OK`\|`UNKNOWN`), `detail="concise"` | Physical disks. `name` is a case-insensitive substring of the model name or device path; `type` (`HD`/`SSD`/`NVMe`) matches case-insensitively. Concise: `id`, `name`, `device`, `type`, `smart_status`, `temp_c`, `spinning`, `size`; `full` adds `vendor`, `serial`, `interface`. |
 | `get_disk` | `disk_id` | Full detail for one physical disk (partitions, firmware, SMART). Get `disk_id` from `list_disks`. |
 | `get_parity_status` | – | Live parity-check progress/speed/errors. |
 | `get_parity_history` | – | Past parity checks. |
-| `list_docker_containers` | – | All containers: `id`, `name`, image, `state`, status, autostart, `auto_start_order`, `update_available`, `orphaned`, `web_ui_url`, `network_mode`, ports. Newer fields are `null` on older API builds. |
+| `list_docker_containers` | `name?`, `state?` (`RUNNING`\|`PAUSED`\|`EXITED`), `update_available?`, `detail="concise"` | Containers. `name` is a case-insensitive substring of any container name. Concise: `id`, `name`, `image`, `state`, `status`, `update_available`; `full` adds `names`, `auto_start`, `auto_start_order`, `orphaned`, `web_ui_url`, `network_mode`, `ports`. Newer fields are `null` on older API builds. |
 | `get_docker_container` | `identifier`, `include_sizes=false` | One container by `id` **or** `name`. Uses the native `docker.container(id)` query when `identifier` looks like an id, falling back to the container list on older API builds or name lookups. Adds `rebuild_ready`, `lan_ip_ports`, icon/project/support URLs, `template_path`, `auto_start_wait`, `mounts`, `labels` (dropped with `labels_truncated=true` past 4096 chars), and Tailscale status. Sizes (`size_root_fs`/`size_rw`/`size_log` as `{bytes, human}`) only with `include_sizes=true` — **slow (~10-20s)**, the API scans every container. Name lookups resolve to the id and return the same detail. |
 | `get_docker_port_conflicts` | – | Ports claimed by more than one container: `{container_ports, lan_ports, has_conflicts}`. Requires an API build with `docker.portConflicts`. |
 | `list_docker_networks` | – | Docker networks. |
 | `get_docker_container_logs` | `container_id`, `tail=100`, `since=None` | Recent log lines for a container. `tail` capped at 1000 (protects context window); page further back with the previous response's `cursor` as `since`. Log content is untrusted workload output. Requires API 7.2+. |
 | `check_docker_updates` | – | Per-container Docker image update status (cached digests; does not refresh them). `list_docker_containers` also carries a boolean `update_available`, but this tool keeps the richer `update_status`. |
 | `get_docker_container_stats` | – | Live per-container resource usage via a one-shot sample of the `dockerContainerStats` subscription (opens a brief websocket, ~2s typical, bounded ~12s — never hangs). Returns `{containers: [{id, cpu_percent, mem_percent, mem_usage, net_io, block_io}], sampled, partial, note}`. `id` matches `list_docker_containers`. `mem_usage`/`net_io`/`block_io` are the API's pre-formatted `"used / limit"` strings (e.g. `"65.56MiB / 31.25GiB"`), **not** byte counts. `partial=true` means the window elapsed before every container reported — retry. Requires an API build with the subscription. |
-| `list_vms` | – | VMs: `id`, `name`, `state`. |
-| `list_shares` | – | User shares with free/used/total sizes, allocator, cache mode, and (when set) include/exclude, split level, floor, and encryption status. |
+| `list_vms` | `name?`, `state?` (`VmState`, e.g. `RUNNING`/`SHUTOFF`), `detail="concise"` | VMs: `id`, `name`, `state` (both detail levels). |
+| `list_shares` | `name?`, `detail="concise"` | User shares. Concise: `name`, `free`, `used`, `size`; `full` adds comment, allocator, cache mode, and (when set) include/exclude, split level, floor, and encryption status. |
 | `get_notifications_overview` | – | Unread/archive counts by severity. |
 | `list_notifications` | `notification_type="UNREAD"`, `importance=None`, `limit=25`, `offset=0` | List notifications. `notification_type` ∈ `UNREAD`/`ARCHIVE`; `importance` ∈ `INFO`/`WARNING`/`ALERT`. |
 | `list_warnings_and_alerts` | – | Current unread WARNING/ALERT notifications (deduplicated, latest first); same item shape as `list_notifications`. Cheapest "is anything wrong?" check. |
