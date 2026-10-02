@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from . import array, docker, misc, notifications, shares, system, vm
 from ._base import compact_read_results
-from ._schema import trim_published_tools
+from ._schema import forbid_unknown_arguments, trim_published_tools
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -54,10 +54,14 @@ def register_all(mcp: MCPServer, settings: Settings) -> None:
         misc.register_raw_query(mcp, settings)
     # Read tools return one compact, null-free text block (#156).
     compact_read_results(mcp)
+    # Reject undeclared arguments; errors are redacted of configured secrets.
+    forbid_unknown_arguments(
+        mcp,
+        [
+            settings.api_key.get_secret_value(),
+            settings.bearer_token.get_secret_value() if settings.bearer_token else None,
+        ],
+    )
     # Strip pydantic boilerplate from the published descriptions and schemas.
-    secrets = [
-        settings.api_key.get_secret_value(),
-        settings.bearer_token.get_secret_value() if settings.bearer_token else None,
-    ]
-    trim_published_tools(mcp, secrets)
+    trim_published_tools(mcp)
     sort_published_tools(mcp)

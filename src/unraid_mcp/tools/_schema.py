@@ -8,8 +8,9 @@ docstring's source indentation and hard wraps. Clients without tool search
 load all of it up front, so :func:`trim_published_tools` strips it once, after
 registration.
 
-Only the *published* metadata changes (plus undeclared input arguments are now
-rejected, see :func:`forbid_unknown_arguments`). The SDK validates arguments against
+Trimming changes only the *published* metadata. Separately,
+:func:`forbid_unknown_arguments` makes each tool's argument model reject
+undeclared arguments. The SDK validates arguments against
 each tool's pydantic argument model and results against its output model, not
 against these dicts, so server-side validation is unaffected; clients that
 validate ``structuredContent`` against the published ``outputSchema`` see an
@@ -221,9 +222,16 @@ def trim_output_schema(
     return _walk(schema, key=None, is_def=False, root_titles=root_titles, output=True)
 
 
-def forbid_unknown_arguments(
-    arg_model: type[BaseModel], secrets: Iterable[str | None] = ()
-) -> type[BaseModel]:
+def forbid_unknown_arguments(mcp: MCPServer, secrets: Iterable[str | None] = ()) -> None:
+    """Make every registered tool reject undeclared arguments (security step).
+
+    Independent of :func:`trim_published_tools`; call once after registration.
+    """
+    for tool in mcp._tool_manager.list_tools():  # noqa: SLF001 - no public Tool accessor
+        tool.fn_metadata.arg_model = _forbid_model(tool.fn_metadata.arg_model, secrets)
+
+
+def _forbid_model(arg_model: type[BaseModel], secrets: Iterable[str | None]) -> type[BaseModel]:
     """Return ``arg_model`` subclassed to reject arguments it does not declare.
 
     The SDK's argument models ignore extras by default, so a misspelled
@@ -277,7 +285,7 @@ def forbid_unknown_arguments(
     return Guarded
 
 
-def trim_published_tools(mcp: MCPServer, secrets: Iterable[str | None] = ()) -> None:
+def trim_published_tools(mcp: MCPServer) -> None:
     """Trim every registered tool's published description and schemas in place.
 
     Call once, after all tools are registered. The SDK has no public accessor
@@ -290,7 +298,6 @@ def trim_published_tools(mcp: MCPServer, secrets: Iterable[str | None] = ()) -> 
         meta = tool.fn_metadata
         fn_name = getattr(tool.fn, "__name__", tool.name)
         tool.description = trim_description(tool.description)
-        meta.arg_model = forbid_unknown_arguments(meta.arg_model, secrets)
         tool.parameters = trim_input_schema(tool.parameters, root_titles={meta.arg_model.__name__})
         if meta.output_schema is not None:
             # The output root is titled with the declared model's name, or the

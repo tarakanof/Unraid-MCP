@@ -86,7 +86,7 @@ async def test_published_schemas_are_valid_draft_2020_12(settings_factory):
 
 async def test_trimming_shrinks_read_only_tools_list(settings_factory, monkeypatch):
     trimmed = sum(_size(t) for t in await _tools(settings_factory()))
-    monkeypatch.setattr(tools_pkg, "trim_published_tools", lambda mcp, secrets=(): None)
+    monkeypatch.setattr(tools_pkg, "trim_published_tools", lambda mcp: None)
     untrimmed = sum(_size(t) for t in await _tools(settings_factory()))
     assert trimmed / untrimmed <= MAX_TRIMMED_RATIO, (trimmed, untrimmed)
 
