@@ -7,6 +7,10 @@ It connects to an Unraid server's official GraphQL API and exposes monitoring
 If you are an agent with this server connected, read the **Operating rules** and
 **Conventions** sections before calling tools.
 
+Server `instructions` (sent at connect) carry a task-to-tool map; `get_health_summary`,
+`list_warnings_and_alerts` and `get_system_info` are marked `anthropic/alwaysLoad`, a
+Claude Code-specific hint that keeps them loaded even with tool search on; other clients (e.g. Codex) ignore it.
+
 ---
 
 ## Operating rules (read first)

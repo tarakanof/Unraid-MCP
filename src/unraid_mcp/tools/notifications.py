@@ -274,7 +274,9 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         filters to INFO/WARNING/ALERT. Supports limit/offset paging."""
         return await guarded(ctx, fetch_notifications, notification_type, importance, limit, offset)
 
-    @mcp.tool(title="List Warnings And Alerts", annotations=READ_ONLY)
+    @mcp.tool(
+        title="List Warnings And Alerts", annotations=READ_ONLY, meta={"anthropic/alwaysLoad": True}
+    )
     async def list_warnings_and_alerts(ctx: Context, limit: int = 20) -> list[dict[str, Any]]:
         """List current unread WARNING/ALERT notifications (deduplicated, latest first) —
         the cheapest "is anything wrong?" check. Same item shape as list_notifications;

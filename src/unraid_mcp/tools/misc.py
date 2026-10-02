@@ -312,7 +312,9 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, fetch_plugins, api_version=api_version)
 
-    @mcp.tool(title="Get Health Summary", annotations=READ_ONLY)
+    @mcp.tool(
+        title="Get Health Summary", annotations=READ_ONLY, meta={"anthropic/alwaysLoad": True}
+    )
     async def get_health_summary(ctx: Context) -> HealthSummary:
         """Compact health roll-up for triage: array state, capacity, any unhealthy disks,
         parity-check status, UPS state, unread notification counts, and up to 5 top

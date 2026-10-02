@@ -108,7 +108,7 @@ async def fetch_hardware_inventory(
 
 
 def register(mcp: MCPServer, settings: Settings) -> None:
-    @mcp.tool(title="Get System Info", annotations=READ_ONLY)
+    @mcp.tool(title="Get System Info", annotations=READ_ONLY, meta={"anthropic/alwaysLoad": True})
     async def get_system_info(ctx: Context) -> dict[str, Any]:
         """Get Unraid host system information: OS/kernel, CPU, memory layout,
         motherboard, Unraid + API versions, and uptime."""
