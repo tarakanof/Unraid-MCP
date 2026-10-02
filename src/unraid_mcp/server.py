@@ -30,11 +30,17 @@ if TYPE_CHECKING:  # pragma: no cover - typing only (starlette arrives with the 
 log = get_logger(__name__)
 
 INSTRUCTIONS = (
-    "Tools to monitor and (optionally) manage an Unraid server via its GraphQL API. "
-    "Read tools cover system info, the array and disks, parity, Docker, VMs, shares, "
-    "notifications, UPS, and network. Mutating tools are only present when enabled on "
-    "the server; destructive ones require confirm=true. Sizes are reported in bytes with "
-    "a human-readable form. Start with get_health_summary for a quick triage."
+    "Monitor and manage an Unraid server via its GraphQL API.\n"
+    "Pick tools by task:\n"
+    "- Health/triage: get_health_summary first, then list_warnings_and_alerts.\n"
+    "- Containers: *docker* tools. VMs: *vm* tools.\n"
+    "- Storage: get_array_status, list_disks, get_disk, list_shares, *parity* tools.\n"
+    "- Logs: list_log_files then read_log_file; get_docker_container_logs.\n"
+    "- Notifications: *notification* tools.\n"
+    "Flow: list (use filters/limits) -> get one item by id -> act. Mutating tools "
+    "need confirm=true and exist only if the server enables them; don't search for "
+    "them otherwise.\n"
+    "Sizes are {bytes, human}."
 )
 
 _ICON_BASE = "https://raw.githubusercontent.com/tarakanof/Unraid-MCP/main/docs/icons"
