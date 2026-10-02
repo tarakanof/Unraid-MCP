@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **BREAKING: non-destructive mutation tools consolidated into `action`-dispatch
+  tools (#160).** Actions that share one module and one annotation tier
+  (`MUTATING_IDEMPOTENT`) now live in a single tool taking
+  `action: Literal[...]`, cutting the mutations-enabled `tools/list` from 61 to
+  53 tools. Destructive tools are unchanged and keep their own names so hosts
+  can still gate them. No aliases; update agent prompts and allowlists:
+
+  | Old tool | New call |
+  | --- | --- |
+  | `start_docker_container(container_id)` | `docker_container_power(container_id, action="start")` |
+  | `pause_docker_container(container_id)` | `docker_container_power(container_id, action="pause")` |
+  | `unpause_docker_container(container_id)` | `docker_container_power(container_id, action="unpause")` |
+  | `start_vm(vm_id)` | `vm_power(vm_id, action="start")` |
+  | `pause_vm(vm_id)` | `vm_power(vm_id, action="pause")` |
+  | `resume_vm(vm_id)` | `vm_power(vm_id, action="resume")` |
+  | `pause_parity_check()` | `parity_check_control(action="pause")` |
+  | `resume_parity_check()` | `parity_check_control(action="resume")` |
+  | `cancel_parity_check()` | `parity_check_control(action="cancel")` |
+  | `archive_notification(notification_id)` | `notification_archive(notification_id, action="archive")` |
+  | `mark_notification_unread(notification_id)` | `notification_archive(notification_id, action="unarchive")` |
+  | `archive_notifications(ids)` | `notification_archive_bulk(ids, action="archive")` |
+  | `unarchive_notifications(ids)` | `notification_archive_bulk(ids, action="unarchive")` |
+
+  All still require `confirm=true`, with the same refusal text per action.
+
 ## 0.9.0 - 2026-10-02
 
 ### Security

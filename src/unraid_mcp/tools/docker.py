@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import weakref
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal, get_args
 
 from mcp.server.mcpserver import Context, Elicit, ElicitationResult, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import ToolError
@@ -41,6 +41,7 @@ from ._base import (
     get_app_context,
     guarded,
     progress_reporter,
+    require_action,
     require_confirm,
     require_confirmation,
     unsupported_field_error,
@@ -330,7 +331,7 @@ async def fetch_container_stats(
 async def do_start_container(
     client: UnraidClient, container_id: str, confirm: bool
 ) -> dict[str, Any]:
-    require_confirm(confirm, f"start container '{container_id}'")
+    require_confirm(confirm, _container_power_consequence(container_id, "start"))
     result = await client.execute(queries.START_CONTAINER, {"id": container_id})
     return shape_mutation_result(result, ("docker", "start"))
 
@@ -367,7 +368,7 @@ async def do_restart_container(
 async def do_pause_container(
     client: UnraidClient, container_id: str, confirm: bool, *, api_version: str | None = None
 ) -> dict[str, Any]:
-    require_confirm(confirm, f"pause container '{container_id}'")
+    require_confirm(confirm, _container_power_consequence(container_id, "pause"))
     try:
         result = await client.execute(queries.PAUSE_CONTAINER, {"id": container_id})
     except UnraidGraphQLError as exc:
@@ -382,7 +383,7 @@ async def do_pause_container(
 async def do_unpause_container(
     client: UnraidClient, container_id: str, confirm: bool, *, api_version: str | None = None
 ) -> dict[str, Any]:
-    require_confirm(confirm, f"unpause container '{container_id}'")
+    require_confirm(confirm, _container_power_consequence(container_id, "unpause"))
     try:
         result = await client.execute(queries.UNPAUSE_CONTAINER, {"id": container_id})
     except UnraidGraphQLError as exc:
@@ -392,6 +393,31 @@ async def do_unpause_container(
             ) from None
         raise
     return shape_mutation_result(result, ("docker", "unpause"))
+
+
+ContainerPowerAction = Literal["start", "pause", "unpause"]
+_CONTAINER_POWER_ACTIONS: tuple[str, ...] = get_args(ContainerPowerAction)
+
+
+async def do_container_power(
+    client: UnraidClient,
+    container_id: str,
+    action: str,
+    confirm: bool,
+    *,
+    api_version: str | None = None,
+) -> dict[str, Any]:
+    """Non-destructive container power actions (one ``MUTATING_IDEMPOTENT`` tool).
+
+    stop/restart are DESTRUCTIVE and keep their own tools so hosts can gate them.
+    """
+    require_action(action, _CONTAINER_POWER_ACTIONS)
+    require_confirm(confirm, _container_power_consequence(container_id, action))
+    if action == "start":
+        return await do_start_container(client, container_id, confirm)
+    if action == "pause":
+        return await do_pause_container(client, container_id, confirm, api_version=api_version)
+    return await do_unpause_container(client, container_id, confirm, api_version=api_version)
 
 
 async def do_update_container(
@@ -716,6 +742,10 @@ def _validate_container_ids(container_ids: list[str]) -> None:
         )
 
 
+def _container_power_consequence(container_id: str, action: str) -> str:
+    return f"{action} container '{container_id}'"
+
+
 def _stop_container_consequence(container_id: str) -> str:
     return f"stop container '{container_id}'"
 
@@ -883,13 +913,19 @@ def register(mcp: MCPServer, settings: Settings) -> None:
 
 
 def register_mutations(mcp: MCPServer, settings: Settings) -> None:
-    @mcp.tool(title="Start Docker Container", annotations=MUTATING_IDEMPOTENT)
-    async def start_docker_container(
-        ctx: Context, container_id: str, confirm: bool = False
+    @mcp.tool(title="Docker Container Power", annotations=MUTATING_IDEMPOTENT)
+    async def docker_container_power(
+        ctx: Context, container_id: str, action: ContainerPowerAction, confirm: bool = False
     ) -> dict[str, Any]:
-        """Start a Docker container by its id (get the id from list_docker_containers).
-        Requires confirm=true."""
-        return await guarded(ctx, do_start_container, container_id, confirm)
+        """Start, pause or unpause a Docker container by id (from
+        list_docker_containers). pause freezes its processes without stopping or
+        removing it; unpause resumes them. pause/unpause need an Unraid API build
+        with `docker.pause`/`docker.unpause` (no fallback). To stop or restart use
+        stop_docker_container / restart_docker_container. Requires confirm=true."""
+        api_version = get_app_context(ctx).api_version
+        return await guarded(
+            ctx, do_container_power, container_id, action, confirm, api_version=api_version
+        )
 
     @mcp.tool(title="Stop Docker Container", annotations=DESTRUCTIVE_IDEMPOTENT)
     async def stop_docker_container(
@@ -922,30 +958,6 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
         Requires confirm=true."""
         return await guarded(
             ctx, do_restart_container, container_id, confirm, confirmation=confirmation
-        )
-
-    @mcp.tool(title="Pause Docker Container", annotations=MUTATING_IDEMPOTENT)
-    async def pause_docker_container(
-        ctx: Context, container_id: str, confirm: bool = False
-    ) -> dict[str, Any]:
-        """Pause a running Docker container by id (freezes its processes; does not
-        stop or remove it). Requires confirm=true. Requires an Unraid API build
-        that supports `docker.pause` — no fallback exists on older builds."""
-        api_version = get_app_context(ctx).api_version
-        return await guarded(
-            ctx, do_pause_container, container_id, confirm, api_version=api_version
-        )
-
-    @mcp.tool(title="Unpause Docker Container", annotations=MUTATING_IDEMPOTENT)
-    async def unpause_docker_container(
-        ctx: Context, container_id: str, confirm: bool = False
-    ) -> dict[str, Any]:
-        """Unpause a paused Docker container by id, resuming its processes.
-        Requires confirm=true. Requires an Unraid API build that supports
-        `docker.unpause` — no fallback exists on older builds."""
-        api_version = get_app_context(ctx).api_version
-        return await guarded(
-            ctx, do_unpause_container, container_id, confirm, api_version=api_version
         )
 
     @mcp.tool(title="Update Docker Container", annotations=DESTRUCTIVE)

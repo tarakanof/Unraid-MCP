@@ -236,6 +236,14 @@ def require_confirm(confirm: bool, action: str) -> None:
         )
 
 
+def require_action(action: str, allowed: tuple[str, ...]) -> None:
+    """Raise ``ToolError`` (before any network call) if a consolidated tool's
+    ``action`` is not one of ``allowed``. The MCP layer already validates the
+    ``Literal`` schema; this guards direct callers of the ``do_*`` logic."""
+    if action not in allowed:
+        raise ToolError(f"Invalid action '{action}'. Must be one of: {', '.join(allowed)}.")
+
+
 REAP_TIMEOUT_S = 1.0
 _abandoned: set[asyncio.Future[Any]] = set()
 

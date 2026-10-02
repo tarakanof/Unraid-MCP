@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal, get_args
 
 from mcp.server.mcpserver import Context, Elicit, ElicitationResult, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import ToolError
@@ -28,6 +28,7 @@ from ._base import (
     Confirmation,
     execute_with_fallback,
     guarded,
+    require_action,
     require_confirm,
     require_confirmation,
 )
@@ -107,24 +108,49 @@ async def do_start_parity(client: UnraidClient, correct: bool, confirm: bool) ->
 
 
 async def do_pause_parity(client: UnraidClient, confirm: bool) -> dict[str, Any]:
-    require_confirm(confirm, "pause the parity check")
+    require_confirm(confirm, _parity_control_consequence("pause"))
     return shape_mutation_json_result(
         await client.execute(queries.PAUSE_PARITY), ("parityCheck", "pause")
     )
 
 
 async def do_resume_parity(client: UnraidClient, confirm: bool) -> dict[str, Any]:
-    require_confirm(confirm, "resume the parity check")
+    require_confirm(confirm, _parity_control_consequence("resume"))
     return shape_mutation_json_result(
         await client.execute(queries.RESUME_PARITY), ("parityCheck", "resume")
     )
 
 
 async def do_cancel_parity(client: UnraidClient, confirm: bool) -> dict[str, Any]:
-    require_confirm(confirm, "cancel the parity check")
+    require_confirm(confirm, _parity_control_consequence("cancel"))
     return shape_mutation_json_result(
         await client.execute(queries.CANCEL_PARITY), ("parityCheck", "cancel")
     )
+
+
+ParityControlAction = Literal["pause", "resume", "cancel"]
+_PARITY_CONTROL_ACTIONS: tuple[str, ...] = get_args(ParityControlAction)
+_PARITY_CONTROL_FNS = {
+    "pause": do_pause_parity,
+    "resume": do_resume_parity,
+    "cancel": do_cancel_parity,
+}
+
+
+async def do_parity_check_control(
+    client: UnraidClient, action: str, confirm: bool
+) -> dict[str, Any]:
+    """Pause/resume/cancel a running parity check (one ``MUTATING_IDEMPOTENT`` tool).
+
+    start_parity_check is ``MUTATING`` (not idempotent) and stays separate.
+    """
+    require_action(action, _PARITY_CONTROL_ACTIONS)
+    require_confirm(confirm, _parity_control_consequence(action))
+    return await _PARITY_CONTROL_FNS[action](client, confirm)
+
+
+def _parity_control_consequence(action: str) -> str:
+    return f"{action} the parity check"
 
 
 # ── Dangerous-tier logic ────────────────────────────────────────────────────
@@ -297,20 +323,13 @@ def register_mutations(mcp: MCPServer, settings: Settings) -> None:
         Requires confirm=true."""
         return await guarded(ctx, do_start_parity, correct, confirm)
 
-    @mcp.tool(title="Pause Parity Check", annotations=MUTATING_IDEMPOTENT)
-    async def pause_parity_check(ctx: Context, confirm: bool = False) -> dict[str, Any]:
-        """Pause the running parity check. Requires confirm=true."""
-        return await guarded(ctx, do_pause_parity, confirm)
-
-    @mcp.tool(title="Resume Parity Check", annotations=MUTATING_IDEMPOTENT)
-    async def resume_parity_check(ctx: Context, confirm: bool = False) -> dict[str, Any]:
-        """Resume a paused parity check. Requires confirm=true."""
-        return await guarded(ctx, do_resume_parity, confirm)
-
-    @mcp.tool(title="Cancel Parity Check", annotations=MUTATING_IDEMPOTENT)
-    async def cancel_parity_check(ctx: Context, confirm: bool = False) -> dict[str, Any]:
-        """Cancel the running parity check. Requires confirm=true."""
-        return await guarded(ctx, do_cancel_parity, confirm)
+    @mcp.tool(title="Parity Check Control", annotations=MUTATING_IDEMPOTENT)
+    async def parity_check_control(
+        ctx: Context, action: ParityControlAction, confirm: bool = False
+    ) -> dict[str, Any]:
+        """Pause, resume or cancel the parity check in progress (start one with
+        start_parity_check). Requires confirm=true."""
+        return await guarded(ctx, do_parity_check_control, action, confirm)
 
 
 def register_dangerous(mcp: MCPServer, settings: Settings) -> None:

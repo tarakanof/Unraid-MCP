@@ -94,31 +94,32 @@ A typical stdio client config:
 
 ### Mutating (only if the operator enabled mutations; **all require `confirm=true`**)
 
+Non-destructive actions on one resource share a tool and an `action` argument
+(e.g. `docker_container_power(action="pause")`). Destructive actions (stop, restart,
+reboot, reset, delete, bulk archive) keep their own tools so hosts can gate them.
+
 | Tool | Args | Notes |
 |------|------|-------|
 | `start_array` | `confirm` | Brings storage online. |
 | `stop_array` | `confirm` | **Disruptive** — unmounts all disks, stops dependent services. |
 | `start_parity_check` | `correct=False`, `confirm` | `correct=true` **writes corrections to parity** — only with explicit intent, never on a degraded array. |
-| `pause_parity_check` / `resume_parity_check` / `cancel_parity_check` | `confirm` | Control a running check. |
-| `start_docker_container` | `container_id`, `confirm` | id from `list_docker_containers`. |
+| `parity_check_control` | `action` ∈ `pause`/`resume`/`cancel`, `confirm` | Control a running check. |
+| `docker_container_power` | `container_id`, `action` ∈ `start`/`pause`/`unpause`, `confirm` | id from `list_docker_containers`. `pause`/`unpause` freeze/resume a container's processes without stopping it; no fallback on older API builds — errors clearly if unsupported. |
 | `stop_docker_container` | `container_id`, `confirm` | Stops a service. |
 | `restart_docker_container` | `container_id`, `confirm` | Atomic on current APIs (native restart); falls back to stop-then-start on older builds (then **not atomic** — if start fails it's left stopped). |
-| `pause_docker_container` / `unpause_docker_container` | `container_id`, `confirm` | Freeze/resume a container's processes without stopping it. No fallback on older API builds — errors clearly if unsupported. |
 | `update_docker_container` | `container_id`, `confirm` | Pull latest image and **recreate** the container (brief downtime). id from `list_docker_containers` / `check_docker_updates`. |
 | `update_docker_containers` | `container_ids`, `confirm` | Batch update: pull + recreate each. List must be non-empty and ≤ 20 ids per call. |
 | `refresh_docker_digests` | `confirm` | Force a fresh image-digest check (idempotent); call before `check_docker_updates`. Upstream gates it behind the `ENABLE_NEXT_DOCKER_RELEASE` feature flag; errors clearly if off. |
 | `set_docker_autostart` | `entries`, `order?`, `persist_user_preferences`, `confirm` | `entries`: non-empty list of `{id, auto_start, wait?}`; validated locally. Upstream replaces the whole autostart list, so the tool reads the current list, merges your changes (order kept, new enables appended) and sends the full list; unknown ids rejected. Calls are serialised. `order`: ids to boot first (must be enabled after the change); the rest keep their relative order after them. |
-| `start_vm` / `pause_vm` / `resume_vm` | `vm_id`, `confirm` | id from `list_vms`. |
+| `vm_power` | `vm_id`, `action` ∈ `start`/`pause`/`resume`, `confirm` | id from `list_vms`. |
 | `stop_vm` | `vm_id`, `confirm` | Graceful shutdown. |
 | `reboot_vm` | `vm_id`, `confirm` | Reboot. |
 | `force_stop_vm` | `vm_id`, `confirm` | **Hard power off** — may lose unsaved guest state. |
 | `reset_vm` | `vm_id`, `confirm` | **Hard reset** (like the reset button) — unsaved guest state is lost. |
-| `archive_notification` | `notification_id`, `confirm` | Clear one unread notification. |
+| `notification_archive` | `notification_id`, `action` ∈ `archive`/`unarchive`, `confirm` | `archive` clears one unread notification; `unarchive` moves an archived one back to unread. |
 | `archive_all_notifications` | `importance=None`, `confirm` | Bulk archive (optionally one severity). |
-| `mark_notification_unread` | `notification_id`, `confirm` | Move an archived notification back to unread. |
 | `delete_notification` | `notification_id`, `notification_type`, `confirm` | **Permanent.** `notification_type` ∈ `UNREAD`/`ARCHIVE` (where it currently lives). |
-| `archive_notifications` | `ids`, `confirm` | Bulk-archive unread notifications by id (non-empty list, from `list_notifications`). |
-| `unarchive_notifications` | `ids`, `confirm` | Bulk-move archived notifications back to unread by id (non-empty list). |
+| `notification_archive_bulk` | `ids`, `action` ∈ `archive`/`unarchive`, `confirm` | Bulk archive / move back to unread by id (non-empty list, from `list_notifications`). |
 | `unarchive_all_notifications` | `importance=None`, `confirm` | Unarchive everything (optionally one severity). |
 | `delete_archived_notifications` | `confirm` | **Permanent.** Deletes every archived notification in one call. |
 | `create_notification` | `title`, `subject`, `description`, `importance`, `link=None`, `confirm` | **Agent→operator channel.** Posts a notification into the Unraid WebGUI bell so you can leave the operator a persistent message (e.g. "disk 2 SMART errors climbing"). `importance` ∈ `INFO`/`WARNING`/`ALERT` (required). |
@@ -156,9 +157,9 @@ opted in — do not try to work around it.
   - **Array start/stop** — `start_array`/`stop_array` return `{"state": "...", ...}`,
     where `start_array` also includes `capacity` normalized to `{bytes, human}`
     (just like `get_array_status`).
-  - **Object-returning ops** — `start_docker_container`, `update_docker_container`,
-    `archive_notification`, `archive_all_notifications`, `delete_notification`,
-    `archive_notifications`, `unarchive_notifications`, `unarchive_all_notifications`,
+  - **Object-returning ops** — `docker_container_power`, `update_docker_container`,
+    `notification_archive`, `archive_all_notifications`, `delete_notification`,
+    `notification_archive_bulk`, `unarchive_all_notifications`,
     `delete_archived_notifications`, etc. return the flattened payload (e.g. the
     affected container, or `{unread, archive}` counts). `create_notification`
     returns the created `Notification` object (id, title, subject, description,
