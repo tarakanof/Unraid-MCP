@@ -505,6 +505,12 @@ def shape_container_stats(events: list[dict] | None) -> list[dict[str, Any]]:
 
 _LOG_LINE_MAX_CHARS = 2000
 _TRUNCATION_MARKER = "… [truncated]"
+# Total size budget for one tool result (~15k tokens). Claude Code warns at 10k
+# tokens and truncates at 25k; line-count caps alone allow ~2M chars.
+MAX_LOG_RESULT_CHARS = 60_000
+MAX_RAW_RESULT_CHARS = MAX_LOG_RESULT_CHARS
+# Per-line JSON overhead beyond the message (keys, timestamp, punctuation).
+_LOG_LINE_OVERHEAD_CHARS = 80
 
 
 def _shape_log_line(line: dict | None) -> dict[str, Any]:
@@ -520,12 +526,27 @@ def shape_container_logs(data: dict | None) -> dict[str, Any]:
     docker = (data or {}).get("docker") or {}
     logs = docker.get("logs") or {}
     lines = [_shape_log_line(line) for line in (logs.get("lines") or [])]
-    return {
+    # Keep the NEWEST lines that fit the budget (tail semantics); drop the oldest.
+    used = 0
+    keep_from = len(lines)
+    for i in range(len(lines) - 1, -1, -1):
+        cost = len(lines[i]["message"]) + _LOG_LINE_OVERHEAD_CHARS
+        if used + cost > MAX_LOG_RESULT_CHARS:
+            break
+        used += cost
+        keep_from = i
+    omitted = keep_from
+    kept = lines[keep_from:]
+    out: dict[str, Any] = {
         "container_id": logs.get("containerId"),
-        "lines": lines,
+        "lines": kept,
         "cursor": logs.get("cursor"),
-        "truncated": any(line["truncated"] for line in lines),
+        "truncated": any(line["truncated"] for line in kept) or omitted > 0,
     }
+    if omitted:
+        out["truncation_reason"] = "char_budget"
+        out["omitted_lines"] = omitted
+    return out
 
 
 def shape_log_files(data: dict | None) -> list[dict[str, Any]]:
@@ -542,11 +563,51 @@ def shape_log_files(data: dict | None) -> list[dict[str, Any]]:
 
 def shape_log_file(data: dict | None) -> dict[str, Any]:
     f = (data or {}).get("logFile") or {}
-    return {
+    content = f.get("content")
+    out: dict[str, Any] = {
         "path": f.get("path"),
-        "content": f.get("content"),
+        "content": content,
         "total_lines": f.get("totalLines"),
         "start_line": f.get("startLine"),
+    }
+    if isinstance(content, str) and len(content) > MAX_LOG_RESULT_CHARS:
+        # Keep whole leading lines; paging forward resumes at the first omitted one.
+        lines = content.splitlines(keepends=True)
+        kept: list[str] = []
+        used = 0
+        for line in lines:
+            if used + len(line) > MAX_LOG_RESULT_CHARS:
+                break
+            kept.append(line)
+            used += len(line)
+        if not kept:  # single line larger than the budget: cut it
+            kept = [lines[0][:MAX_LOG_RESULT_CHARS] + _TRUNCATION_MARKER]
+        out["content"] = "".join(kept)
+        out["truncated"] = True
+        out["truncation_reason"] = "char_budget"
+        out["omitted_lines"] = len(lines) - len(kept)
+        start = f.get("startLine")
+        if isinstance(start, int):
+            out["next_start_line"] = start + len(kept)
+    return out
+
+
+def limit_raw_result(data: dict[str, Any], budget: int = MAX_RAW_RESULT_CHARS) -> dict[str, Any]:
+    """Pass a raw GraphQL result through unless its JSON exceeds ``budget`` chars;
+    then return a truncation envelope with a prefix preview and a hint."""
+    text = json.dumps(data, default=str)
+    if len(text) <= budget:
+        return data
+    return {
+        "truncated": True,
+        "truncation_reason": "char_budget",
+        "total_chars": len(text),
+        "preview": text[:budget] + _TRUNCATION_MARKER,
+        "message": (
+            f"Result is {len(text)} chars, over the {budget}-char budget. "
+            "Narrow the query selection (fewer fields, filters, or a smaller "
+            "list window) and re-run."
+        ),
     }
 
 
