@@ -20,6 +20,7 @@ from ._base import (
     Confirmation,
     contains_ci,
     guarded,
+    local_id,
     require_action,
     require_choice,
     require_confirm,
@@ -65,49 +66,49 @@ async def fetch_vms(
 async def do_start_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, _vm_power_consequence(vm_id, "start"))
     return shape_mutation_result(
-        await client.execute(queries.VM_START, {"id": vm_id}), ("vm", "start")
+        await client.execute(queries.VM_START, {"id": local_id(vm_id)}), ("vm", "start")
     )
 
 
 async def do_stop_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, _stop_vm_consequence(vm_id))
     return shape_mutation_result(
-        await client.execute(queries.VM_STOP, {"id": vm_id}), ("vm", "stop")
+        await client.execute(queries.VM_STOP, {"id": local_id(vm_id)}), ("vm", "stop")
     )
 
 
 async def do_pause_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, _vm_power_consequence(vm_id, "pause"))
     return shape_mutation_result(
-        await client.execute(queries.VM_PAUSE, {"id": vm_id}), ("vm", "pause")
+        await client.execute(queries.VM_PAUSE, {"id": local_id(vm_id)}), ("vm", "pause")
     )
 
 
 async def do_resume_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, _vm_power_consequence(vm_id, "resume"))
     return shape_mutation_result(
-        await client.execute(queries.VM_RESUME, {"id": vm_id}), ("vm", "resume")
+        await client.execute(queries.VM_RESUME, {"id": local_id(vm_id)}), ("vm", "resume")
     )
 
 
 async def do_reboot_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, _reboot_vm_consequence(vm_id))
     return shape_mutation_result(
-        await client.execute(queries.VM_REBOOT, {"id": vm_id}), ("vm", "reboot")
+        await client.execute(queries.VM_REBOOT, {"id": local_id(vm_id)}), ("vm", "reboot")
     )
 
 
 async def do_force_stop_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, _force_stop_vm_consequence(vm_id))
     return shape_mutation_result(
-        await client.execute(queries.VM_FORCE_STOP, {"id": vm_id}), ("vm", "forceStop")
+        await client.execute(queries.VM_FORCE_STOP, {"id": local_id(vm_id)}), ("vm", "forceStop")
     )
 
 
 async def do_reset_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
     require_confirm(confirm, _reset_vm_consequence(vm_id))
     return shape_mutation_result(
-        await client.execute(queries.VM_RESET, {"id": vm_id}), ("vm", "reset")
+        await client.execute(queries.VM_RESET, {"id": local_id(vm_id)}), ("vm", "reset")
     )
 
 

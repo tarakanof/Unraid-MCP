@@ -102,7 +102,7 @@ async def test_get_container_short_id_and_name_resolve(mocked_client, ident):
     async with mocked_client([_resp(REFS), _resp(DETAIL)]) as (client, route):
         out = await docker.fetch_container(client, ident)
     assert route.call_count == 2
-    assert _body(route.calls[1])["variables"] == {"id": FULL}
+    assert _body(route.calls[1])["variables"] == {"id": PLEX}
     assert out["id"] == PLEX[:12]
 
 
@@ -131,7 +131,7 @@ async def test_logs_short_id_resolves_before_query(mocked_client):
     async with mocked_client([_resp(REFS), _resp(logs)]) as (client, route):
         out = await docker.fetch_container_logs(client, PLEX[:12], tail=5)
     assert _body(route.calls[0])["query"] == queries.CONTAINER_REFS
-    assert _body(route.calls[1])["variables"] == {"id": FULL, "since": None, "tail": 5}
+    assert _body(route.calls[1])["variables"] == {"id": PLEX, "since": None, "tail": 5}
     assert out["container_id"] == PLEX[:12]
 
 
@@ -170,7 +170,7 @@ async def test_mutation_short_id_resolves_after_confirm(mocked_client, call):
     async with mocked_client([_resp(REFS), _resp(ok)]) as (client, route):
         await call(client, PLEX[:12])
     assert _body(route.calls[0])["query"] == queries.CONTAINER_REFS
-    assert _body(route.calls[1])["variables"]["id"] == FULL
+    assert _body(route.calls[1])["variables"]["id"] == PLEX
     assert route.call_count == 2
 
 
@@ -220,7 +220,7 @@ async def test_update_containers_mixed_forms_one_lookup(mocked_client):
     async with mocked_client([_resp(REFS), _resp(updated)]) as (client, route):
         out = await docker.do_update_containers(client, [PLEX[:12], RADARR], confirm=True)
     assert route.call_count == 2
-    assert _body(route.calls[1])["variables"] == {"ids": [FULL, RADARR]}
+    assert _body(route.calls[1])["variables"] == {"ids": [PLEX, RADARR]}
     assert [c["id"] for c in out] == [PLEX[:12], RADARR[:12]]
 
 
@@ -242,7 +242,7 @@ async def test_autostart_accepts_short_and_bare_ids(mocked_client):
             confirm=True,
         )
     sent = _body(route.calls[1])["variables"]["entries"]
-    assert [e["id"] for e in sent] == [f"{SERVER}:{RADARR}", FULL]
+    assert [e["id"] for e in sent] == [RADARR, PLEX]
     assert [e["id"] for e in out["autostart"]] == [RADARR[:12], PLEX[:12]]
 
 
@@ -281,7 +281,7 @@ async def test_destructive_short_id_elicits_with_caller_id_before_any_request(se
     assert any(f"stop container '{PLEX[:12]}'" in m for m in messages)
     sent = [_body(c) for c in route.calls[1:]]
     assert sent[0]["query"] == queries.CONTAINER_REFS
-    assert sent[1]["variables"] == {"id": FULL}
+    assert sent[1]["variables"] == {"id": PLEX}
 
 
 # ── Review follow-ups ────────────────────────────────────────────────────────
@@ -360,7 +360,7 @@ async def test_hex_looking_name_reachable_by_exact_name(mocked_client):
         out = await docker.fetch_container(client, hex_name)
     assert out["id"] == PLEX[:12]
     assert _body(route.calls[0])["variables"] == {"id": hex_name}
-    assert _body(route.calls[2])["variables"] == {"id": FULL}
+    assert _body(route.calls[2])["variables"] == {"id": PLEX}
 
 
 async def test_hex_looking_short_name_reachable(mocked_client):
@@ -368,7 +368,7 @@ async def test_hex_looking_short_name_reachable(mocked_client):
     async with mocked_client([_resp(rows), _resp(DETAIL)]) as (client, route):
         out = await docker.fetch_container(client, "cafebabe1234")
     assert out["id"] == PLEX[:12]
-    assert _body(route.calls[1])["variables"] == {"id": FULL}
+    assert _body(route.calls[1])["variables"] == {"id": PLEX}
 
 
 AUTOSTART_STATE = {
@@ -431,7 +431,7 @@ async def test_autostart_padded_ids_are_trimmed(mocked_client, entry_id, order):
             client, [{"id": entry_id, "auto_start": True}], order=order, confirm=True
         )
     sent = [e["id"] for e in _body(route.calls[1])["variables"]["entries"]]
-    expected = [f"{SERVER}:{RADARR}", FULL] if order else [FULL, f"{SERVER}:{RADARR}"]
+    expected = [RADARR, PLEX] if order else [PLEX, RADARR]
     assert sent == expected
     assert {e["id"] for e in out["autostart"]} == {PLEX[:12], RADARR[:12]}
 

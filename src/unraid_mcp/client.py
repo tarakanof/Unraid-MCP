@@ -3,7 +3,10 @@
 This is intentionally generic: it knows how to authenticate, POST a GraphQL
 operation, and map transport/HTTP/GraphQL failures onto the package's
 exception hierarchy. It has no knowledge of specific Unraid operations — tool
-modules own the queries and response shaping.
+modules own the queries and response shaping. The one schema-wide rule it
+applies: results come back with the server prefix dropped from every
+``PrefixedID`` (``id``/``containerId`` keys), unless ``strip_prefixes=False``
+(the raw-query tool, whose aliases make key-based stripping unsound).
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from .errors import (
     UnraidGraphQLError,
     UnraidServerError,
 )
+from .formatting import strip_server_prefixes
 from .logging import get_logger, redact
 
 log = get_logger(__name__)
@@ -73,6 +77,7 @@ class UnraidClient:
         variables: dict[str, Any] | None = None,
         *,
         timeout: float | httpx.Timeout | None = None,
+        strip_prefixes: bool = True,
     ) -> dict[str, Any]:
         """Run a GraphQL operation and return its ``data`` object.
 
@@ -81,9 +86,13 @@ class UnraidClient:
         timeout then reports that the operation may still be running.
 
         Raises an :class:`~unraid_mcp.errors.UnraidError` subclass on failure.
-        Configured secrets are scrubbed from data and errors.
+        Configured secrets are scrubbed from data and errors; ``PrefixedID``
+        values come back without the server prefix unless ``strip_prefixes`` is
+        False.
         """
-        data, _ = await self.execute_with_errors(query, variables, timeout=timeout)
+        data, _ = await self.execute_with_errors(
+            query, variables, timeout=timeout, strip_prefixes=strip_prefixes
+        )
         return data
 
     async def execute_with_errors(
@@ -92,10 +101,11 @@ class UnraidClient:
         variables: dict[str, Any] | None = None,
         *,
         timeout: float | httpx.Timeout | None = None,
+        strip_prefixes: bool = True,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Return data and redacted partial errors; raise on total query failure."""
         try:
-            return await self._execute(query, variables, timeout)
+            data, errors = await self._execute(query, variables, timeout)
         except UnraidError as exc:
             message = redact(str(exc), self._secrets)
             if isinstance(exc, UnraidGraphQLError):
@@ -103,6 +113,9 @@ class UnraidClient:
                     message, errors=redact(exc.errors, self._secrets)
                 ) from None
             raise type(exc)(message) from None
+        # The server prefix on every `PrefixedID` is constant noise; upstream
+        # takes the bare id on input, so typed queries only see bare ids (#174).
+        return (strip_server_prefixes(data) if strip_prefixes else data), errors
 
     async def _execute(
         self, query: str, variables: dict[str, Any] | None, timeout: float | httpx.Timeout | None

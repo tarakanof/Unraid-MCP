@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -84,6 +85,24 @@ async def live_client():
 def _is_int(value: Any) -> bool:
     # bool is a subclass of int; a size in bytes must never be a bool.
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+# `<64-hex serverId>:` must never reach an id field; ids are bare (#174).
+_SERVER_PREFIX = re.compile(r"[0-9a-fA-F]{64}:")
+
+
+def _assert_bare_ids(obj: Any) -> None:
+    """Recursively check ``id``/``containerId`` values only (free text such as a
+    notification description may legitimately contain a prefix-like string)."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key in ("id", "containerId") and isinstance(value, str):
+                assert not _SERVER_PREFIX.match(value), value
+            else:
+                _assert_bare_ids(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            _assert_bare_ids(item)
 
 
 def _check_shapes(obj: Any) -> None:
@@ -166,6 +185,7 @@ async def test_read_returns_dict(live_client, fetch):
     result = await _run(fetch, live_client)
     assert isinstance(result, dict)
     _check_shapes(result)
+    _assert_bare_ids(result)
 
 
 @pytest.mark.parametrize("fetch", LIST_READS, ids=lambda f: f.__name__)
@@ -175,6 +195,7 @@ async def test_read_returns_list(live_client, fetch):
     for item in result:
         assert isinstance(item, dict)
     _check_shapes(result)
+    _assert_bare_ids(result)
 
 
 @pytest.mark.parametrize(
@@ -217,6 +238,7 @@ async def test_get_disk_detail(live_client):
     detail = await _run(array.fetch_disk, live_client, disk_id)
     assert detail is None or isinstance(detail, dict)
     if detail is not None:
+        assert detail.get("id") == disk_id  # the bare listed id round-trips (#174)
         assert "size" in detail
         _check_shapes(detail)
         assert isinstance(detail.get("partitions"), list)

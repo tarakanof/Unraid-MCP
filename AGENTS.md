@@ -34,6 +34,11 @@ uv run python scripts/check_schema_drift.py         # PASS/FAIL per op, non-zero
 - **GraphQL strings** live only in `queries.py`. Validate every field name
   against the upstream schema: https://github.com/unraid/api →
   `api/generated-schema.graphql`.
+- **Bare ids**: `UnraidClient` drops the `<serverId>:` prefix from every
+  `PrefixedID` (`id`/`containerId`) in typed query results, so internal code
+  must not depend on prefixed ids. `run_graphql_query` opts out
+  (`strip_prefixes=False`) and returns raw data; subscriptions don't go through
+  `_execute` and still see prefixed ids.
 - **Response shaping** is pure functions in `formatting.py` (no I/O).
   Size conventions: `ArrayDisk`/`Share` sizes arrive in **KiB**, physical
   `Disk.size` arrives in **bytes**; every size is emitted as

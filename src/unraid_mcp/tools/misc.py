@@ -279,7 +279,7 @@ async def do_raw_query(
     client: UnraidClient, query: str, variables: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     _ensure_read_only(query)
-    return limit_raw_result(await client.execute(query, variables))
+    return limit_raw_result(await client.execute(query, variables, strip_prefixes=False))
 
 
 def register(mcp: MCPServer, settings: Settings) -> None:
@@ -390,6 +390,7 @@ def register_raw_query(mcp: MCPServer, settings: Settings) -> None:
     ) -> dict[str, Any]:
         """Run an arbitrary READ-ONLY GraphQL query against the Unraid API (escape hatch
         for fields without a dedicated tool). Mutations and subscriptions are rejected.
+        Ids keep the server prefix here.
 
         Results over ~60k characters are replaced by {"truncated": true,
         "truncation_reason": "char_budget", "total_chars", "preview", "message"};
