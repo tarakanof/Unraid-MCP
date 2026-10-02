@@ -18,7 +18,7 @@ from ..formatting import (
     shape_physical_disk,
     shape_physical_disks,
 )
-from ..types import Disk
+from ..types import Disk, DiskListItem
 from ._base import (
     DESTRUCTIVE,
     DESTRUCTIVE_IDEMPOTENT,
@@ -26,6 +26,7 @@ from ._base import (
     MUTATING,
     MUTATING_IDEMPOTENT,
     READ_ONLY,
+    CaseInsensitive,
     Confirmation,
     Detail,
     contains_ci,
@@ -36,6 +37,7 @@ from ._base import (
     require_confirm,
     require_confirmation,
     select_detail,
+    upper_if_str,
 )
 
 # ── Read logic ───────────────────────────────────────────────────────────────
@@ -72,6 +74,7 @@ async def fetch_disks(
     """List physical disks, filtered after the GraphQL call (#158). ``name``
     matches the model name or device path; ``disk_type`` (free-form upstream
     string, e.g. HD/SSD/NVMe) matches case-insensitively."""
+    smart_status = upper_if_str(smart_status)
     if smart_status is not None:
         require_choice("smart_status", smart_status, _SMART_STATUSES)
     require_choice("detail", detail, DETAILS)
@@ -322,9 +325,9 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         ctx: Context,
         name: str | None = None,
         type: str | None = None,
-        smart_status: SmartStatus | None = None,
+        smart_status: Annotated[SmartStatus | None, CaseInsensitive] = None,
         detail: Detail = "concise",
-    ) -> list[Disk | None]:
+    ) -> list[DiskListItem | None]:
         """List physical disks. Filter before listing everything: name (substring
         of model or device), type (HD/SSD/NVMe, case-insensitive), smart_status.
         detail="concise" returns id, name, device, type, smart_status, temp_c,

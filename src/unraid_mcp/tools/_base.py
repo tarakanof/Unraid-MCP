@@ -13,7 +13,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.utilities.func_metadata import FuncMetadata
 from mcp.types import CallToolResult, InputRequiredResult, TextContent, ToolAnnotations
 from mcp_types.version import is_version_at_least
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 from ..client import UnraidClient
 from ..errors import UnraidAuthError, UnraidError, UnraidGraphQLError
@@ -259,6 +259,16 @@ def require_action(action: str, allowed: tuple[str, ...]) -> None:
 # returns every shaped field.
 Detail = Literal["concise", "full"]
 DETAILS: tuple[str, ...] = get_args(Detail)
+
+
+def upper_if_str(value: Any) -> Any:
+    """Uppercase strings (enum filters accept any case); pass anything else through."""
+    return value.upper() if isinstance(value, str) else value
+
+
+# ``Annotated[<UPPERCASE Literal> | None, CaseInsensitive]``: the published schema
+# keeps the uppercase enum, but "running" is accepted as "RUNNING".
+CaseInsensitive = BeforeValidator(upper_if_str)
 
 
 def contains_ci(needle: str | None, *haystacks: Any) -> bool:

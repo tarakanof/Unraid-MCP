@@ -14,18 +14,17 @@ from ..formatting import shape_mutation_result, shape_vms
 from ._base import (
     DESTRUCTIVE,
     DESTRUCTIVE_IDEMPOTENT,
-    DETAILS,
     MUTATING_IDEMPOTENT,
     READ_ONLY,
+    CaseInsensitive,
     Confirmation,
-    Detail,
     contains_ci,
     guarded,
     require_action,
     require_choice,
     require_confirm,
     require_confirmation,
-    select_detail,
+    upper_if_str,
 )
 
 
@@ -40,33 +39,27 @@ VmState = Literal[
     "NOSTATE", "RUNNING", "IDLE", "PAUSED", "SHUTDOWN", "SHUTOFF", "CRASHED", "PMSUSPENDED"
 ]
 _VM_STATES: tuple[str, ...] = get_args(VmState)
-# VMs are already shaped to id/name/state, so concise == full today; the
-# parameter keeps the list tools uniform (#158).
-CONCISE_VM_KEYS = ("id", "name", "state")
 
 
 async def fetch_vms(
-    client: UnraidClient,
-    *,
-    name: str | None = None,
-    state: str | None = None,
-    detail: str = "full",
+    client: UnraidClient, *, name: str | None = None, state: str | None = None
 ) -> list[dict[str, Any]]:
+    """List VMs, filtered after the GraphQL call (#158). VMs are already
+    shaped to id/name/state, so there is no ``detail`` level."""
+    state = upper_if_str(state)
     if state is not None:
         require_choice("state", state, _VM_STATES)
-    require_choice("detail", detail, DETAILS)
     try:
         data = await client.execute(queries.LIST_VMS)
     except UnraidGraphQLError as exc:
         if not _is_missing_domains_field_error(exc):
             raise
         data = await client.execute(queries.LIST_VMS_LEGACY)
-    vms = [
+    return [
         v
         for v in shape_vms(data)
         if contains_ci(name, v.get("name")) and (state is None or v.get("state") == state)
     ]
-    return select_detail(vms, CONCISE_VM_KEYS, detail)
 
 
 async def do_start_vm(client: UnraidClient, vm_id: str, confirm: bool) -> dict[str, Any]:
@@ -184,13 +177,11 @@ def register(mcp: MCPServer, settings: Settings) -> None:
     async def list_vms(
         ctx: Context,
         name: str | None = None,
-        state: VmState | None = None,
-        detail: Detail = "concise",
+        state: Annotated[VmState | None, CaseInsensitive] = None,
     ) -> list[dict[str, Any]]:
-        """List virtual machines. Filter before listing everything: name
-        (case-insensitive substring), state. Both detail levels return id,
-        name and state."""
-        return await guarded(ctx, fetch_vms, name=name, state=state, detail=detail)
+        """List virtual machines (id, name, state). Filter before listing
+        everything: name (case-insensitive substring), state."""
+        return await guarded(ctx, fetch_vms, name=name, state=state)
 
 
 def register_mutations(mcp: MCPServer, settings: Settings) -> None:

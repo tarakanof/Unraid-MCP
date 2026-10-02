@@ -183,14 +183,13 @@ async def test_read_returns_list(live_client, fetch):
         (
             docker.fetch_containers,
             {"state": "RUNNING"},
-            {"id", "name", "image", "state", "status", "update_available"},
+            {"id", "name", "image", "state", "status", "update_available", "web_ui_url"},
         ),
         (
             array.fetch_disks,
             {},
             {"id", "name", "device", "type", "smart_status", "temp_c", "spinning", "size"},
         ),
-        (vm.fetch_vms, {}, {"id", "name", "state"}),
         (shares.fetch_shares, {}, {"name", "free", "used", "size"}),
     ],
     ids=lambda v: getattr(v, "__name__", None),

@@ -29,7 +29,7 @@ from ..formatting import (
     shape_port_conflicts,
 )
 from ..logging import redact
-from ..types import Container
+from ..types import Container, ContainerListItem
 from ._base import (
     DESTRUCTIVE,
     DESTRUCTIVE_IDEMPOTENT,
@@ -37,6 +37,7 @@ from ._base import (
     MUTATING,
     MUTATING_IDEMPOTENT,
     READ_ONLY,
+    CaseInsensitive,
     Confirmation,
     Detail,
     ProgressCallback,
@@ -51,6 +52,7 @@ from ._base import (
     require_confirmation,
     select_detail,
     unsupported_field_error,
+    upper_if_str,
     with_heartbeat,
 )
 
@@ -71,7 +73,15 @@ UPDATE_HEARTBEAT_S = 10.0
 
 ContainerState = Literal["RUNNING", "PAUSED", "EXITED"]
 _CONTAINER_STATES: tuple[str, ...] = get_args(ContainerState)
-CONCISE_CONTAINER_KEYS = ("id", "name", "image", "state", "status", "update_available")
+CONCISE_CONTAINER_KEYS = (
+    "id",
+    "name",
+    "image",
+    "state",
+    "status",
+    "update_available",
+    "web_ui_url",
+)
 
 
 async def fetch_containers(
@@ -87,6 +97,7 @@ async def fetch_containers(
     The logic default is ``detail="full"`` so internal callers (name lookup)
     keep every field; the ``list_docker_containers`` tool defaults to concise.
     """
+    state = upper_if_str(state)
     if state is not None:
         require_choice("state", state, _CONTAINER_STATES)
     require_choice("detail", detail, DETAILS)
@@ -853,16 +864,16 @@ def register(mcp: MCPServer, settings: Settings) -> None:
     async def list_docker_containers(
         ctx: Context,
         name: str | None = None,
-        state: ContainerState | None = None,
+        state: Annotated[ContainerState | None, CaseInsensitive] = None,
         update_available: bool | None = None,
         detail: Detail = "concise",
-    ) -> list[Container | None]:
+    ) -> list[ContainerListItem | None]:
         """List Docker containers. Filter before listing everything: name
-        (case-insensitive substring), state, update_available. detail="concise"
-        returns id, name, image, state, status, update_available; "full" adds
-        names, auto_start(_order), orphaned, web_ui_url, network_mode, ports.
-        Newer fields are null on older API builds. Use get_docker_container for
-        one container's sizes, mounts and labels."""
+        (case-insensitive substring), state, update_available (false also
+        excludes null, i.e. unknown on older API builds). detail="concise"
+        returns id, name, image, state, status, update_available, web_ui_url;
+        "full" adds names, auto_start(_order), orphaned, network_mode, ports.
+        Use get_docker_container for one container's sizes, mounts and labels."""
         return await guarded(
             ctx,
             fetch_containers,

@@ -12,7 +12,6 @@ from unraid_mcp.formatting import (
     shape_containers,
     shape_physical_disks,
     shape_shares,
-    shape_vms,
 )
 from unraid_mcp.server import build_server
 from unraid_mcp.tools import array, docker, shares, vm
@@ -108,14 +107,13 @@ TOOLS = {
     "list_docker_containers": (
         docker.fetch_containers,
         shape_containers(CONTAINERS),
-        {"id", "name", "image", "state", "status", "update_available"},
+        {"id", "name", "image", "state", "status", "update_available", "web_ui_url"},
     ),
     "list_disks": (
         array.fetch_disks,
         shape_physical_disks(DISKS),
         {"id", "name", "device", "type", "smart_status", "temp_c", "spinning", "size"},
     ),
-    "list_vms": (vm.fetch_vms, shape_vms(VMS), {"id", "name", "state"}),
     "list_shares": (shares.fetch_shares, shape_shares(SHARES), {"name", "free", "used", "size"}),
 }
 
@@ -150,6 +148,10 @@ FILTER_CASES = [
     (vm.fetch_vms, {"state": "RUNNING"}, ["Windows 11", "HomeAssistant"]),
     (vm.fetch_vms, {"name": "windows", "state": "SHUTOFF"}, ["windows-old"]),
     (vm.fetch_vms, {"state": "PAUSED"}, []),
+    # Enum filters are case-insensitive.
+    (docker.fetch_containers, {"state": "running"}, ["Plex", "sonarr"]),
+    (array.fetch_disks, {"smart_status": "unknown"}, ["WDC WD40"]),
+    (vm.fetch_vms, {"state": "shutoff"}, ["windows-old"]),
     (shares.fetch_shares, {"name": "MEDIA"}, ["Media", "media-backup"]),
     (shares.fetch_shares, {"name": "zzz"}, []),
 ]
@@ -198,12 +200,11 @@ async def test_name_lookup_still_uses_full_list(mocked_client):
 @pytest.mark.parametrize(
     "fn,kwargs,param",
     [
-        (docker.fetch_containers, {"state": "running"}, "state"),
+        (docker.fetch_containers, {"state": "runnin"}, "state"),
         (docker.fetch_containers, {"detail": "brief"}, "detail"),
         (array.fetch_disks, {"smart_status": "FAILED"}, "smart_status"),
         (array.fetch_disks, {"detail": "all"}, "detail"),
-        (vm.fetch_vms, {"state": "STOPPED"}, "state"),
-        (vm.fetch_vms, {"detail": "x"}, "detail"),
+        (vm.fetch_vms, {"state": "stopped"}, "state"),
         (shares.fetch_shares, {"detail": "x"}, "detail"),
     ],
 )
@@ -229,10 +230,11 @@ async def _session_call(settings_factory, tool, args, data=DATA):
 @pytest.mark.parametrize(
     "tool,args,allowed",
     [
-        ("list_docker_containers", {"state": "running"}, "'RUNNING', 'PAUSED' or 'EXITED'"),
+        ("list_docker_containers", {"state": "garbage"}, "'RUNNING', 'PAUSED' or 'EXITED'"),
+        ("list_docker_containers", {"state": 1}, "'RUNNING', 'PAUSED' or 'EXITED'"),
         ("list_docker_containers", {"detail": "brief"}, "'concise' or 'full'"),
-        ("list_disks", {"smart_status": "BAD"}, "'OK' or 'UNKNOWN'"),
-        ("list_vms", {"state": "STOPPED"}, "'SHUTOFF'"),
+        ("list_disks", {"smart_status": "bad"}, "'OK' or 'UNKNOWN'"),
+        ("list_vms", {"state": "stopped"}, "'SHUTOFF'"),
         ("list_shares", {"detail": "all"}, "'concise' or 'full'"),
     ],
 )
@@ -241,6 +243,65 @@ async def test_sdk_rejects_invalid_enum_without_http(settings_factory, tool, arg
     assert result.is_error is True
     assert allowed in result.content[0].text
     assert route.call_count == 0
+
+
+@pytest.mark.parametrize(
+    "tool,args,expected",
+    [
+        ("list_docker_containers", {"state": "running"}, ["Plex", "sonarr"]),
+        ("list_docker_containers", {"state": "Exited"}, ["plex-meta"]),
+        ("list_disks", {"smart_status": "unknown"}, ["WDC WD40"]),
+        ("list_vms", {"state": "shutoff"}, ["windows-old"]),
+    ],
+)
+async def test_sdk_enum_filters_case_insensitive(settings_factory, tool, args, expected):
+    result, route = await _session_call(settings_factory, tool, args)
+    assert result.is_error is False, result.content[0].text
+    assert _names(result.structured_content["result"]) == expected
+    assert route.call_count == 1
+
+
+async def test_enum_schema_stays_uppercase(settings_factory):
+    with respx.mock:
+        respx.post(URL).respond(200, json={"data": {}})
+        async with Client(build_server(settings_factory())) as s:
+            tools = {t.name: t for t in (await s.list_tools()).tools}
+    props = tools["list_docker_containers"].input_schema["properties"]
+    assert ["RUNNING", "PAUSED", "EXITED"] in [
+        branch.get("enum") for branch in props["state"].get("anyOf", [props["state"]])
+    ]
+
+
+async def test_only_container_disk_share_lists_take_detail(settings_factory):
+    flags = {"allow_mutations": True, "allow_dangerous": True, "allow_raw_query": True}
+    with respx.mock:
+        respx.post(URL).respond(200, json={"data": {}})
+        async with Client(build_server(settings_factory(**flags))) as s:
+            tools = (await s.list_tools()).tools
+    with_detail = {t.name for t in tools if "detail" in t.input_schema.get("properties", {})}
+    assert with_detail == {"list_docker_containers", "list_disks", "list_shares"}
+
+
+async def test_get_tools_keep_strict_output_contracts(settings_factory):
+    """List items relax non-concise keys; get_* contracts stay fully required."""
+    with respx.mock:
+        respx.post(URL).respond(200, json={"data": {}})
+        async with Client(build_server(settings_factory())) as s:
+            schemas = {t.name: t.output_schema for t in (await s.list_tools()).tools}
+    assert set(schemas["get_disk"]["required"]) == {
+        "id", "name", "device", "vendor", "type", "serial", "interface",
+        "smart_status", "temp_c", "spinning", "size", "firmware", "partitions",
+    }  # fmt: skip
+    assert set(schemas["get_docker_container"]["required"]) == {
+        "id", "name", "names", "image", "state", "status", "auto_start",
+        "auto_start_order", "update_available", "orphaned", "web_ui_url",
+        "network_mode", "ports",
+    }  # fmt: skip
+    for tool, keys in (("list_docker_containers", 0), ("list_disks", 1)):
+        item = schemas[tool]["properties"]["result"]["items"]["anyOf"][0]
+        definition = schemas[tool]["$defs"][item["$ref"].split("/")[-1]]
+        concise = list(TOOLS.values())[keys][2]
+        assert set(definition["required"]) == concise
 
 
 @pytest.mark.parametrize("tool", TOOLS)
@@ -277,6 +338,7 @@ async def test_filters_apply_through_sdk(settings_factory):
             "state": "RUNNING",
             "status": "Up",
             "update_available": True,
+            "web_ui_url": None,
         }
     ]
     result, _ = await _session_call(settings_factory, "list_disks", {"type": "ssd"})
