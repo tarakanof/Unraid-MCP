@@ -26,6 +26,7 @@ are treated as capability degradation and ``skip``, not fail.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -286,3 +287,23 @@ async def test_run_graphql_query(live_client):
     result = await _run(misc.do_raw_query, live_client, "query { __typename }")
     assert isinstance(result, dict)
     assert result.get("__typename") == "Query"
+
+
+@pytest.mark.parametrize("tool", ["list_docker_containers", "get_health_summary"])
+async def test_compact_text_block_through_server(tool):
+    """#156: through the real server, a read tool returns ONE compact text block
+    (no newline, null-valued keys omitted) whose content mirrors ``structuredContent``."""
+    from mcp.client import Client
+
+    from unraid_mcp.server import build_server
+    from unraid_mcp.tools._base import compact_text
+
+    async with Client(build_server(load_settings()), raise_exceptions=True) as session:
+        result = await session.call_tool(tool, {})
+    assert result.is_error is False
+    assert len(result.content) == 1
+    text = result.content[0].text
+    assert "\n" not in text
+    json.loads(text)
+    sc = result.structured_content
+    assert text == compact_text(sc["result"] if tool.startswith("list_") else sc)

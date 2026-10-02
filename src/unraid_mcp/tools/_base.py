@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.mcpserver import Context, Elicit, ElicitationResult
 from mcp.server.mcpserver.exceptions import ToolError
-from mcp.types import ToolAnnotations
+from mcp.server.mcpserver.utilities.func_metadata import FuncMetadata
+from mcp.types import CallToolResult, InputRequiredResult, TextContent, ToolAnnotations
 from mcp_types.version import is_version_at_least
 from pydantic import BaseModel, Field
 
@@ -18,6 +20,8 @@ from ..errors import UnraidAuthError, UnraidError, UnraidGraphQLError
 from ..logging import get_logger, redact
 
 if TYPE_CHECKING:  # avoid a runtime import cycle (server imports tools imports _base)
+    from mcp.server.mcpserver import MCPServer
+
     from ..server import AppContext
 
 log = get_logger(__name__)
@@ -397,3 +401,87 @@ def require_confirmation(
     if _can_elicit(ctx):
         return Elicit(consequence, Confirmation)
     return Confirmation(proceed=True)
+
+
+# ── Compact results (#156) ───────────────────────────────────────────────────
+
+
+def _prune(value: Any) -> Any:
+    """Recursively drop dict keys whose value is ``None``.
+
+    List elements are never removed (``None``/``{}`` placeholders keep their
+    position, e.g. per-core CPU usage), and empty lists/dicts stay as-is."""
+    if isinstance(value, dict):
+        return {k: _prune(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [_prune(v) for v in value]
+    return value
+
+
+def compact_text(value: Any, *, prune: bool = True) -> str:
+    """Whitespace-free JSON for a tool's text block; null-valued keys omitted
+    unless ``prune`` is false."""
+    return json.dumps(_prune(value) if prune else value, separators=(",", ":"), ensure_ascii=False)
+
+
+def compact_result(
+    result: CallToolResult, *, wrap_output: bool, prune: bool = True
+) -> CallToolResult:
+    """Replace the SDK's text content with ONE compact JSON block.
+
+    ``structured_content`` (the canonical, schema-validated payload, nulls kept)
+    is passed through untouched. The text is derived from it, so both carry the
+    same data; ``wrap_output`` (list/non-object returns, published as
+    ``{"result": ...}``) is unwrapped so the model sees the bare list. Error and
+    unstructured results are returned as-is. ``prune=False`` keeps null keys
+    (raw upstream data, e.g. ``run_graphql_query``).
+    """
+    if result.is_error or result.structured_content is None:
+        return result
+    payload = result.structured_content
+    if wrap_output:
+        payload = payload["result"]
+    return result.model_copy(
+        update={"content": [TextContent(type="text", text=compact_text(payload, prune=prune))]}
+    )
+
+
+class CompactFuncMetadata(FuncMetadata):
+    """``FuncMetadata`` whose results carry one compact text block.
+
+    The SDK's ``convert_result`` still validates the return value and builds
+    ``structured_content`` exactly as before; only the (redundant, pretty,
+    one-block-per-list-item) text content is swapped out afterwards.
+    """
+
+    prune: bool = True
+
+    def convert_result(self, result: Any) -> CallToolResult | InputRequiredResult:
+        converted = super().convert_result(result)
+        if isinstance(converted, InputRequiredResult):
+            return converted
+        return compact_result(converted, wrap_output=self.wrap_output, prune=self.prune)
+
+
+# Raw upstream passthrough: compact, but nulls are data the caller asked for.
+_UNPRUNED_TOOLS = frozenset({"run_graphql_query"})
+
+
+def compact_read_results(mcp: MCPServer) -> None:
+    """Route every registered read-only tool through :class:`CompactFuncMetadata`.
+
+    Mutating tools (and their elicitation flow) keep the SDK default. The SDK
+    has no public accessor for registered ``Tool`` objects, hence the
+    ``_tool_manager`` read; ``FuncMetadata`` fields are copied verbatim, so the
+    advertised ``outputSchema`` is unchanged.
+    """
+    for tool in mcp._tool_manager.list_tools():  # noqa: SLF001 - no public Tool accessor
+        meta = tool.fn_metadata
+        if not (tool.annotations and tool.annotations.read_only_hint):
+            continue
+        if isinstance(meta, CompactFuncMetadata):
+            continue
+        tool.fn_metadata = CompactFuncMetadata(
+            **{name: getattr(meta, name) for name in FuncMetadata.model_fields},
+            prune=tool.name not in _UNPRUNED_TOOLS,
+        )

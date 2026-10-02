@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from . import array, docker, misc, notifications, shares, system, vm
+from ._base import compact_read_results
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -36,3 +37,5 @@ def register_all(mcp: MCPServer, settings: Settings) -> None:
             module.register_dangerous(mcp, settings)
     if settings.allow_raw_query:
         misc.register_raw_query(mcp, settings)
+    # Read tools return one compact, null-free text block (#156).
+    compact_read_results(mcp)

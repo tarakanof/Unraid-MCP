@@ -15,6 +15,7 @@ from unraid_mcp.formatting import (
 )
 from unraid_mcp.server import build_server
 from unraid_mcp.tools import array, docker, misc
+from unraid_mcp.tools._base import compact_text
 
 URL = "https://tower.local/graphql"
 TOOLS = [
@@ -204,12 +205,11 @@ async def test_core_outputs_validate_without_changing_values(settings_factory, m
                 assert json.dumps(result.structured_content, sort_keys=True) == json.dumps(
                     expected[name], sort_keys=True
                 )
-                # Text content is still the original object/list, without the SDK wrapper.
+                # One compact text block: the original object/list without the SDK
+                # wrapper, null-valued keys dropped (#156).
                 original = expected[name].get("result", expected[name])
-                if isinstance(original, list):
-                    assert [json.loads(block.text) for block in result.content] == original
-                else:
-                    assert json.loads(result.content[0].text) == original
+                assert len(result.content) == 1
+                assert result.content[0].text == compact_text(original)
 
 
 @pytest.mark.parametrize("name", ["list_disks", "list_docker_containers"])
