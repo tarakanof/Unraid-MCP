@@ -42,17 +42,36 @@ def test_instructions_within_budget():
     assert len(INSTRUCTIONS) <= 1200
 
 
+# References that intentionally match mutation tools only (checked against the
+# mutations-enabled server instead of the read-only one). Keep empty unless needed.
+MUTATION_ONLY_REFS: set[str] = set()
+
+
+def unresolved_refs(refs: list[str], read: set[str], full: set[str]) -> list[str]:
+    """References that do not resolve where they must: on the read-only tool set,
+    or (explicit MUTATION_ONLY_REFS only) on the mutations-enabled set."""
+    bad = []
+    for ref in refs:
+        pool = full if ref in MUTATION_ONLY_REFS else read
+        if not _matches(ref, pool):
+            bad.append(ref)
+    return bad
+
+
 def test_mentioned_tools_exist():
     read = {t.name for t in _tools()}
     full = {t.name for t in _tools(allow_mutations=True, allow_dangerous=True)}
     mentioned = _mentioned(full)
     assert {"get_health_summary", "*docker*", "whoami"} <= set(mentioned)
-    mutation_only = full - read
-    for ref in mentioned:
-        assert _matches(ref, full), f"{ref!r} matches no tool"
-        # Reads must resolve on the read-only server; only a reference that
-        # targets mutation tools alone may miss it.
-        assert _matches(ref, read) or _matches(ref, mutation_only)
+    assert unresolved_refs(mentioned, read, full) == []
+
+
+def test_drift_check_catches_removed_read_tool():
+    read = {t.name for t in _tools()}
+    full = {t.name for t in _tools(allow_mutations=True, allow_dangerous=True)}
+    # *vm* would still match mutation tools (vm_power...); it must still fail.
+    assert any("vm" in n for n in full - read)
+    assert unresolved_refs(["*vm*"], read - {"list_vms"}, full) == ["*vm*"]
 
 
 def test_every_read_tool_is_covered():
