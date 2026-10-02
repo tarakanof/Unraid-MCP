@@ -87,8 +87,22 @@ def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-# `<64-hex serverId>:` must never reach output; ids are bare (#174).
+# `<64-hex serverId>:` must never reach an id field; ids are bare (#174).
 _SERVER_PREFIX = re.compile(r"[0-9a-fA-F]{64}:")
+
+
+def _assert_bare_ids(obj: Any) -> None:
+    """Recursively check ``id``/``containerId`` values only (free text such as a
+    notification description may legitimately contain a prefix-like string)."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key in ("id", "containerId") and isinstance(value, str):
+                assert not _SERVER_PREFIX.match(value), value
+            else:
+                _assert_bare_ids(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            _assert_bare_ids(item)
 
 
 def _check_shapes(obj: Any) -> None:
@@ -171,7 +185,7 @@ async def test_read_returns_dict(live_client, fetch):
     result = await _run(fetch, live_client)
     assert isinstance(result, dict)
     _check_shapes(result)
-    assert not _SERVER_PREFIX.search(json.dumps(result, default=str))
+    _assert_bare_ids(result)
 
 
 @pytest.mark.parametrize("fetch", LIST_READS, ids=lambda f: f.__name__)
@@ -181,7 +195,7 @@ async def test_read_returns_list(live_client, fetch):
     for item in result:
         assert isinstance(item, dict)
     _check_shapes(result)
-    assert not _SERVER_PREFIX.search(json.dumps(result, default=str))
+    _assert_bare_ids(result)
 
 
 @pytest.mark.parametrize(
