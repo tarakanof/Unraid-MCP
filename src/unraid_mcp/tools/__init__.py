@@ -24,6 +24,20 @@ if TYPE_CHECKING:
 _MODULES = (system, array, docker, vm, shares, notifications, misc)
 
 
+def sort_published_tools(mcp: MCPServer) -> None:
+    """Publish tools alphabetically by name, whatever the registration order.
+
+    ``tools/list`` must be deterministic so clients can cache it and keep
+    prompt-cache hits; sorting makes that explicit rather than an accident of
+    module import and flag order. Reaches into the SDK's ``_tool_manager``
+    like :func:`trim_published_tools` (``tests/test_tool_order.py`` guards it).
+    """
+    tools = mcp._tool_manager._tools
+    ordered = {name: tools[name] for name in sorted(tools)}
+    tools.clear()
+    tools.update(ordered)
+
+
 def register_all(mcp: MCPServer, settings: Settings) -> None:
     for module in _MODULES:
         module.register(mcp, settings)
@@ -42,3 +56,4 @@ def register_all(mcp: MCPServer, settings: Settings) -> None:
     compact_read_results(mcp)
     # Strip pydantic boilerplate from the published descriptions and schemas.
     trim_published_tools(mcp)
+    sort_published_tools(mcp)

@@ -8,7 +8,8 @@ docstring's source indentation and hard wraps. Clients without tool search
 load all of it up front, so :func:`trim_published_tools` strips it once, after
 registration.
 
-Only the *published* metadata changes. The SDK validates arguments against
+Only the *published* metadata changes (plus unknown input arguments are now
+rejected, see :func:`forbid_unknown_arguments`). The SDK validates arguments against
 each tool's pydantic argument model and results against its output model, not
 against these dicts, so server-side validation is unaffected; clients that
 validate ``structuredContent`` against the published ``outputSchema`` see an
@@ -28,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
+    from pydantic import BaseModel
 
 # Keywords whose value is one subschema / a list of subschemas / a name ->
 # subschema map. Everything else (enum, default, const, required, ...) is data
@@ -197,10 +199,14 @@ def trim_input_schema(
 ) -> dict[str, Any]:
     """Return a copy of a tool input schema without auto-generated titles.
 
-    Nullable ``anyOf`` wrappers stay: some hosts' function-calling validators
-    reject ``"type": [...]`` arrays in parameter schemas.
+    The root gains ``additionalProperties: false`` (the spec's recommendation;
+    :func:`forbid_unknown_arguments` makes the server enforce it). Nullable
+    ``anyOf`` wrappers stay: some hosts' function-calling validators reject
+    ``"type": [...]`` arrays in parameter schemas.
     """
-    return _walk(schema, key=None, is_def=False, root_titles=root_titles, output=False)
+    out = _walk(schema, key=None, is_def=False, root_titles=root_titles, output=False)
+    out["additionalProperties"] = False
+    return out
 
 
 def trim_output_schema(
@@ -208,6 +214,18 @@ def trim_output_schema(
 ) -> dict[str, Any]:
     """Return an equivalent, smaller copy of a tool output schema."""
     return _walk(schema, key=None, is_def=False, root_titles=root_titles, output=True)
+
+
+def forbid_unknown_arguments(arg_model: type[BaseModel]) -> None:
+    """Make ``arg_model`` reject arguments it does not declare.
+
+    The SDK's argument models ignore extras by default, so a misspelled
+    parameter would be dropped silently and the tool would run with defaults.
+    Forbidding them turns that into a validation error before the tool body
+    (and so any HTTP request) runs.
+    """
+    arg_model.model_config["extra"] = "forbid"
+    arg_model.model_rebuild(force=True)
 
 
 def trim_published_tools(mcp: MCPServer) -> None:
@@ -223,6 +241,7 @@ def trim_published_tools(mcp: MCPServer) -> None:
         meta = tool.fn_metadata
         fn_name = getattr(tool.fn, "__name__", tool.name)
         tool.description = trim_description(tool.description)
+        forbid_unknown_arguments(meta.arg_model)
         tool.parameters = trim_input_schema(tool.parameters, root_titles={meta.arg_model.__name__})
         if meta.output_schema is not None:
             # The output root is titled with the declared model's name, or the

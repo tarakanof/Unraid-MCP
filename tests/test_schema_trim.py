@@ -20,7 +20,7 @@ ALL_FLAGS = {"allow_mutations": True, "allow_dangerous": True, "allow_raw_query"
 
 # Trimming must keep tools/list (read-only) at <= 75% of its untrimmed size
 # (it is ~73% at the time of #157), and no single tool may balloon past the cap.
-MAX_TRIMMED_RATIO = 0.75
+MAX_TRIMMED_RATIO = 0.77  # includes the additionalProperties:false each input schema now carries
 MAX_TOOL_CHARS = 5_500
 
 
@@ -217,7 +217,7 @@ def test_input_trim_keeps_nullable_any_of():
         "type": "object",
         "properties": {"since": {"anyOf": [{"type": "string"}, {"type": "null"}]}},
     }
-    assert trim_input_schema(schema) == schema
+    assert trim_input_schema(schema) == {**schema, "additionalProperties": False}
 
 
 def test_trim_description_unwraps_prose_only():
