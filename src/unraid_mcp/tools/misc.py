@@ -154,7 +154,7 @@ async def fetch_log_file(
         variables["startLine"] = start_line
 
     try:
-        return shape_log_file(await client.execute(queries.LOG_FILE, variables))
+        return shape_log_file(await client.execute(queries.LOG_FILE, variables), start_line)
     except UnraidGraphQLError as exc:
         if unsupported_field_error(exc):
             raise feature_unsupported(

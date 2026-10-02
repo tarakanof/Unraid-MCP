@@ -581,7 +581,7 @@ def shape_log_files(data: dict | None) -> list[dict[str, Any]]:
     ]
 
 
-def shape_log_file(data: dict | None) -> dict[str, Any]:
+def shape_log_file(data: dict | None, requested_start: int | None = None) -> dict[str, Any]:
     f = (data or {}).get("logFile") or {}
     content = f.get("content")
     out: dict[str, Any] = {
@@ -617,7 +617,7 @@ def shape_log_file(data: dict | None) -> dict[str, Any]:
             out["line_truncated"] = True
         start = f.get("startLine")
         if not isinstance(start, int):
-            start = 1
+            start = requested_start or 1
         out["next_start_line"] = start + len(kept)
     return out
 

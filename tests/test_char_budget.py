@@ -94,6 +94,15 @@ async def test_read_log_file_missing_start_line_falls_back(mocked_client):
     assert out["next_start_line"] == 1 + out["content"].count("\n")
 
 
+async def test_read_log_file_missing_start_line_uses_requested(mocked_client):
+    content = "".join("y" * 999 + "\n" for _ in range(100))
+    payload = _log_file_payload(content)
+    payload["logFile"]["startLine"] = None
+    async with mocked_client(_resp(payload)) as (c, _r):
+        out = await misc.fetch_log_file(c, "/var/log/syslog", lines=100, start_line=500)
+    assert out["next_start_line"] == 500 + out["content"].count("\n")
+
+
 async def test_raw_query_quote_heavy_envelope_within_budget(mocked_client):
     big = {"a": ['"\\' * 50_000]}
     async with mocked_client(_resp(big)) as (client, _r):
