@@ -32,7 +32,7 @@ def sort_published_tools(mcp: MCPServer) -> None:
     module import and flag order. Reaches into the SDK's ``_tool_manager``
     like :func:`trim_published_tools` (``tests/test_tool_order.py`` guards it).
     """
-    tools = mcp._tool_manager._tools
+    tools = mcp._tool_manager._tools  # noqa: SLF001 - no public Tool accessor
     ordered = {name: tools[name] for name in sorted(tools)}
     tools.clear()
     tools.update(ordered)
@@ -55,5 +55,9 @@ def register_all(mcp: MCPServer, settings: Settings) -> None:
     # Read tools return one compact, null-free text block (#156).
     compact_read_results(mcp)
     # Strip pydantic boilerplate from the published descriptions and schemas.
-    trim_published_tools(mcp)
+    secrets = [
+        settings.api_key.get_secret_value(),
+        settings.bearer_token.get_secret_value() if settings.bearer_token else None,
+    ]
+    trim_published_tools(mcp, secrets)
     sort_published_tools(mcp)

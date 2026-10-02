@@ -19,8 +19,9 @@ URL = "https://tower.local/graphql"
 ALL_FLAGS = {"allow_mutations": True, "allow_dangerous": True, "allow_raw_query": True}
 
 # Trimming must keep tools/list (read-only) at <= 75% of its untrimmed size
-# (it is ~73% at the time of #157), and no single tool may balloon past the cap.
-MAX_TRIMMED_RATIO = 0.77  # includes the additionalProperties:false each input schema now carries
+# (it is ~73% at the time of #157; the root additionalProperties:false of #162 is
+# excluded from the measurement, it is not trimming), and no single tool may balloon past the cap.
+MAX_TRIMMED_RATIO = 0.75
 MAX_TOOL_CHARS = 5_500
 
 
@@ -33,7 +34,9 @@ async def _tools(settings):
 
 def _size(tool):
     # Measured like #157: json.dumps(tool.model_dump(exclude_none=True, by_alias=True)).
-    return len(json.dumps(tool.model_dump(exclude_none=True, by_alias=True)))
+    dumped = tool.model_dump(exclude_none=True, by_alias=True)
+    dumped.get("inputSchema", {}).pop("additionalProperties", None)
+    return len(json.dumps(dumped))
 
 
 def _subschemas(node, key=None, is_model=True):
@@ -83,7 +86,7 @@ async def test_published_schemas_are_valid_draft_2020_12(settings_factory):
 
 async def test_trimming_shrinks_read_only_tools_list(settings_factory, monkeypatch):
     trimmed = sum(_size(t) for t in await _tools(settings_factory()))
-    monkeypatch.setattr(tools_pkg, "trim_published_tools", lambda mcp: None)
+    monkeypatch.setattr(tools_pkg, "trim_published_tools", lambda mcp, secrets=(): None)
     untrimmed = sum(_size(t) for t in await _tools(settings_factory()))
     assert trimmed / untrimmed <= MAX_TRIMMED_RATIO, (trimmed, untrimmed)
 

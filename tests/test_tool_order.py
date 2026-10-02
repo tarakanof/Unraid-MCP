@@ -54,5 +54,37 @@ def test_unknown_argument_is_rejected_without_http(respx_mock):
     for r in results:
         assert r.is_error
         assert "bogus_arg" in r.content[0].text
-        assert "Extra inputs are not permitted" in r.content[0].text
+        assert "Unknown argument" in r.content[0].text
     assert len(respx_mock.calls) == 0
+
+
+def test_unknown_argument_errors_name_allowed_and_never_echo_secrets():
+    api_key = "k" * 40 + "-api-secret"
+    bearer = "b" * 40 + "-bearer-secret"
+    settings = make_settings(api_key=api_key, bearer_token=bearer, allow_mutations=True)
+
+    async def go():
+        async with Client(build_server(settings)) as session:
+            tools = (await session.list_tools()).tools
+            out = []
+            for t in tools:
+                for args in (
+                    {"bogus": api_key},
+                    {api_key: bearer},
+                    {bearer: 1, "also_bad": api_key},
+                ):
+                    out.append((t.name, await session.call_tool(t.name, args)))
+            wrong_type = await session.call_tool("get_disk", {"disk_id": {"x": api_key}})
+            return out, wrong_type
+
+    with respx.mock(assert_all_called=False) as router:
+        out, wrong_type = asyncio.run(go())
+        assert len(router.calls) == 0
+    for name, r in out:
+        text = r.content[0].text
+        assert r.is_error, name
+        assert "Unknown argument" in text and "Allowed:" in text, name
+        assert api_key not in text and bearer not in text, name
+    assert wrong_type.is_error
+    assert api_key not in wrong_type.content[0].text
+    assert api_key not in repr(wrong_type)
