@@ -24,11 +24,18 @@ def _tools(**flags):
     return asyncio.run(go())
 
 
-def _mentioned() -> list[str]:
-    """Tool names (snake_case) and ``*prefix*`` globs mentioned in INSTRUCTIONS."""
-    return [
-        t for t in re.findall(r"\*?[a-z]+(?:_[a-z]+)*\*?", INSTRUCTIONS) if "_" in t or "*" in t
-    ]
+def _mentioned(known: set[str]) -> list[str]:
+    """Tool references in INSTRUCTIONS: snake_case names, ``*globs*``, names with
+    digits, and any bare word that is itself a registered tool name."""
+    out = []
+    for t in re.findall(r"[A-Za-z0-9_*]+", INSTRUCTIONS):
+        if "_" in t or "*" in t or any(c.isdigit() for c in t) or t in known:
+            out.append(t)
+    return out
+
+
+def _matches(ref: str, names: set[str]) -> bool:
+    return any(fnmatch.fnmatchcase(n, ref) for n in names)
 
 
 def test_instructions_within_budget():
@@ -36,11 +43,24 @@ def test_instructions_within_budget():
 
 
 def test_mentioned_tools_exist():
-    mentioned = _mentioned()
-    assert "get_health_summary" in mentioned and "*docker*" in mentioned
-    names = {t.name for t in _tools(allow_mutations=True, allow_dangerous=True)}
+    read = {t.name for t in _tools()}
+    full = {t.name for t in _tools(allow_mutations=True, allow_dangerous=True)}
+    mentioned = _mentioned(full)
+    assert {"get_health_summary", "*docker*", "whoami"} <= set(mentioned)
+    mutation_only = full - read
     for ref in mentioned:
-        assert any(fnmatch.fnmatchcase(n, ref) for n in names), f"{ref!r} matches no tool"
+        assert _matches(ref, full), f"{ref!r} matches no tool"
+        # Reads must resolve on the read-only server; only a reference that
+        # targets mutation tools alone may miss it.
+        assert _matches(ref, read) or _matches(ref, mutation_only)
+
+
+def test_every_read_tool_is_covered():
+    read = {t.name for t in _tools()}
+    full = {t.name for t in _tools(allow_mutations=True, allow_dangerous=True)}
+    refs = _mentioned(full)
+    uncovered = sorted(n for n in read if not any(fnmatch.fnmatchcase(n, r) for r in refs))
+    assert not uncovered, f"read tools not named or globbed in INSTRUCTIONS: {uncovered}"
 
 
 def test_always_load_meta_only_on_core_tools():
