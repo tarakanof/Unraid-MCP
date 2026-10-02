@@ -17,6 +17,8 @@ from ..client import UnraidClient
 from ..config import Settings
 from ..errors import UnraidAuthError, UnraidGraphQLError
 from ..formatting import (
+    MAX_LOG_RESULT_CHARS,
+    limit_raw_result,
     shape_array_status,
     shape_connect_status,
     shape_health_temperature,
@@ -152,7 +154,7 @@ async def fetch_log_file(
         variables["startLine"] = start_line
 
     try:
-        return shape_log_file(await client.execute(queries.LOG_FILE, variables))
+        return shape_log_file(await client.execute(queries.LOG_FILE, variables), start_line)
     except UnraidGraphQLError as exc:
         if unsupported_field_error(exc):
             raise feature_unsupported(
@@ -277,7 +279,7 @@ async def do_raw_query(
     client: UnraidClient, query: str, variables: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     _ensure_read_only(query)
-    return await client.execute(query, variables)
+    return limit_raw_result(await client.execute(query, variables))
 
 
 def register(mcp: MCPServer, settings: Settings) -> None:
@@ -344,7 +346,11 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, fetch_log_files, api_version=api_version)
 
-    @mcp.tool(title="Read Log File", annotations=READ_ONLY)
+    @mcp.tool(
+        title="Read Log File",
+        annotations=READ_ONLY,
+        meta={"anthropic/maxResultSizeChars": MAX_LOG_RESULT_CHARS},
+    )
     async def read_log_file(
         ctx: Context,
         path: str,
@@ -363,6 +369,15 @@ def register(mcp: MCPServer, settings: Settings) -> None:
         To page forward, call again with `start_line` advanced by `lines`. To read
         the tail of the file, first call with a small `lines` to learn `total_lines`,
         then call again with `start_line = total_lines - lines + 1`.
+
+        The serialized result is capped at ~60k characters. If a slice is bigger (long lines),
+        `content` keeps whole leading lines and the response adds `truncated: true`,
+        `truncation_reason: "char_budget"`, `omitted_lines`, and `next_start_line`
+        (the first omitted line) — call again with `start_line=next_start_line`
+        (optionally a smaller `lines`) to continue. If a single line alone exceeds
+        the budget it is cut and `line_truncated: true` is set; the remainder of
+        that line cannot be retrieved by paging (`next_start_line` moves on to the
+        next line).
         """
         api_version = get_app_context(ctx).api_version
         return await guarded(ctx, fetch_log_file, path, lines, start_line, api_version=api_version)
@@ -374,5 +389,9 @@ def register_raw_query(mcp: MCPServer, settings: Settings) -> None:
         ctx: Context, query: str, variables: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """Run an arbitrary READ-ONLY GraphQL query against the Unraid API (escape hatch
-        for fields without a dedicated tool). Mutations and subscriptions are rejected."""
+        for fields without a dedicated tool). Mutations and subscriptions are rejected.
+
+        Results over ~60k characters are replaced by {"truncated": true,
+        "truncation_reason": "char_budget", "total_chars", "preview", "message"};
+        narrow the query selection (fewer fields, filters, smaller windows) and re-run."""
         return await guarded(ctx, do_raw_query, query, variables)
