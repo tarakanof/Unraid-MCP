@@ -701,7 +701,7 @@ MAX_AUTOSTART_WAIT = 2147483647  # GraphQL Int max
 def _shown(cid: str) -> str:
     """Id as shown in error messages: never the server prefix; the 12-hex short
     id for a 64-hex id, else the bare form."""
-    bare = bare_container_id(cid)
+    bare = bare_container_id(_normalize_id(cid))
     return short_container_id(bare) if len(bare) == _FULL_HEX_LEN and _is_hex(bare) else bare
 
 
@@ -723,6 +723,7 @@ def _validate_autostart_entries(entries: list[dict[str, Any]]) -> list[dict[str,
         cid = entry.get("id")
         if not isinstance(cid, str) or not cid.strip():
             raise ToolError(f"entries[{i}].id must be a non-empty container id.")
+        cid = _normalize_id(cid)
         if cid in seen:
             raise ToolError(f"entries[{i}].id {_shown(cid)!r} is listed more than once.")
         seen.add(cid)
@@ -776,6 +777,7 @@ def _validate_order(order: list[str] | None) -> list[str] | None:
     for i, cid in enumerate(order):
         if not isinstance(cid, str) or not cid.strip():
             raise ToolError(f"order[{i}] must be a non-empty container id.")
+    order = [_normalize_id(c) for c in order]
     dupes = sorted({_shown(c) for c in order if order.count(c) > 1})
     if dupes:
         raise ToolError(f"order lists id(s) more than once: {dupes}.")

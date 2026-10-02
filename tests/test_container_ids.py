@@ -412,3 +412,45 @@ async def test_check_docker_updates_ids_feed_update_tools(mocked_client):
     async with mocked_client(_resp(data)) as (client, _):
         (status,) = await docker.fetch_docker_updates(client)
     assert status == {"id": PLEX[:12], "name": "plex", "update_status": "UPDATE_AVAILABLE"}
+
+
+@pytest.mark.parametrize(
+    "entry_id,order",
+    [
+        (f" {RADARR[:12]} ", None),
+        (f"\t{RADARR.upper()} ", None),
+        (RADARR[:12], [f" {RADARR[:12]} ", f" {FULL.upper()} "]),
+        (RADARR, [f" {RADARR} ", f"{PLEX[:12]}\n"]),
+    ],
+    ids=["entry-short", "entry-full", "order-short", "order-full"],
+)
+async def test_autostart_padded_ids_are_trimmed(mocked_client, entry_id, order):
+    done = {"docker": {"updateAutostartConfiguration": True}}
+    async with mocked_client([_resp(AUTOSTART_STATE), _resp(done)]) as (client, route):
+        out = await docker.do_set_docker_autostart(
+            client, [{"id": entry_id, "auto_start": True}], order=order, confirm=True
+        )
+    sent = [e["id"] for e in _body(route.calls[1])["variables"]["entries"]]
+    expected = [f"{SERVER}:{RADARR}", FULL] if order else [FULL, f"{SERVER}:{RADARR}"]
+    assert sent == expected
+    assert {e["id"] for e in out["autostart"]} == {PLEX[:12], RADARR[:12]}
+
+
+@pytest.mark.parametrize(
+    "entries,order",
+    [
+        ([{"id": f" {'e' * 64} ", "auto_start": True}], None),
+        ([{"id": " deadbeefdead ", "auto_start": True}], None),
+        ([{"id": RADARR[:12], "auto_start": True}], [f" {RADARR} ", RADARR.upper()]),
+        ([{"id": f" {PLEX} ", "auto_start": True}, {"id": PLEX, "auto_start": False}], None),
+    ],
+    ids=["unknown-full", "unknown-short", "order-dup", "entries-dup"],
+)
+async def test_autostart_padded_id_errors_show_short_form(mocked_client, entries, order):
+    async with mocked_client(_resp(AUTOSTART_STATE)) as (client, route):
+        with pytest.raises(ToolError) as exc:
+            await docker.do_set_docker_autostart(client, entries, order=order, confirm=True)
+    msg = str(exc.value)
+    assert "e" * 13 not in msg and PLEX not in msg and RADARR not in msg.lower()
+    assert SERVER not in msg
+    assert route.call_count <= 1
