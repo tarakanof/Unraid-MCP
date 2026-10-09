@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Actionable permission errors (#179).** An upstream `Forbidden resource`
+  GraphQL error now becomes a tool error that says the API key lacks permission
+  for the operation, names the key's roles when known, and suggests a key with
+  the needed permission (e.g. `DOCKER` `update`) or the `ADMIN` role. Applies to
+  reads and mutations; the key never appears in the message.
+- **Read-only key warning at startup (#179).** With
+  `UNRAID_MCP_ALLOW_MUTATIONS=true`, startup runs the `whoami` identity query
+  once (best effort, 5 s bound, alongside the version probe) and logs one
+  stderr warning when every role on the key is read-only (`VIEWER`/`GUEST`).
+  A failed or malformed check never blocks startup.
+
 ## 0.11.0 - 2026-10-02
 
 Shorter ids (#172, #174): no server prefix anywhere; container ids are 12-hex short ids.

@@ -121,6 +121,43 @@ def feature_unsupported(
     return ToolError(msg)
 
 
+def _error_code(error: dict[str, Any]) -> Any:
+    """``extensions.code`` of one GraphQL error, or None if absent or malformed."""
+    extensions = error.get("extensions")
+    return extensions.get("code") if isinstance(extensions, dict) else None
+
+
+def forbidden_error(exc: UnraidError) -> bool:
+    """True iff ``exc`` is the upstream authz guard rejecting the API key.
+
+    NestJS answers an operation the key's roles/permissions don't cover with
+    ``Forbidden resource`` (or a ``FORBIDDEN`` error code). Unlike
+    :func:`is_permission_error`, ``UNAUTHENTICATED`` (a bad key) does not count.
+    """
+    if not isinstance(exc, UnraidGraphQLError):
+        return False
+    return "Forbidden resource" in str(exc) or any(
+        "Forbidden resource" in str(e.get("message", "")) or _error_code(e) == "FORBIDDEN"
+        for e in exc.errors
+    )
+
+
+def permission_denied(roles: tuple[str, ...] | None) -> ToolError:
+    """Build (do NOT raise) the actionable ``ToolError`` for a forbidden operation.
+
+    ``roles`` are the key's roles from the startup identity check, or None when
+    unknown (the clause is then omitted).
+    """
+    msg = "The Unraid API key lacks permission for this operation (Forbidden resource)."
+    if roles is not None:
+        msg += f" Key roles: {', '.join(roles) or 'none'}."
+    msg += (
+        " Use a key with the needed resource/action permission (e.g. DOCKER update"
+        " for container changes) or the ADMIN role, then restart the server."
+    )
+    return ToolError(msg)
+
+
 def local_id(identifier: Any) -> Any:
     """A caller's ``PrefixedID`` input as upstream resolves it: trimmed, server
     prefix dropped, so bare and prefixed ids behave the same (#174). Case is
@@ -149,6 +186,8 @@ async def guarded(
         # which may contain a configured secret.
         raise ToolError(redact(str(exc), client.secrets)) from None
     except UnraidError as exc:
+        if forbidden_error(exc):
+            raise permission_denied(get_app_context(ctx).key_roles) from None
         raise ToolError(redact(str(exc), client.secrets)) from None
 
 
@@ -196,10 +235,7 @@ async def safe_query_with_status(
 
 def is_permission_error(exc: UnraidGraphQLError) -> bool:
     """True iff a GraphQL error carries a structured permission code."""
-    return any(
-        (e.get("extensions") or {}).get("code") in ("FORBIDDEN", "UNAUTHENTICATED")
-        for e in exc.errors
-    )
+    return any(_error_code(e) in ("FORBIDDEN", "UNAUTHENTICATED") for e in exc.errors)
 
 
 async def gather_all(*aws: Awaitable[Any]) -> list[Any]:

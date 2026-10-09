@@ -73,8 +73,21 @@ containers — those stay locked until you deliberately opt into the dangerous t
 
 ## Least privilege
 
-Use a scoped Unraid API key. A `guest`/read key is enough for all the read-only
-tools — only create a wider-scoped key if you actually enable mutations.
+Use a scoped Unraid API key. A read-only key (`VIEWER` role) is enough for all the
+read-only tools. Only create a wider-scoped key if you actually enable mutations.
+
+Mutating tools need a key whose roles or permissions cover the resource and action:
+for example `DOCKER` `update` for container start/stop/update and
+`refresh_docker_digests`, `ARRAY` for array and parity control, `VMS` for VM power,
+`NOTIFICATIONS` for the notification tools. The `ADMIN` role covers everything.
+
+When the key lacks a permission, Unraid answers `Forbidden resource`. The server
+turns that into an error that says the key lacks permission for the operation,
+names the key's roles when known, and suggests the fix. It never includes the key.
+With `UNRAID_MCP_ALLOW_MUTATIONS=true`, startup also runs the `whoami` identity
+query once (best effort, bounded to 5 s, never blocking startup). If every role on
+the key is read-only (`VIEWER` and/or `GUEST`), the server logs one warning to
+stderr naming the roles.
 
 ## Secrets stay secret
 
