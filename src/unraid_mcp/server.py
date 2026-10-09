@@ -132,30 +132,41 @@ async def _probe_versions(client: UnraidClient) -> tuple[str | None, str | None]
     return core.get("api"), core.get("unraid")
 
 
+# Roles that cannot mutate anything (upstream ``Role`` enum descriptions).
+_READ_ONLY_ROLES = frozenset({"VIEWER", "GUEST"})
+
+
 async def _probe_key_roles(client: UnraidClient) -> tuple[str, ...] | None:
     """Best-effort: the API key's roles (same query as ``whoami``), time-bounded.
 
-    Never raises: any failure returns None. Warns once when the key is
-    VIEWER-only, since mutating tools will then fail with Forbidden resource.
+    Never raises: any failure, including a malformed response, returns None.
+    Warns once when every role is read-only, since mutating tools will then
+    fail with Forbidden resource.
     """
     try:
         async with asyncio.timeout(IDENTITY_PROBE_TIMEOUT_S):
             data = await client.execute(queries.ME)
+        me = shape_me(data)
+        roles = me.get("roles") if isinstance(me, dict) else None
+        if not isinstance(roles, list):
+            return None
+        key_roles = tuple(r for r in roles if isinstance(r, str))
     except Exception as exc:  # noqa: BLE001 - startup must never be blocked by the check
         log.info("API key identity check failed; continuing: %s", type(exc).__name__)
         return None
-    roles = shape_me(data).get("roles")
-    if not isinstance(roles, list):
-        return None
-    key_roles = tuple(str(r) for r in roles)
-    if key_roles and {r.upper() for r in key_roles} == {"VIEWER"}:
+    if key_roles and {r.upper() for r in key_roles} <= _READ_ONLY_ROLES:
         log.warning(
-            "UNRAID_MCP_ALLOW_MUTATIONS=true but the Unraid API key has only the VIEWER "
-            "role: mutating tools will fail with a permission error unless the key was "
-            "granted explicit permissions. Use a key with the needed permissions "
-            "(e.g. DOCKER update) or the ADMIN role."
+            "UNRAID_MCP_ALLOW_MUTATIONS=true but the Unraid API key has only read-only "
+            "role(s) (%s): mutating tools will fail with a permission error unless the "
+            "key was granted explicit permissions. Use a key with the needed permissions "
+            "(e.g. DOCKER update) or the ADMIN role.",
+            ", ".join(key_roles),
         )
     return key_roles
+
+
+async def _no_roles() -> None:
+    return None
 
 
 def _transport_security(settings: Settings) -> TransportSecuritySettings | None:
@@ -267,8 +278,12 @@ def build_server(settings: Settings) -> MCPServer:
                 timeout=settings.timeout,
                 long_timeout=settings.long_timeout,
             )
-            api_version, unraid_version = await _probe_versions(client)
-            key_roles = await _probe_key_roles(client) if settings.allow_mutations else None
+            # Both probes never raise, so plain gather is safe; running them
+            # together keeps the identity check off the startup critical path.
+            (api_version, unraid_version), key_roles = await asyncio.gather(
+                _probe_versions(client),
+                _probe_key_roles(client) if settings.allow_mutations else _no_roles(),
+            )
             log.info(
                 "unraid-mcp ready (target=%s, mutations=%s, raw_query=%s, api=%s, unraid=%s)",
                 settings.host_for_messages,

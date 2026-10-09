@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import json
 import logging
+from types import SimpleNamespace
 
 import httpx
+import pytest
 import respx
 from mcp.client import Client
+from mcp.server.mcpserver.exceptions import ToolError
 
 from unraid_mcp import queries
+from unraid_mcp.errors import UnraidGraphQLError
 from unraid_mcp.server import build_server
+from unraid_mcp.tools._base import forbidden_error, guarded, is_permission_error
 
 from .conftest import KEY, URL
 
@@ -80,7 +85,7 @@ async def test_viewer_key_with_mutations_warns_once(settings_factory, caplog):
         mcp = build_server(settings_factory(allow_mutations=True))
         async with mcp._lowlevel_server.lifespan(mcp._lowlevel_server) as ctx:
             assert ctx.key_roles == ("VIEWER",)
-    warnings = [r for r in caplog.records if "only the VIEWER role" in r.getMessage()]
+    warnings = [r for r in caplog.records if "read-only role" in r.getMessage()]
     assert len(warnings) == 1
     assert KEY not in caplog.text
     assert _me_calls(route) == 1
@@ -92,7 +97,7 @@ async def test_admin_key_with_mutations_does_not_warn(settings_factory, caplog):
         mcp = build_server(settings_factory(allow_mutations=True))
         async with mcp._lowlevel_server.lifespan(mcp._lowlevel_server) as ctx:
             assert ctx.key_roles == ("ADMIN",)
-    assert "VIEWER role" not in caplog.text
+    assert "read-only role" not in caplog.text
 
 
 async def test_mutations_off_skips_identity_check(settings_factory, caplog):
@@ -101,7 +106,7 @@ async def test_mutations_off_skips_identity_check(settings_factory, caplog):
         mcp = build_server(settings_factory(allow_mutations=False))
         async with mcp._lowlevel_server.lifespan(mcp._lowlevel_server) as ctx:
             assert ctx.key_roles is None
-    assert "VIEWER role" not in caplog.text
+    assert "read-only role" not in caplog.text
     assert _me_calls(route) == 0
 
 
@@ -133,3 +138,52 @@ async def test_identity_check_is_time_bounded(settings_factory, monkeypatch):
         async with asyncio.timeout(2):
             async with mcp._lowlevel_server.lifespan(mcp._lowlevel_server) as ctx:
                 assert ctx.key_roles is None
+
+
+async def test_malformed_identity_response_does_not_block_startup(settings_factory, caplog):
+    """Envelope-valid but malformed ``me`` payloads leave roles unknown."""
+    for me in (
+        {"data": {"me": "unexpected"}},
+        {"data": {"me": {"roles": "VIEWER"}}},
+        {"data": {"me": {"roles": [None, 7]}}},
+    ):
+        with respx.mock:
+            respx.post(URL).mock(side_effect=_router(me, other=PROBE))
+            mcp = build_server(settings_factory(allow_mutations=True))
+            async with mcp._lowlevel_server.lifespan(mcp._lowlevel_server) as ctx:
+                assert ctx.key_roles in (None, ())
+
+
+@pytest.mark.parametrize("roles", [("GUEST",), ("VIEWER", "GUEST"), ("viewer",)])
+async def test_read_only_role_sets_warn(settings_factory, caplog, roles):
+    with respx.mock, caplog.at_level(logging.WARNING, logger="unraid_mcp.server"):
+        respx.post(URL).mock(side_effect=_router(_me(*roles)))
+        mcp = build_server(settings_factory(allow_mutations=True))
+        async with mcp._lowlevel_server.lifespan(mcp._lowlevel_server):
+            pass
+    warnings = [r for r in caplog.records if "read-only role" in r.getMessage()]
+    assert len(warnings) == 1
+    assert ", ".join(roles) in warnings[0].getMessage()
+
+
+async def test_viewer_plus_admin_does_not_warn(settings_factory, caplog):
+    with respx.mock, caplog.at_level(logging.WARNING, logger="unraid_mcp.server"):
+        respx.post(URL).mock(side_effect=_router(_me("VIEWER", "ADMIN")))
+        mcp = build_server(settings_factory(allow_mutations=True))
+        async with mcp._lowlevel_server.lifespan(mcp._lowlevel_server):
+            pass
+    assert "read-only role" not in caplog.text
+
+
+@pytest.mark.parametrize("extensions", ["oops", ["FORBIDDEN"], 1])
+async def test_non_dict_extensions_do_not_raise(mocked_client, extensions):
+    body = {"errors": [{"message": "boom", "extensions": extensions}], "data": None}
+    exc = UnraidGraphQLError("GraphQL error: boom", errors=body["errors"])
+    assert forbidden_error(exc) is False
+    assert is_permission_error(exc) is False
+    async with mocked_client(httpx.Response(200, json=body)) as (client, _):
+        ctx = SimpleNamespace(
+            request_context=SimpleNamespace(lifespan_context=SimpleNamespace(client=client))
+        )
+        with pytest.raises(ToolError, match="boom"):
+            await guarded(ctx, lambda c: c.execute("query { x }"))

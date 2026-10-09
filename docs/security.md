@@ -85,8 +85,9 @@ When the key lacks a permission, Unraid answers `Forbidden resource`. The server
 turns that into an error that says the key lacks permission for the operation,
 names the key's roles when known, and suggests the fix. It never includes the key.
 With `UNRAID_MCP_ALLOW_MUTATIONS=true`, startup also runs the `whoami` identity
-query once (best effort, bounded to 5 s, never blocking startup). If the key has
-only the `VIEWER` role, the server logs one warning to stderr.
+query once (best effort, bounded to 5 s, never blocking startup). If every role on
+the key is read-only (`VIEWER` and/or `GUEST`), the server logs one warning to
+stderr naming the roles.
 
 ## Secrets stay secret
 

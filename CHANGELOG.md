@@ -11,8 +11,9 @@
   reads and mutations; the key never appears in the message.
 - **Read-only key warning at startup (#179).** With
   `UNRAID_MCP_ALLOW_MUTATIONS=true`, startup runs the `whoami` identity query
-  once (best effort, 5 s bound) and logs one stderr warning when the key has
-  only the `VIEWER` role. A failed check never blocks startup.
+  once (best effort, 5 s bound, alongside the version probe) and logs one
+  stderr warning when every role on the key is read-only (`VIEWER`/`GUEST`).
+  A failed or malformed check never blocks startup.
 
 ## 0.11.0 - 2026-10-02
 

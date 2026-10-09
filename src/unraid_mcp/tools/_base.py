@@ -121,17 +121,23 @@ def feature_unsupported(
     return ToolError(msg)
 
 
+def _error_code(error: dict[str, Any]) -> Any:
+    """``extensions.code`` of one GraphQL error, or None if absent or malformed."""
+    extensions = error.get("extensions")
+    return extensions.get("code") if isinstance(extensions, dict) else None
+
+
 def forbidden_error(exc: UnraidError) -> bool:
     """True iff ``exc`` is the upstream authz guard rejecting the API key.
 
     NestJS answers an operation the key's roles/permissions don't cover with
-    ``Forbidden resource`` (or a ``FORBIDDEN`` error code).
+    ``Forbidden resource`` (or a ``FORBIDDEN`` error code). Unlike
+    :func:`is_permission_error`, ``UNAUTHENTICATED`` (a bad key) does not count.
     """
     if not isinstance(exc, UnraidGraphQLError):
         return False
     return "Forbidden resource" in str(exc) or any(
-        "Forbidden resource" in str(e.get("message", ""))
-        or (e.get("extensions") or {}).get("code") == "FORBIDDEN"
+        "Forbidden resource" in str(e.get("message", "")) or _error_code(e) == "FORBIDDEN"
         for e in exc.errors
     )
 
@@ -181,8 +187,7 @@ async def guarded(
         raise ToolError(redact(str(exc), client.secrets)) from None
     except UnraidError as exc:
         if forbidden_error(exc):
-            roles = getattr(get_app_context(ctx), "key_roles", None)
-            raise permission_denied(roles) from None
+            raise permission_denied(get_app_context(ctx).key_roles) from None
         raise ToolError(redact(str(exc), client.secrets)) from None
 
 
@@ -230,10 +235,7 @@ async def safe_query_with_status(
 
 def is_permission_error(exc: UnraidGraphQLError) -> bool:
     """True iff a GraphQL error carries a structured permission code."""
-    return any(
-        (e.get("extensions") or {}).get("code") in ("FORBIDDEN", "UNAUTHENTICATED")
-        for e in exc.errors
-    )
+    return any(_error_code(e) in ("FORBIDDEN", "UNAUTHENTICATED") for e in exc.errors)
 
 
 async def gather_all(*aws: Awaitable[Any]) -> list[Any]:
