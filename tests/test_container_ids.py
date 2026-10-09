@@ -270,7 +270,9 @@ async def test_destructive_short_id_elicits_with_caller_id_before_any_request(se
         return ElicitResult(action="accept", content={"proceed": True})
 
     with respx.mock:
-        route = respx.post(URL).mock(side_effect=[_resp({}), _resp(REFS), _resp(STOPPED)])
+        route = respx.post(URL).mock(
+            side_effect=[_resp({}), _resp({}), _resp(REFS), _resp(STOPPED)]
+        )
         mcp = build_server(settings_factory(allow_mutations=True))
         async with Client(mcp, mode="auto", elicitation_callback=elicit) as client:
             respx.calls.clear()
@@ -279,7 +281,7 @@ async def test_destructive_short_id_elicits_with_caller_id_before_any_request(se
             )
     assert not result.is_error, result.content
     assert any(f"stop container '{PLEX[:12]}'" in m for m in messages)
-    sent = [_body(c) for c in route.calls[1:]]
+    sent = [_body(c) for c in route.calls[2:]]  # skip the startup probe + identity check
     assert sent[0]["query"] == queries.CONTAINER_REFS
     assert sent[1]["variables"] == {"id": PLEX}
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from . import queries
 from .client import UnraidClient
 from .config import Settings
 from .errors import UnraidError
+from .formatting import shape_me
 from .logging import get_logger
 from .prompts import register_prompts
 from .resources import register_resources
@@ -102,6 +104,13 @@ class AppContext:
     # explain capability gaps (see tools/_base.feature_unsupported).
     api_version: str | None = None
     unraid_version: str | None = None
+    # The API key's roles from the startup identity check (mutations on only).
+    # None when unchecked or the check failed; named in permission errors.
+    key_roles: tuple[str, ...] | None = None
+
+
+# Upper bound on the startup identity check; it must never stall startup.
+IDENTITY_PROBE_TIMEOUT_S = 5.0
 
 
 async def _probe_versions(client: UnraidClient) -> tuple[str | None, str | None]:
@@ -121,6 +130,32 @@ async def _probe_versions(client: UnraidClient) -> tuple[str | None, str | None]
     core = ((data or {}).get("info") or {}).get("versions") or {}
     core = core.get("core") or {}
     return core.get("api"), core.get("unraid")
+
+
+async def _probe_key_roles(client: UnraidClient) -> tuple[str, ...] | None:
+    """Best-effort: the API key's roles (same query as ``whoami``), time-bounded.
+
+    Never raises: any failure returns None. Warns once when the key is
+    VIEWER-only, since mutating tools will then fail with Forbidden resource.
+    """
+    try:
+        async with asyncio.timeout(IDENTITY_PROBE_TIMEOUT_S):
+            data = await client.execute(queries.ME)
+    except Exception as exc:  # noqa: BLE001 - startup must never be blocked by the check
+        log.info("API key identity check failed; continuing: %s", type(exc).__name__)
+        return None
+    roles = shape_me(data).get("roles")
+    if not isinstance(roles, list):
+        return None
+    key_roles = tuple(str(r) for r in roles)
+    if key_roles and {r.upper() for r in key_roles} == {"VIEWER"}:
+        log.warning(
+            "UNRAID_MCP_ALLOW_MUTATIONS=true but the Unraid API key has only the VIEWER "
+            "role: mutating tools will fail with a permission error unless the key was "
+            "granted explicit permissions. Use a key with the needed permissions "
+            "(e.g. DOCKER update) or the ADMIN role."
+        )
+    return key_roles
 
 
 def _transport_security(settings: Settings) -> TransportSecuritySettings | None:
@@ -233,6 +268,7 @@ def build_server(settings: Settings) -> MCPServer:
                 long_timeout=settings.long_timeout,
             )
             api_version, unraid_version = await _probe_versions(client)
+            key_roles = await _probe_key_roles(client) if settings.allow_mutations else None
             log.info(
                 "unraid-mcp ready (target=%s, mutations=%s, raw_query=%s, api=%s, unraid=%s)",
                 settings.host_for_messages,
@@ -246,6 +282,7 @@ def build_server(settings: Settings) -> MCPServer:
                 settings=settings,
                 api_version=api_version,
                 unraid_version=unraid_version,
+                key_roles=key_roles,
             )
             if "context" in running:
                 # One holder per server: a second concurrent lifespan would make

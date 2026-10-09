@@ -121,6 +121,37 @@ def feature_unsupported(
     return ToolError(msg)
 
 
+def forbidden_error(exc: UnraidError) -> bool:
+    """True iff ``exc`` is the upstream authz guard rejecting the API key.
+
+    NestJS answers an operation the key's roles/permissions don't cover with
+    ``Forbidden resource`` (or a ``FORBIDDEN`` error code).
+    """
+    if not isinstance(exc, UnraidGraphQLError):
+        return False
+    return "Forbidden resource" in str(exc) or any(
+        "Forbidden resource" in str(e.get("message", ""))
+        or (e.get("extensions") or {}).get("code") == "FORBIDDEN"
+        for e in exc.errors
+    )
+
+
+def permission_denied(roles: tuple[str, ...] | None) -> ToolError:
+    """Build (do NOT raise) the actionable ``ToolError`` for a forbidden operation.
+
+    ``roles`` are the key's roles from the startup identity check, or None when
+    unknown (the clause is then omitted).
+    """
+    msg = "The Unraid API key lacks permission for this operation (Forbidden resource)."
+    if roles is not None:
+        msg += f" Key roles: {', '.join(roles) or 'none'}."
+    msg += (
+        " Use a key with the needed resource/action permission (e.g. DOCKER update"
+        " for container changes) or the ADMIN role, then restart the server."
+    )
+    return ToolError(msg)
+
+
 def local_id(identifier: Any) -> Any:
     """A caller's ``PrefixedID`` input as upstream resolves it: trimmed, server
     prefix dropped, so bare and prefixed ids behave the same (#174). Case is
@@ -149,6 +180,9 @@ async def guarded(
         # which may contain a configured secret.
         raise ToolError(redact(str(exc), client.secrets)) from None
     except UnraidError as exc:
+        if forbidden_error(exc):
+            roles = getattr(get_app_context(ctx), "key_roles", None)
+            raise permission_denied(roles) from None
         raise ToolError(redact(str(exc), client.secrets)) from None
 
 

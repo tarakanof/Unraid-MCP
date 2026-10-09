@@ -402,7 +402,7 @@ async def test_destructive_vm_elicits_with_caller_id_before_any_request(settings
         return ElicitResult(action="accept", content={"proceed": True})
 
     with respx.mock:
-        route = respx.post(URL).mock(side_effect=[_resp({}), _resp(VM_RESULT)])
+        route = respx.post(URL).mock(side_effect=[_resp({}), _resp({}), _resp(VM_RESULT)])
         mcp = build_server(settings_factory(allow_mutations=True))
         async with Client(mcp, mode="auto", elicitation_callback=elicit) as client:
             respx.calls.clear()
