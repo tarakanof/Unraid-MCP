@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 - 2026-10-09
+
+Clearer errors when the API key lacks permission (#179).
 
 ### Added
 
