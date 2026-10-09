@@ -187,3 +187,16 @@ async def test_non_dict_extensions_do_not_raise(mocked_client, extensions):
         )
         with pytest.raises(ToolError, match="boom"):
             await guarded(ctx, lambda c: c.execute("query { x }"))
+
+
+@pytest.mark.parametrize(
+    "info",
+    ["x", {"versions": "x"}, {"versions": {"core": "x"}}],
+    ids=["info", "versions", "core"],
+)
+async def test_malformed_version_probe_does_not_block_startup(settings_factory, info):
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {"info": info}}))
+        mcp = build_server(settings_factory(allow_mutations=False))
+        async with mcp._lowlevel_server.lifespan(mcp._lowlevel_server) as ctx:
+            assert (ctx.api_version, ctx.unraid_version) == (None, None)

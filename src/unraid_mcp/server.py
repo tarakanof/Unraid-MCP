@@ -127,9 +127,13 @@ async def _probe_versions(client: UnraidClient) -> tuple[str | None, str | None]
     except Exception as exc:  # noqa: BLE001 - startup must never be blocked by the probe
         log.warning("API version probe raised unexpectedly; continuing: %s", exc)
         return None, None
-    core = ((data or {}).get("info") or {}).get("versions") or {}
-    core = core.get("core") or {}
-    return core.get("api"), core.get("unraid")
+    node: object = data
+    for key in ("info", "versions", "core"):
+        node = node.get(key) if isinstance(node, dict) else None
+    if not isinstance(node, dict):
+        return None, None
+    api, unraid = node.get("api"), node.get("unraid")
+    return (api if isinstance(api, str) else None), (unraid if isinstance(unraid, str) else None)
 
 
 # Roles that cannot mutate anything (upstream ``Role`` enum descriptions).
