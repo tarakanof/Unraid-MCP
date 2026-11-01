@@ -115,7 +115,9 @@ def _apply_allow_list(mcp: MCPServer, settings: Settings, allowed: frozenset[str
     for name in registered - allowed:
         mcp.remove_tool(name)
     for name in sorted(allowed - registered):
-        log.warning("UNRAID_MCP_TOOLS lists %s, but it stays off: it needs %s.", name, catalog[name])
+        log.warning(
+            "UNRAID_MCP_TOOLS lists %s, but it stays off: it needs %s.", name, catalog[name]
+        )
 
 
 def register_all(mcp: MCPServer, settings: Settings) -> None:
