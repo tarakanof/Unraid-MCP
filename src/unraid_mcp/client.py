@@ -117,6 +117,17 @@ class UnraidClient:
         # takes the bare id on input, so typed queries only see bare ids (#174).
         return (strip_server_prefixes(data) if strip_prefixes else data), errors
 
+    @staticmethod
+    def _has_graphql_errors(response: httpx.Response) -> bool:
+        """True when a 4xx body is a JSON object with a non-empty ``errors`` list."""
+        try:
+            body = response.json()
+        except ValueError:
+            return False
+        return (
+            isinstance(body, dict) and isinstance(body.get("errors"), list) and bool(body["errors"])
+        )
+
     async def _execute(
         self, query: str, variables: dict[str, Any] | None, timeout: float | httpx.Timeout | None
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -168,7 +179,8 @@ class UnraidClient:
             raise UnraidServerError(
                 f"Unraid returned a server error (HTTP {response.status_code}) from {self._host}."
             )
-        if response.status_code >= 400:
+        client_error = response.status_code >= 400
+        if client_error and not self._has_graphql_errors(response):
             raise UnraidServerError(f"Unexpected HTTP {response.status_code} from {self._host}.")
 
         try:
@@ -202,7 +214,9 @@ class UnraidClient:
             # details; coercion runs on that scrubbed payload.
             errors = [e if isinstance(e, dict) else {"message": str(e)} for e in raw_errors]
             messages = "; ".join(str(e.get("message", "unknown error")) for e in errors)
-            if data is None or all(value is None for value in data.values()):
+            # Unraid rejects validation failures and request limits as HTTP 400
+            # with the reason in the GraphQL envelope: never partial success.
+            if client_error or data is None or all(value is None for value in data.values()):
                 raise UnraidGraphQLError(f"GraphQL error: {messages}", errors=errors)
             # Partial success — Unraid returned some data plus non-fatal errors
             # (e.g. an optional field unavailable on this build). Surface a
