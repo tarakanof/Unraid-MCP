@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+
+- **Tool allow-list (#178).** `UNRAID_MCP_TOOLS` takes comma-separated exact
+  tool names; when set, only those tools register, across every tier. It only
+  narrows the tier flags: a listed tool whose tier is off stays off and logs one
+  stderr warning naming the flag it needs. Unknown names, and a value with no
+  names, fail startup. Blank means no filter. `confirm=true`, elicitation,
+  resources and prompts are unchanged.
+
 ### Fixed
 
 - **GraphQL errors on HTTP 400 (#195).** Unraid returns validation failures and

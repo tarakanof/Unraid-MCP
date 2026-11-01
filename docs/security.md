@@ -48,6 +48,15 @@ nothing.
 | Mutate | `UNRAID_MCP_ALLOW_MUTATIONS` | off | Everyday writes: start/stop array, start/pause/resume/cancel parity, start/stop/restart/update Docker containers (single + batch), `refresh_docker_digests`, `set_docker_autostart`, start/stop/pause/resume/reboot/force-stop/reset VMs, notification archive/unarchive/unread/delete (single and bulk, plus `create_notification` — see below). `delete_archived_notifications` is annotated `destructive` (irreversible bulk delete) but lives in this tier, not the dangerous one. |
 | Dangerous | `UNRAID_MCP_ALLOW_DANGEROUS` (requires mutations too) | off | High-blast-radius topology/removal ops (see below). |
 
+`UNRAID_MCP_TOOLS` narrows these tiers to an explicit list of tool names, so a client
+that needs one write action doesn't also get every other tool in the mutate tier. Unlike
+a client-side denylist, it fails closed: a tool added by a later release stays off until
+it is listed. It covers every tier, including read tools and `run_graphql_query`, and
+only narrows: a tool registers if its tier flags allow it **and** it is listed. A listed
+tool whose tier is off stays off, with one startup warning naming the flag it needs.
+Unknown names fail startup. `confirm=true` and elicitation are unchanged, and resources
+and prompts are not filtered.
+
 **Notification lifecycle tools** (mutate tier, all require `confirm=true`):
 
 - `notification_archive` / `notification_archive_bulk` — archive or unarchive one

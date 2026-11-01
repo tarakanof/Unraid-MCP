@@ -45,6 +45,10 @@ _INSECURE_BEARER_TOKENS = {
 }
 
 
+def _tool_names(value: str) -> frozenset[str]:
+    return frozenset(name for part in value.split(",") if (name := part.strip()))
+
+
 class BindSettings(BaseSettings):
     """The HTTP bind/TLS fields only, so the container healthcheck can resolve
     them with exactly the server's semantics (case-insensitive env, ``.env``)
@@ -96,6 +100,9 @@ class Settings(BindSettings):
     # this alone unlocks nothing (see tools.register_all).
     allow_dangerous: bool = Field(default=False, validation_alias="UNRAID_MCP_ALLOW_DANGEROUS")
     allow_raw_query: bool = Field(default=False, validation_alias="UNRAID_MCP_ALLOW_RAW_QUERY")
+    # Comma-separated exact tool names. Blank means no filter; otherwise only
+    # these tools register. It narrows the flags above and never enables a tier.
+    tools: str = Field(default="", validation_alias="UNRAID_MCP_TOOLS")
 
     # ── Misc ───────────────────────────────────────────────────────────
     timeout: float = Field(default=30.0, gt=0, validation_alias="UNRAID_MCP_TIMEOUT")
@@ -161,6 +168,21 @@ class Settings(BindSettings):
                 f"UNRAID_MCP_BEARER_TOKEN must be at least {MIN_BEARER_TOKEN_LENGTH} characters"
             )
         return value
+
+    @field_validator("tools")
+    @classmethod
+    def _validate_tools(cls, value: str) -> str:
+        # Blank is "no filter", but "," must not silently mean all or no tools.
+        if value.strip() and not _tool_names(value):
+            raise ValueError(
+                "UNRAID_MCP_TOOLS has no tool names: list at least one, or leave it blank"
+            )
+        return value
+
+    @property
+    def allowed_tools(self) -> frozenset[str] | None:
+        """The ``UNRAID_MCP_TOOLS`` names, or None when no filter is set."""
+        return _tool_names(self.tools) if self.tools.strip() else None
 
     @property
     def health_ignored_sensors(self) -> tuple[str, ...]:

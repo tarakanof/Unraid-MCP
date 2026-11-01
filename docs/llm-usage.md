@@ -65,7 +65,10 @@ A typical stdio client config:
 
 ## Tool catalog
 
-### Read-only (always available)
+If `UNRAID_MCP_TOOLS` is set, only the tools it lists exist, read tools included. A
+missing tool means the operator left it out, so do not try to work around it.
+
+### Read-only (available unless `UNRAID_MCP_TOOLS` leaves them out)
 
 | Tool | Args | Use it to |
 |------|------|-----------|
