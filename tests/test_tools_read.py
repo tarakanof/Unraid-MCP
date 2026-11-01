@@ -2432,3 +2432,40 @@ async def test_temperature_health_nvme_75c_boundary_all_units(mocked_client, val
     async with mocked_client(_health_responses([sensor])) as (c, _r):
         out = await misc.fetch_health(c)
     assert out["overall"] == expected
+
+
+# ── HTTP 400 validation errors reach fallback / raw-query paths (issue #195) ──
+
+
+async def test_http_400_cannot_query_field_triggers_legacy_fallback(mocked_client):
+    from unraid_mcp.tools._base import execute_with_fallback
+
+    bad = {"errors": [{"message": 'Cannot query field "nope" on type "Info".'}]}
+    async with mocked_client(
+        [httpx.Response(400, json=bad), httpx.Response(200, json={"data": {"ok": 1}})]
+    ) as (client, route):
+        data = await execute_with_fallback(client, "query { new }", "query { ok }")
+    assert data == {"ok": 1}
+    assert route.call_count == 2
+
+
+async def test_http_400_cannot_query_field_is_unsupported_error(mocked_client):
+    from unraid_mcp.tools._base import unsupported_field_error
+
+    bad = {"errors": [{"message": 'Cannot query field "nope" on type "Info".'}]}
+    async with mocked_client(httpx.Response(400, json=bad)) as (client, _):
+        with pytest.raises(UnraidGraphQLError) as exc:
+            await client.execute("query { info { nope } }")
+    assert unsupported_field_error(exc.value)
+
+
+async def test_http_400_limit_reason_shown_by_run_graphql_query(mocked_client):
+    from unraid_mcp.tools import misc
+
+    msg = "Syntax Error: Aliases limit of 100 exceeded, found 101."
+    async with mocked_client(httpx.Response(400, json={"errors": [{"message": msg}]})) as (
+        client,
+        _,
+    ):
+        with pytest.raises(UnraidGraphQLError, match="Aliases limit of 100"):
+            await misc.do_raw_query(client, "query { a }")
