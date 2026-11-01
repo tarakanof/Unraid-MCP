@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 - 2026-11-01
+
+A tool allow-list, plus clearer upstream errors (#178, #195, #199).
 
 ### Added
 
@@ -19,6 +21,10 @@
   message, so legacy-query fallbacks and "feature unsupported" messages work on
   a real server. A 400 without an `errors` body, 429 and 5xx are unchanged; 401/403
   still mean authentication failed.
+- **Permission errors on resource reads (#199).** Reading `unraid://health` or
+  `unraid://system-info` with a key that lacks permission now returns the same
+  actionable message as tools, and other resource errors are redacted of
+  configured secrets.
 
 ## 0.12.0 - 2026-10-09
 
