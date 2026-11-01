@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **GraphQL errors on HTTP 400 (#195).** Unraid returns validation failures and
+  request limits (alias limit, introspection disabled) as HTTP 400 with the
+  reason in the JSON body. They now surface as GraphQL errors with the upstream
+  message, so legacy-query fallbacks and "feature unsupported" messages work on
+  a real server. A 400 without an `errors` body, 429 and 5xx are unchanged; 401/403
+  still mean authentication failed.
+
 ## 0.12.0 - 2026-10-09
 
 Clearer errors when the API key lacks permission (#179).

@@ -363,3 +363,96 @@ async def test_timeout_on_normal_call_does_not_claim_still_running():
             with pytest.raises(UnraidConnectionError) as exc:
                 await (await _client(http)).execute("query { x }")
         assert "may still be running" not in str(exc.value)
+
+
+# ── HTTP 400 GraphQL errors (issue #195): bodies captured from API 4.37.9 ────
+
+BAD_FIELD = {
+    "errors": [
+        {
+            "message": 'Cannot query field "nope" on type "Info".',
+            "extensions": {"code": "GRAPHQL_VALIDATION_FAILED"},
+        }
+    ]
+}
+ALIAS_LIMIT = {
+    "errors": [
+        {
+            "message": "Syntax Error: Aliases limit of 100 exceeded, found 101.",
+            "extensions": {"code": "GRAPHQL_VALIDATION_FAILED"},
+        }
+    ]
+}
+INTROSPECTION = {
+    "errors": [
+        {
+            "message": "GraphQL introspection is not allowed, but the current request is "
+            "for introspection.",
+            "extensions": {"code": "INTROSPECTION_DISABLED"},
+        }
+    ]
+}
+
+
+@pytest.mark.parametrize("body", [BAD_FIELD, ALIAS_LIMIT, INTROSPECTION])
+async def test_http_400_with_errors_raises_graphql_error(body):
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(400, json=body))
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            with pytest.raises(UnraidGraphQLError) as exc:
+                await client.execute("query { info { nope } }")
+    assert body["errors"][0]["message"] in str(exc.value)
+    assert exc.value.errors == body["errors"]
+
+
+async def test_http_400_with_errors_and_data_still_raises():
+    with respx.mock:
+        respx.post(URL).mock(
+            return_value=httpx.Response(400, json={"data": {"ok": 1}, **BAD_FIELD})
+        )
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            with pytest.raises(UnraidGraphQLError):
+                await client.execute("query { ok }")
+
+
+async def test_http_400_redacts_secrets_in_errors():
+    body = {"errors": [{"message": f"bad {KEY}", "extensions": {"echo": KEY}}]}
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(400, json=body))
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            with pytest.raises(UnraidGraphQLError) as exc:
+                await client.execute("query { ok }")
+    assert KEY not in str(exc.value)
+    assert exc.value.errors[0]["extensions"]["echo"] == "***REDACTED***"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(400),
+        httpx.Response(400, text="not json"),
+        httpx.Response(400, json={"errors": []}),
+        httpx.Response(400, json=["x"]),
+        httpx.Response(429, text="slow down"),
+    ],
+)
+async def test_other_4xx_keep_unexpected_http_error(response):
+    with respx.mock:
+        respx.post(URL).mock(return_value=response)
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            with pytest.raises(UnraidServerError, match=f"Unexpected HTTP {response.status_code}"):
+                await client.execute("query { ok }")
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_auth_statuses_win_over_errors_body(status):
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(status, json=BAD_FIELD))
+        async with httpx.AsyncClient() as http:
+            client = await _client(http)
+            with pytest.raises(UnraidAuthError):
+                await client.execute("query { ok }")
