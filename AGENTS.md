@@ -14,6 +14,11 @@ uv run ruff check . && uv run ruff format --check . # lint + format
 
 All three must pass before opening a PR.
 
+`t3.json` defines the T3 Code project actions: a new T3 worktree links `.env` from
+the main checkout and runs `uv sync --extra dev` before the agent starts; "Check"
+runs the three commands above. T3 applies the file only on import (the thread
+header's action menu → "From t3.json"); import again after it changes.
+
 Schema-drift check (network, run manually or via the weekly `schema-drift`
 workflow) — validates every operation in `queries.py` against the upstream
 `unraid/api` SDL:

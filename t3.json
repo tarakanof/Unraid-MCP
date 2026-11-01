@@ -1,0 +1,28 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "defaultThreadEnvMode": "worktree",
+  "scripts": [
+    {
+      "name": "Setup worktree",
+      "command": "[ -e .env ] || [ ! -f \"$T3CODE_PROJECT_ROOT/.env\" ] || ln -s \"$T3CODE_PROJECT_ROOT/.env\" .env; uv sync --extra dev",
+      "icon": "configure",
+      "runOnWorktreeCreate": true,
+      "async": false
+    },
+    {
+      "name": "Check",
+      "command": "uv sync --extra dev && uv run pytest -q && uv run ruff check . && uv run ruff format --check .",
+      "icon": "test"
+    },
+    {
+      "name": "Schema drift",
+      "command": "uv run python scripts/check_schema_drift.py",
+      "icon": "lint"
+    },
+    {
+      "name": "Codex review",
+      "command": "codex review --base origin/main",
+      "icon": "lint"
+    }
+  ]
+}
