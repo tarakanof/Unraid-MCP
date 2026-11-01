@@ -33,6 +33,8 @@ from mcp.types import INTERNAL_ERROR
 
 from .client import UnraidClient
 from .errors import UnraidError
+from .logging import redact
+from .tools._base import forbidden_error, permission_denied
 from .tools.misc import fetch_health
 from .tools.system import fetch_system_info
 
@@ -61,7 +63,11 @@ async def _read(
     except UnraidError as exc:
         # data.uri mirrors the SDK's own resource-error payloads so clients can
         # extract the failing URI without parsing the message.
-        raise MCPError(INTERNAL_ERROR, f"Could not read {uri}: {exc}", {"uri": uri}) from None
+        if forbidden_error(exc):
+            detail = str(permission_denied(context.key_roles))
+        else:
+            detail = redact(str(exc), context.client.secrets)
+        raise MCPError(INTERNAL_ERROR, f"Could not read {uri}: {detail}", {"uri": uri}) from None
 
 
 def register_resources(mcp: MCPServer, settings: Settings, app_context: AppContextAccessor) -> None:
