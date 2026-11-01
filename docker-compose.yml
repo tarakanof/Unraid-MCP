@@ -49,6 +49,10 @@ services:
       # want an agent able to reshape the array or delete containers.
       UNRAID_MCP_ALLOW_DANGEROUS: "false"
       UNRAID_MCP_ALLOW_RAW_QUERY: "false"
+      # Comma-separated exact tool names; blank means no filter. Only narrows the
+      # switches above (read tools included), never enables a tier. Unknown names
+      # fail startup.
+      UNRAID_MCP_TOOLS: "${UNRAID_MCP_TOOLS:-}"
       # --- optional hardening / misc ---
       # If you publish on a LAN address, include that address or DNS name here
       # (for example 10.0.0.5:6750,tower.local:6750) or Host validation rejects clients.

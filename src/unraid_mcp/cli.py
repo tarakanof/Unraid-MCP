@@ -127,7 +127,11 @@ def main() -> int:
             "Prefer setting UNRAID_CA_BUNDLE to trust the Unraid certificate instead."
         )
 
-    mcp = build_server(settings)
+    try:
+        mcp = build_server(settings)
+    except UnraidConfigError as exc:
+        log.error("%s", exc)
+        return 1
     if settings.transport == "streamable-http":
         _serve_http(mcp, settings)
     else:
