@@ -62,8 +62,9 @@ To publish only what a client needs, set `UNRAID_MCP_TOOLS` to a comma-separated
 exact tool names, e.g.
 `UNRAID_MCP_TOOLS=refresh_docker_digests,update_docker_container,list_docker_containers`.
 Only those tools register, read tools included. The list narrows the flags above and
-never enables a tier, so a tool that needs a flag still needs that flag. An unknown name
-fails startup, so a new release can't widen the surface or leave a typo unnoticed.
+never enables a tier, so a tool that needs a flag still needs that flag. A tool added by
+a later release stays off until you list it. An unknown name fails startup, so a typo, or
+a tool renamed by an upgrade, can't go unnoticed.
 
 Slow mutations (Docker image updates, array start/stop) use a longer HTTP timeout,
 `UNRAID_MCP_LONG_TIMEOUT` (default 600s), instead of `UNRAID_MCP_TIMEOUT` (30s). If one
