@@ -200,3 +200,57 @@ async def test_malformed_version_probe_does_not_block_startup(settings_factory, 
         mcp = build_server(settings_factory(allow_mutations=False))
         async with mcp._lowlevel_server.lifespan(mcp._lowlevel_server) as ctx:
             assert (ctx.api_version, ctx.unraid_version) == (None, None)
+
+
+async def test_resource_forbidden_is_actionable_with_roles(settings_factory):
+    from mcp.shared.exceptions import MCPError
+
+    uri = "unraid://system-info"
+    with respx.mock:
+        respx.post(URL).mock(side_effect=_router(_me("VIEWER")))
+        mcp = build_server(settings_factory(allow_mutations=True))
+        async with Client(mcp) as session:
+            with pytest.raises(MCPError) as excinfo:
+                await session.read_resource(uri)
+    msg = str(excinfo.value)
+    assert f"Could not read {uri}:" in msg
+    assert "lacks permission" in msg
+    assert "Key roles: VIEWER." in msg
+    assert KEY not in msg
+
+
+async def test_resource_forbidden_without_roles_omits_clause(settings_factory):
+    from mcp.shared.exceptions import MCPError
+
+    with respx.mock:
+        respx.post(URL).mock(side_effect=_router(_me("VIEWER")))
+        mcp = build_server(settings_factory())
+        async with Client(mcp) as session:
+            with pytest.raises(MCPError) as excinfo:
+                await session.read_resource("unraid://system-info")
+    msg = str(excinfo.value)
+    assert "lacks permission" in msg
+    assert "Key roles" not in msg
+
+
+async def test_health_resource_still_degrades_on_forbidden(settings_factory):
+    with respx.mock:
+        respx.post(URL).mock(side_effect=_router(_me("VIEWER")))
+        mcp = build_server(settings_factory())
+        async with Client(mcp) as session:
+            result = await session.read_resource("unraid://health")
+    assert json.loads(result.contents[0].text)["overall"] == "degraded"
+
+
+async def test_resource_error_is_redacted(settings_factory):
+    from mcp.shared.exceptions import MCPError
+
+    leak = {"errors": [{"message": f"boom {KEY}"}], "data": None}
+    with respx.mock:
+        respx.post(URL).mock(side_effect=_router(_me("VIEWER"), other=leak))
+        mcp = build_server(settings_factory())
+        async with Client(mcp) as session:
+            with pytest.raises(MCPError) as excinfo:
+                await session.read_resource("unraid://system-info")
+    assert KEY not in str(excinfo.value)
+    assert "boom" in str(excinfo.value)
