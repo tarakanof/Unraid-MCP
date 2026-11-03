@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from mcp.server.mcpserver import Context, Elicit, ElicitationResult
@@ -142,11 +142,28 @@ def forbidden_error(exc: UnraidError) -> bool:
     )
 
 
-def permission_denied(roles: tuple[str, ...] | None) -> ToolError:
+def other_error_messages(exc: UnraidError) -> list[str]:
+    """Messages of the GraphQL errors that are not the Forbidden rejection.
+
+    Callers must redact them: upstream messages can echo caller input.
+    """
+    if not isinstance(exc, UnraidGraphQLError):
+        return []
+    return [
+        m
+        for e in exc.errors
+        if (m := str(e.get("message", "")))
+        and "Forbidden resource" not in m
+        and _error_code(e) != "FORBIDDEN"
+    ]
+
+
+def permission_denied(roles: tuple[str, ...] | None, others: Sequence[str] = ()) -> ToolError:
     """Build (do NOT raise) the actionable ``ToolError`` for a forbidden operation.
 
     ``roles`` are the key's roles from the startup identity check, or None when
-    unknown (the clause is then omitted).
+    unknown (the clause is then omitted). ``others`` are the response's other
+    (already redacted) error messages, kept so they are not lost (#182).
     """
     msg = "The Unraid API key lacks permission for this operation (Forbidden resource)."
     if roles is not None:
@@ -155,6 +172,8 @@ def permission_denied(roles: tuple[str, ...] | None) -> ToolError:
         " Use a key with the needed resource/action permission (e.g. DOCKER update"
         " for container changes) or the ADMIN role, then restart the server."
     )
+    if others:
+        msg += f" Other errors in the response: {'; '.join(others)}."
     return ToolError(msg)
 
 
@@ -187,7 +206,8 @@ async def guarded(
         raise ToolError(redact(str(exc), client.secrets)) from None
     except UnraidError as exc:
         if forbidden_error(exc):
-            raise permission_denied(get_app_context(ctx).key_roles) from None
+            others = [redact(m, client.secrets) for m in other_error_messages(exc)]
+            raise permission_denied(get_app_context(ctx).key_roles, others) from None
         raise ToolError(redact(str(exc), client.secrets)) from None
 
 
