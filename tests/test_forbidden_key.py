@@ -254,3 +254,64 @@ async def test_resource_error_is_redacted(settings_factory):
                 await session.read_resource("unraid://system-info")
     assert KEY not in str(excinfo.value)
     assert "boom" in str(excinfo.value)
+
+
+MIXED = {
+    "errors": [
+        {"message": "Forbidden resource", "extensions": {"code": "FORBIDDEN"}},
+        {"message": 'Cannot query field "nope" on type "Docker".'},
+        {"message": f"echoed {KEY}"},
+    ],
+    "data": None,
+}
+
+
+async def test_forbidden_keeps_other_graphql_errors(settings_factory):
+    with respx.mock:
+        respx.post(URL).mock(side_effect=_router(_me("VIEWER"), other=MIXED))
+        mcp = build_server(settings_factory())
+        async with Client(mcp) as session:
+            result = await session.call_tool("list_docker_containers", {})
+    text = result.content[0].text
+    assert "lacks permission" in text
+    assert 'Cannot query field "nope"' in text
+    assert "echoed" in text
+    assert KEY not in text
+
+
+async def test_resource_forbidden_keeps_other_graphql_errors(settings_factory):
+    from mcp.shared.exceptions import MCPError
+
+    with respx.mock:
+        respx.post(URL).mock(side_effect=_router(_me("VIEWER"), other=MIXED))
+        mcp = build_server(settings_factory())
+        async with Client(mcp) as session:
+            with pytest.raises(MCPError) as excinfo:
+                await session.read_resource("unraid://system-info")
+    msg = str(excinfo.value)
+    assert "lacks permission" in msg
+    assert 'Cannot query field "nope"' in msg
+    assert "echoed" in msg
+    assert KEY not in msg
+
+
+def test_other_error_messages_edge_cases():
+    from unraid_mcp.tools._base import other_error_messages, permission_denied
+
+    forbidden = {"message": "Forbidden resource", "extensions": {"code": "FORBIDDEN"}}
+    only = UnraidGraphQLError("Forbidden resource", [forbidden])
+    assert other_error_messages(only) == []
+    assert "Other errors" not in str(permission_denied(None, other_error_messages(only)))
+
+    exc = UnraidGraphQLError(
+        "x",
+        [
+            forbidden,
+            {"message": None},
+            {"message": "boom."},
+            {"message": "boom."},
+            {"message": "bang"},
+        ],
+    )
+    assert other_error_messages(exc) == ["boom", "bang"]
+    assert "boom; bang." in str(permission_denied(None, other_error_messages(exc)))

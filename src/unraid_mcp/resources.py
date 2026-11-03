@@ -34,7 +34,7 @@ from mcp.types import INTERNAL_ERROR
 from .client import UnraidClient
 from .errors import UnraidError
 from .logging import redact
-from .tools._base import forbidden_error, permission_denied
+from .tools._base import forbidden_error, other_error_messages, permission_denied
 from .tools.misc import fetch_health
 from .tools.system import fetch_system_info
 
@@ -64,7 +64,8 @@ async def _read(
         # data.uri mirrors the SDK's own resource-error payloads so clients can
         # extract the failing URI without parsing the message.
         if forbidden_error(exc):
-            detail = str(permission_denied(context.key_roles))
+            others = other_error_messages(exc, context.client.secrets)
+            detail = str(permission_denied(context.key_roles, others))
         else:
             detail = redact(str(exc), context.client.secrets)
         raise MCPError(INTERNAL_ERROR, f"Could not read {uri}: {detail}", {"uri": uri}) from None
