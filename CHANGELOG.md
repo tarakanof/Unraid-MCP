@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 - 2026-11-03
+
+Origin checks on every HTTP bind, honest capabilities, and complete permission
+errors (#182, #196, #197, #198).
 
 ### Fixed
 
@@ -9,12 +12,17 @@
   `UNRAID_MCP_ALLOWED_ORIGINS` takes effect there: an unlisted `Origin` gets 403.
   Requests without `Origin` still pass. **Behaviour change:** browser-based
   clients on a non-localhost bind must now list their origin in
-  `UNRAID_MCP_ALLOWED_ORIGINS`. `/health` is unaffected. Entries are lowercased and stripped of a trailing `/`;
-  defaults now include `https` and `[::1]`; rejected origins are logged; the 403
-  body on localhost binds is now JSON instead of the SDK's plain text.
+  `UNRAID_MCP_ALLOWED_ORIGINS`. `/health` is unaffected. Entries are lowercased
+  and stripped of a trailing `/`; defaults now include `https` and `[::1]`;
+  rejected origins are logged; the 403 body on localhost binds is now JSON
+  instead of the SDK's plain text.
 - **Capabilities (#196).** The server no longer advertises `tools.listChanged`,
   `prompts.listChanged`, `resources.listChanged` or `resources.subscribe`; it
   never sent those notifications. Tools, resources and prompts are unchanged.
+- **Permission errors keep the other errors (#182).** When a response holds a
+  `Forbidden resource` error and others, the permission message now ends with
+  the other messages (redacted, de-duplicated, at most 5) instead of dropping
+  them. Tools and resource reads both do this.
 
 ### Documentation
 
