@@ -295,7 +295,11 @@ async def test_server_info_has_title_and_website(settings_factory):
 
 @pytest.mark.parametrize("mode", ["auto", "legacy"])
 async def test_no_unhonoured_subscription_capabilities(settings_factory, mode):
-    """The server never notifies, so it must not advertise listChanged/subscribe (#196)."""
+    """The server never notifies, so it must not advertise listChanged/subscribe (#196).
+
+    Only ``auto`` fails on the old code; ``legacy`` never advertised these flags
+    and stays as a regression guard for the handshake path.
+    """
     mcp = build_server(settings_factory(allow_mutations=False))
     async with Client(mcp, raise_exceptions=True, mode=mode) as session:
         caps = session.server_capabilities
