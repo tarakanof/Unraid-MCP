@@ -361,3 +361,109 @@ async def test_health_path_ignores_bearer_token_requirement_even_with_bad_header
             resp = await client.get("/health", headers={"Authorization": "Bearer wrong"})
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
+
+
+# --- Origin validation (#197) ---------------------------------------------
+
+_AUTH = {
+    "authorization": f"Bearer {TOKEN}",
+    "accept": "application/json, text/event-stream",
+    "content-type": "application/json",
+}
+
+
+async def _post_mcp(settings, headers):
+    mcp = build_server(settings)
+    app = cli._build_http_app(mcp, settings, TOKEN)
+    stop = await _drive_lifespan(app)
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.post("/mcp", headers=headers, json=INITIALIZE)
+    finally:
+        await stop()
+
+
+async def test_non_localhost_disallowed_origin_is_403_without_upstream_call(settings_factory):
+    with respx.mock:
+        route = respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
+        settings = settings_factory(transport="streamable-http", host="0.0.0.0")
+        mcp = build_server(settings)
+        app = cli._build_http_app(mcp, settings, TOKEN)
+        stop = await _drive_lifespan(app)
+        try:
+            # Startup may touch the API itself; only the request's effect counts.
+            before = route.call_count
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/mcp",
+                    headers={**_AUTH, "origin": "https://evil.example"},
+                    json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                )
+            assert resp.status_code == 403
+            assert TOKEN not in resp.text
+            assert route.call_count == before
+        finally:
+            await stop()
+
+
+async def test_non_localhost_no_origin_passes(settings_factory):
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
+        settings = settings_factory(transport="streamable-http", host="0.0.0.0")
+        resp = await _post_mcp(settings, _AUTH)
+        assert resp.status_code == 200
+
+
+async def test_allowed_origins_takes_effect_without_allowed_hosts(settings_factory):
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
+        settings = settings_factory(
+            transport="streamable-http",
+            host="0.0.0.0",
+            allowed_origins="https://ui.example, https://other.example:*",
+        )
+        ok = await _post_mcp(settings, {**_AUTH, "origin": "https://ui.example"})
+        wild = await _post_mcp(settings, {**_AUTH, "origin": "https://other.example:8443"})
+        bad = await _post_mcp(settings, {**_AUTH, "origin": "https://evil.example"})
+        assert ok.status_code == 200
+        assert wild.status_code == 200
+        assert bad.status_code == 403
+
+
+async def test_duplicate_origin_headers_are_rejected(settings_factory):
+    with respx.mock:
+        settings = settings_factory(
+            transport="streamable-http", host="0.0.0.0", allowed_origins="https://ui.example"
+        )
+        mcp = build_server(settings)
+        app = cli._build_http_app(mcp, settings, TOKEN)
+        transport = httpx.ASGITransport(app=app)
+        headers = list(_AUTH.items())
+        headers += [("origin", "https://ui.example"), ("origin", "https://ui.example")]
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/mcp", headers=headers, json=INITIALIZE)
+        assert resp.status_code == 403
+
+
+async def test_health_ignores_origin(settings_factory):
+    settings = settings_factory(transport="streamable-http", host="0.0.0.0")
+    mcp = build_server(settings)
+    app = cli._build_http_app(mcp, settings, TOKEN)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/health", headers={"origin": "https://evil.example"})
+    assert resp.status_code == 200
+
+
+async def test_localhost_default_origins_unchanged(settings_factory):
+    with respx.mock:
+        respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {}}))
+        settings = settings_factory(transport="streamable-http", port=6750)
+        bad = await _post_mcp(settings, {**_AUTH, "origin": "https://evil.example"})
+        good = await _post_mcp(
+            settings, {**_AUTH, "origin": "http://localhost:6750", "host": "localhost:6750"}
+        )
+        assert bad.status_code == 403
+        assert good.status_code == 200

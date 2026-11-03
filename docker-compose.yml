@@ -57,6 +57,10 @@ services:
       # If you publish on a LAN address, include that address or DNS name here
       # (for example 10.0.0.5:6750,tower.local:6750) or Host validation rejects clients.
       UNRAID_MCP_ALLOWED_HOSTS: "${UNRAID_MCP_ALLOWED_HOSTS:-127.0.0.1:6750,localhost:6750}"
+      # Origin allow-list, enforced on every bind. Requests without Origin (CLI
+      # clients) pass; an unlisted Origin gets 403. Blank = localhost origins only.
+      # Browser-based clients must list their origin (https://my-ui.example).
+      UNRAID_MCP_ALLOWED_ORIGINS: "${UNRAID_MCP_ALLOWED_ORIGINS:-}"
       # UNRAID_MCP_TLS_CERT: "/certs/cert.pem"
       # UNRAID_MCP_TLS_KEY: "/certs/key.pem"
       # HTTP timeout (seconds) for slow mutations (Docker updates, array start/stop).
