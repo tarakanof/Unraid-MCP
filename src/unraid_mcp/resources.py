@@ -64,7 +64,7 @@ async def _read(
         # data.uri mirrors the SDK's own resource-error payloads so clients can
         # extract the failing URI without parsing the message.
         if forbidden_error(exc):
-            others = [redact(m, context.client.secrets) for m in other_error_messages(exc)]
+            others = other_error_messages(exc, context.client.secrets)
             detail = str(permission_denied(context.key_roles, others))
         else:
             detail = redact(str(exc), context.client.secrets)

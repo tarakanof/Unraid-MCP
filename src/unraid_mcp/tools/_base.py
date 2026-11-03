@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from mcp.server.mcpserver import Context, Elicit, ElicitationResult
@@ -142,20 +142,25 @@ def forbidden_error(exc: UnraidError) -> bool:
     )
 
 
-def other_error_messages(exc: UnraidError) -> list[str]:
-    """Messages of the GraphQL errors that are not the Forbidden rejection.
+MAX_OTHER_ERRORS = 5
 
-    Callers must redact them: upstream messages can echo caller input.
-    """
+
+def other_error_messages(exc: UnraidError, secrets: Iterable[str | None] = ()) -> list[str]:
+    """Redacted, de-duplicated messages of the GraphQL errors that are not the
+    Forbidden rejection (at most :data:`MAX_OTHER_ERRORS`)."""
     if not isinstance(exc, UnraidGraphQLError):
         return []
-    return [
-        m
-        for e in exc.errors
-        if (m := str(e.get("message", "")))
-        and "Forbidden resource" not in m
-        and _error_code(e) != "FORBIDDEN"
-    ]
+    found: dict[str, None] = {}
+    for e in exc.errors:
+        m = e.get("message")
+        if (
+            isinstance(m, str)
+            and m.strip()
+            and "Forbidden resource" not in m
+            and _error_code(e) != "FORBIDDEN"
+        ):
+            found[redact(m.strip().rstrip("."), secrets)] = None
+    return list(found)[:MAX_OTHER_ERRORS]
 
 
 def permission_denied(roles: tuple[str, ...] | None, others: Sequence[str] = ()) -> ToolError:
@@ -206,7 +211,7 @@ async def guarded(
         raise ToolError(redact(str(exc), client.secrets)) from None
     except UnraidError as exc:
         if forbidden_error(exc):
-            others = [redact(m, client.secrets) for m in other_error_messages(exc)]
+            others = other_error_messages(exc, client.secrets)
             raise permission_denied(get_app_context(ctx).key_roles, others) from None
         raise ToolError(redact(str(exc), client.secrets)) from None
 
