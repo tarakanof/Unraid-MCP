@@ -179,7 +179,9 @@ def _transport_security(settings: Settings) -> TransportSecuritySettings | None:
     Enabled for localhost binds (the safe default) or whenever the operator has
     provided an explicit host allow-list. For a non-localhost bind without an
     allow-list we leave it off — otherwise legitimate requests to the real
-    hostname would be rejected — and rely on the bearer token (cli warns).
+    hostname would be rejected — and rely on the bearer token (cli warns). That
+    turns off *Host* checking only: ``Origin`` is enforced on every bind by
+    ``origin.OriginValidationMiddleware``, independently of this setting.
 
     The SDK auto-enables its own localhost allow-list when the app is built with
     ``transport_security=None`` and a localhost ``host``; we always answer for

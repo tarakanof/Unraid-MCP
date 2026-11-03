@@ -148,7 +148,8 @@ When you run `streamable-http`:
   never calls the Unraid API — so an unauthenticated caller learns nothing beyond
   "the process is up" and can't use it to probe the box. Every other path still
   401s without a valid token. It also bypasses Host and Origin
-  validation, since the health middleware sits in front of them — acceptable given the fixed, no-lookup response.
+  validation, since the health middleware sits in front of them — acceptable
+  given the fixed, no-lookup response.
 
 ## Outbound API path
 
