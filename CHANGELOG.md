@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Capabilities (#196).** The server no longer advertises `tools.listChanged`,
+  `prompts.listChanged`, `resources.listChanged` or `resources.subscribe`; it
+  never sent those notifications. Tools, resources and prompts are unchanged.
+
 ### Documentation
 
 - **`run_graphql_query` limits (#198).** The tool description and

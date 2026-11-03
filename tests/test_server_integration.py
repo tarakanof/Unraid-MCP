@@ -291,3 +291,22 @@ async def test_server_info_has_title_and_website(settings_factory):
     assert info is not None
     assert info.title == "Unraid"
     assert info.website_url == "https://github.com/tarakanof/Unraid-MCP"
+
+
+@pytest.mark.parametrize("mode", ["auto", "legacy"])
+async def test_no_unhonoured_subscription_capabilities(settings_factory, mode):
+    """The server never notifies, so it must not advertise listChanged/subscribe (#196).
+
+    Only ``auto`` fails on the old code; ``legacy`` never advertised these flags
+    and stays as a regression guard for the handshake path.
+    """
+    mcp = build_server(settings_factory(allow_mutations=False))
+    async with Client(mcp, raise_exceptions=True, mode=mode) as session:
+        caps = session.server_capabilities
+        assert caps.tools is None or not caps.tools.list_changed
+        assert caps.prompts is None or not caps.prompts.list_changed
+        assert caps.resources is None or not caps.resources.list_changed
+        assert caps.resources is None or not caps.resources.subscribe
+        assert (await session.list_tools()).tools
+        assert (await session.list_resources()).resources
+        assert (await session.list_prompts()).prompts
