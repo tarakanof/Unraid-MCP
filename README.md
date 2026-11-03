@@ -102,6 +102,8 @@ The image binds `0.0.0.0` inside the container, so `UNRAID_MCP_BEARER_TOKEN` is 
 
 This publishes the port on localhost only. To reach it from other machines, drop the
 `127.0.0.1:` prefix — but set `UNRAID_MCP_ALLOWED_HOSTS` and put TLS in front first.
+`Origin` is checked on every bind: clients that send none (CLI clients) pass; browser-based
+clients must be listed in `UNRAID_MCP_ALLOWED_ORIGINS`.
 [docs/connectivity.md](docs/connectivity.md) has copy-paste recipes per topology.
 
 Or grab [`docker-compose.yml`](docker-compose.yml), fill in the values, and

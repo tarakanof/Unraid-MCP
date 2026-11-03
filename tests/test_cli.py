@@ -227,3 +227,15 @@ def test_main_http_generated_token_reaches_server_settings(clean_env, monkeypatc
 
     logging.getLogger("x").warning("leak %s", token)
     assert capsys.readouterr().err.count(token) == 1
+
+
+def test_serve_http_warning_says_host_off_origin_on(settings_factory, monkeypatch, caplog):
+    _capture_serve_http(monkeypatch)
+    with caplog.at_level("WARNING"):
+        cli._serve_http(
+            MagicMock(),
+            settings_factory(transport="streamable-http", host="0.0.0.0", bearer_token=TOKEN),
+        )
+    text = caplog.text
+    assert "Host checking is off" in text
+    assert "Origin checking stays on" in text

@@ -88,8 +88,9 @@ class Settings(BindSettings):
     # ── Transport ──────────────────────────────────────────────────────
     transport: Transport = Field(default="stdio", validation_alias="UNRAID_MCP_TRANSPORT")
     bearer_token: SecretStr | None = Field(default=None, validation_alias="UNRAID_MCP_BEARER_TOKEN")
-    # Comma-separated Host / Origin allow-lists for DNS-rebinding protection on
-    # the HTTP transport. Required when binding to a non-localhost address.
+    # Comma-separated Host / Origin allow-lists for the HTTP transport. Hosts are
+    # required on a non-localhost bind to keep Host checking on; Origins are
+    # enforced on every bind (see origin.py).
     allowed_hosts: str | None = Field(default=None, validation_alias="UNRAID_MCP_ALLOWED_HOSTS")
     allowed_origins: str | None = Field(default=None, validation_alias="UNRAID_MCP_ALLOWED_ORIGINS")
 
@@ -250,10 +251,22 @@ class Settings(BindSettings):
         return sorted(set(hosts))
 
     def http_allowed_origins(self) -> list[str]:
-        """Origin allow-list for DNS-rebinding protection (HTTP transport)."""
+        """Origin allow-list (HTTP transport), enforced on every bind.
+
+        Entries are normalised the way browsers send them: lowercase, no trailing
+        slash. A blank or separators-only value falls back to the localhost
+        defaults (http and https, IPv4/IPv6 loopback) for the configured port.
+        """
         if self.allowed_origins:
-            return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
-        return [f"http://127.0.0.1:{self.port}", f"http://localhost:{self.port}"]
+            parsed = [o.strip().rstrip("/").lower() for o in self.allowed_origins.split(",")]
+            parsed = [o for o in parsed if o]
+            if parsed:
+                return parsed
+        return [
+            f"{scheme}://{host}:{self.port}"
+            for scheme in ("http", "https")
+            for host in ("127.0.0.1", "localhost", "[::1]")
+        ]
 
 
 def load_settings(**overrides: object) -> Settings:

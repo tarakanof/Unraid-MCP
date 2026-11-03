@@ -12,20 +12,24 @@ from .config import Settings, load_settings
 from .errors import UnraidConfigError
 from .health import HealthCheckMiddleware
 from .logging import configure_logging, get_logger
+from .origin import OriginValidationMiddleware
 from .server import build_server, http_app
 
 log = get_logger(__name__)
 
 
 def _build_http_app(mcp, settings: Settings, token: str):
-    """Compose the ASGI app: an unauthenticated ``/health`` in front of the bearer gate.
+    """Compose the ASGI app: ``/health``, then Origin validation, then the bearer gate.
 
-    Both wrappers are pure-ASGI and forward ``lifespan`` scopes untouched, so
-    uvicorn's lifespan run reaches the Starlette app returned by
+    ``/health`` is answered before Origin is checked, so it stays reachable
+    whatever the ``Origin``. All wrappers are pure-ASGI and forward ``lifespan``
+    scopes untouched, so uvicorn's lifespan run reaches the Starlette app returned by
     :func:`~unraid_mcp.server.http_app` and starts its session manager.
     """
     inner = http_app(mcp, settings)
-    return HealthCheckMiddleware(StaticBearerAuthMiddleware(inner, token))
+    guarded = StaticBearerAuthMiddleware(inner, token)
+    origin_checked = OriginValidationMiddleware(guarded, settings.http_allowed_origins())
+    return HealthCheckMiddleware(origin_checked)
 
 
 def _with_bearer_token(settings: Settings) -> Settings:
@@ -77,9 +81,9 @@ def _serve_http(mcp, settings: Settings) -> None:
 
     if not settings.binds_localhost and not settings.allowed_hosts:
         log.warning(
-            "Binding %s without UNRAID_MCP_ALLOWED_HOSTS: DNS-rebinding protection is "
-            "off and only the bearer token guards access. Set UNRAID_MCP_ALLOWED_HOSTS "
-            "for remote use.",
+            "Binding %s without UNRAID_MCP_ALLOWED_HOSTS: Host checking is off (Origin "
+            "checking stays on, see UNRAID_MCP_ALLOWED_ORIGINS) and the bearer token is "
+            "the main guard. Set UNRAID_MCP_ALLOWED_HOSTS for remote use.",
             settings.host,
         )
 

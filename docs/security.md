@@ -133,7 +133,11 @@ When you run `streamable-http`:
   common placeholders such as `change-me`.
 - **DNS-rebinding protection** (Host/Origin validation) is on automatically for
   localhost binds. For a non-localhost bind, set `UNRAID_MCP_ALLOWED_HOSTS` to keep
-  it on — the server warns if you don't.
+  Host checking on — the server warns if you don't.
+- **Origin validation** is on for every bind, independent of Host: a request with
+  no `Origin` passes (non-browser clients), one with an unlisted `Origin` gets 403
+  before MCP handling. `UNRAID_MCP_ALLOWED_ORIGINS` sets the list (default: the
+  localhost origins). Browser-based clients must list their origin.
 - **TLS:** set `UNRAID_MCP_TLS_CERT` + `UNRAID_MCP_TLS_KEY` to serve HTTPS directly,
   or terminate TLS at a reverse proxy — see [connectivity.md](connectivity.md) for
   concrete recipes (LAN, Tailscale, WireGuard, SWAG/NPM/Caddy) and the exact
@@ -143,9 +147,9 @@ When you run `streamable-http`:
   entirely. It's a static `200 {"status":"ok"}` — no version/build info, and it
   never calls the Unraid API — so an unauthenticated caller learns nothing beyond
   "the process is up" and can't use it to probe the box. Every other path still
-  401s without a valid token. It also bypasses DNS-rebinding Host-header
-  validation, since that check lives inside the MCP app the health middleware
-  wraps in front of — acceptable given the fixed, no-lookup response.
+  401s without a valid token. It also bypasses Host and Origin
+  validation, since the health middleware sits in front of them — acceptable
+  given the fixed, no-lookup response.
 
 ## Outbound API path
 

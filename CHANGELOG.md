@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- **Origin validation on every bind (#197).** `Origin` is now checked on
+  non-localhost binds even without `UNRAID_MCP_ALLOWED_HOSTS`, and
+  `UNRAID_MCP_ALLOWED_ORIGINS` takes effect there: an unlisted `Origin` gets 403.
+  Requests without `Origin` still pass. **Behaviour change:** browser-based
+  clients on a non-localhost bind must now list their origin in
+  `UNRAID_MCP_ALLOWED_ORIGINS`. `/health` is unaffected. Entries are lowercased and stripped of a trailing `/`;
+  defaults now include `https` and `[::1]`; rejected origins are logged; the 403
+  body on localhost binds is now JSON instead of the SDK's plain text.
 - **Capabilities (#196).** The server no longer advertises `tools.listChanged`,
   `prompts.listChanged`, `resources.listChanged` or `resources.subscribe`; it
   never sent those notifications. Tools, resources and prompts are unchanged.

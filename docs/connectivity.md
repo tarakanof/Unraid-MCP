@@ -16,7 +16,8 @@ where it can be; the two things that never change are called out first.
 
 2. **A non-localhost bind needs `UNRAID_MCP_ALLOWED_HOSTS`.** The moment you
    bind anything other than loopback, set the Host allow-list — otherwise
-   DNS-rebinding protection turns off and only the bearer token guards access.
+   Host checking turns off and the bearer token is the main guard (Origin
+   checking stays on).
    The exact value depends on the recipe; the matching rules are spelled out in
    [How the Host allow-list matches](#how-the-host-allow-list-matches) below,
    and every recipe gives you the exact string to use.
@@ -91,10 +92,17 @@ does (`config.py::http_allowed_hosts` + the MCP SDK's `TransportSecurityMiddlewa
   must be present: `tower.local:*` matches `tower.local:6750`, **not** bare
   `tower.local`. Handy if clients reach the box under one name but varying
   ports; otherwise prefer the exact form.
-- **`Origin` is separate and rarely matters here.** The SDK only rejects a
-  request on `Origin` if the header is *present* and unlisted; non-browser MCP
-  clients don't send `Origin`, so they pass. Set `UNRAID_MCP_ALLOWED_ORIGINS`
-  only if a browser-based client connects. This guide's recipes don't need it.
+- **`Origin` is separate from `Host`.** It is checked on every bind, even without
+  `UNRAID_MCP_ALLOWED_HOSTS`, and rejected (403) only if the header is *present*
+  and unlisted; non-browser MCP clients don't send `Origin`, so they pass and
+  this guide's recipes need no entry. A browser-based client must be listed in
+  `UNRAID_MCP_ALLOWED_ORIGINS`, written the way browsers send it: lowercase,
+  no trailing slash, port included unless it is the scheme default
+  (`https://ui.example`, not `https://ui.example:443`). `https://host:*` matches
+  any explicit port, not the default-port form. The server does not add CORS
+  headers, so a cross-origin page also needs a proxy that does. Rejected
+  origins are logged to stderr. Default list: `http`/`https` on `127.0.0.1`,
+  `localhost` and `[::1]` for the configured port.
 
 A missing entry shows up as HTTP **421 "Invalid Host header"** (or 403 for a
 bad `Origin`). If a client that connected fine suddenly 421s, the `Host` it
