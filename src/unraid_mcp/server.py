@@ -330,6 +330,10 @@ def build_server(settings: Settings) -> MCPServer:
         lifespan=lifespan,
         log_level=settings.log_level.upper(),
         cache_hints=CACHE_HINTS,
+        # Nothing here sends list-changed or resource-updated notifications: the
+        # tool/prompt/resource sets are fixed per process and no change feed
+        # exists. Don't advertise capabilities we never honour (#196).
+        subscriptions=False,
     )
     register_all(mcp, settings)
     # Resources and prompts are always on: both are read-only and reuse the
