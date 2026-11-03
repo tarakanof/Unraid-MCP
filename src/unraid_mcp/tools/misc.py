@@ -390,7 +390,8 @@ def register_raw_query(mcp: MCPServer, settings: Settings) -> None:
     ) -> dict[str, Any]:
         """Run an arbitrary READ-ONLY GraphQL query against the Unraid API (escape hatch
         for fields without a dedicated tool). Mutations and subscriptions are rejected.
-        Ids keep the server prefix here.
+        Ids keep the server prefix here. Introspection (__schema, __type) is blocked and
+        queries are capped (aliases, cost, depth, tokens); narrow an over-limit query.
 
         Results over ~60k characters are replaced by {"truncated": true,
         "truncation_reason": "char_budget", "total_chars", "preview", "message"};

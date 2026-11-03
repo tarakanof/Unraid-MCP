@@ -102,7 +102,7 @@ missing tool means the operator left it out, so do not try to work around it.
 | `whoami` | – | The authenticated API user and its roles (use to confirm the key's scope). |
 | `list_log_files` | – | List system log files: name, path, size, last-modified time. |
 | `read_log_file` | `path`, `lines=100`, `start_line=None` | Read a slice of a log file for triage. `path` must come from `list_log_files` (`/var/log` only); `lines` capped at 500; use `total_lines`/`start_line` in the response to page. |
-| `run_graphql_query` | `query`, `variables=None` | **Only if enabled.** Run an arbitrary **read-only** GraphQL query (mutations/subscriptions are rejected). Escape hatch for fields without a dedicated tool. |
+| `run_graphql_query` | `query`, `variables=None` | **Only if enabled.** Run an arbitrary **read-only** GraphQL query (mutations/subscriptions are rejected). Escape hatch for fields without a dedicated tool. Since API 4.37.8 schema introspection (`__schema`, `__type`) is blocked unless the developer sandbox is enabled, and each operation is limited (see below). |
 
 ### Mutating (only if the operator enabled mutations; **all require `confirm=true`**)
 
@@ -291,6 +291,12 @@ verdict. Failed checks remain visible even when a health signal takes precedence
 **A field has no dedicated tool** (only if `run_graphql_query` is enabled)
 - `run_graphql_query("query { ... }")`. Mutations are rejected — use the typed
   mutation tools for changes.
+- Since API 4.37.8, schema introspection (`__schema`, `__type`) is rejected unless
+  the Unraid developer sandbox is enabled; `__typename` still works. Don't try to
+  discover fields that way.
+- Each operation is also limited to 100 aliases, cost 1000 (about one per selected
+  field, fragments expanded), depth 20 and 5,000 tokens. An over-limit query comes
+  back as a GraphQL error; select fewer fields, split it, or use a typed tool.
 
 ---
 

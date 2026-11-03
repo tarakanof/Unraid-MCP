@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Documentation
+
+- **`run_graphql_query` limits (#198).** The tool description and
+  `docs/llm-usage.md` now say that introspection is blocked (API 4.37.8+) and
+  list the per-operation limits: 100 aliases, cost 1000, depth 20, 5,000 tokens.
+
 ## 0.13.0 - 2026-11-01
 
 A tool allow-list, plus clearer upstream errors (#178, #195, #199).
